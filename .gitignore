@@ -1,0 +1,20 @@
+# Gradle / Android build artifacts
+.gradle/
+build/
+**/build/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Local SDK / signing config — machine-specific, never commit
+local.properties
+*.keystore
+*.jks
+keystore.properties
+
+# Logs & OS cruft
+*.log
+.DS_Store
+Thumbs.db

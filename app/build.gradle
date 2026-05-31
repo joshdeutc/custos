@@ -1,0 +1,44 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.jo.selfcontrol.ultimate'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.jo.selfcontrol.ultimate"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+        // Persistent on-device event log (records foreground-app history) — OFF by default
+        // for privacy. The blocking engine never needs it; it exists only for local debugging.
+        buildConfigField "boolean", "EVENT_LOG_ENABLED", "false"
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.12.0'
+}
