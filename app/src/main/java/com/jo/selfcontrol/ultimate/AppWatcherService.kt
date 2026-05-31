@@ -47,10 +47,12 @@ class AppWatcherService : AccessibilityService() {
         // App names to protect
         private val TARGET_APP_NAMES = mutableSetOf("SelfControl", "selfcontrol", "Self control", "Self Control")
 
-        // Cancel buttons to click
+        // Cancel buttons to click. These match the on-screen text of the system Settings
+        // dialogs, so both English and French labels are listed on purpose (add your locale).
         private val CANCEL_KEYWORDS = setOf("Cancel", "No", "Annuler", "Non")
 
-        // Danger keywords that trigger protection
+        // Danger keywords that trigger protection. Same as above: the French entries are
+        // intentional — they match the localized Settings UI text, not app strings.
         private val DANGER_KEYWORDS = setOf(
             "Disable", "Désactiver",
             "Force stop", "Forcer l'arrêt",

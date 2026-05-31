@@ -6,10 +6,10 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Gère la configuration des limites d'usage, stockée dans le filesDir de l'app (limits.json).
- * Les limites sont lues/écrites via l'UI de MainActivity — aucun déploiement externe nécessaire.
+ * Manages the usage-limit configuration, stored in the app's filesDir (limits.json).
+ * Limits are read/written via MainActivity's UI — no external deployment required.
  *
- * Format de limits.json :
+ * limits.json format:
  * {
  *   "limits": [
  *     {
@@ -27,14 +27,14 @@ import java.io.File
  *   ]
  * }
  *
- * allowed_days : 0=dimanche, 1=lundi, ..., 6=samedi. "*" = tous les jours.
- * allowed_hours : "HH:mm-HH:mm" ou "*" pour toute la journée.
+ * allowed_days: 0=Sunday, 1=Monday, ..., 6=Saturday. "*" = every day.
+ * allowed_hours: "HH:mm-HH:mm" or "*" for all day.
  *
- * period_blocks (optionnel) — plages où les apps listées sont bloquées en priorité sur le quota journalier :
+ * period_blocks (optional) — windows where the listed apps are blocked with priority over the daily quota:
  * [
  *   { "packages": ["com.tinder.android"], "blocked_hours": "22:00-07:00" }
  * ]
- * Si l'heure de fin est avant l'heure de début, la plage passe minuit (ex. 22h → 7h).
+ * If the end time is before the start time, the window crosses midnight (e.g. 22h → 7h).
  */
 class ConfigManager {
 
@@ -49,11 +49,11 @@ class ConfigManager {
     data class AppLimit(
         val packageName: String,
         val maxMinutesPerDay: Int,
-        val maxSecondsPerDay: Int,      // limite en secondes (priorité sur minutes si défini)
-        val allowedDays: List<Int>,     // 0=dim, 1=lun, ..., 6=sam
-        val allowedHoursStart: Int,     // minutes depuis minuit (ex: 1080 = 18:00)
-        val allowedHoursEnd: Int,       // minutes depuis minuit (ex: 1200 = 20:00)
-        val allDay: Boolean,            // true si allowed_hours = "*"
+        val maxSecondsPerDay: Int,      // limit in seconds (takes priority over minutes when set)
+        val allowedDays: List<Int>,     // 0=Sun, 1=Mon, ..., 6=Sat
+        val allowedHoursStart: Int,     // minutes since midnight (e.g. 1080 = 18:00)
+        val allowedHoursEnd: Int,       // minutes since midnight (e.g. 1200 = 20:00)
+        val allDay: Boolean,            // true when allowed_hours = "*"
         val session: SessionConfig? = null   // null = no per-unlock session limit
     )
 
@@ -179,7 +179,7 @@ class ConfigManager {
             return json
         }
 
-        /** True si maintenant (minutes depuis minuit) est dans la plage bloquée [start, end) avec passage minuit si start > end. */
+        /** True if now (minutes since midnight) falls within the blocked window [start, end), crossing midnight when start > end. */
         fun isInBlockedWindow(nowMinutes: Int, start: Int, end: Int): Boolean {
             if (start == end) return false
             if (start < end) return nowMinutes >= start && nowMinutes < end
@@ -345,7 +345,7 @@ class ConfigManager {
         }
 
         /**
-         * Parse "18:30" → 1110 (minutes depuis minuit)
+         * Parse "18:30" → 1110 (minutes since midnight)
          */
         private fun parseTimeToMinutes(time: String): Int {
             val parts = time.trim().split(":")
