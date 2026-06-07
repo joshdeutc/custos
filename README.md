@@ -62,28 +62,32 @@ Full details in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Installation
 
-### Build the APK
+### Download (recommended)
+
+Grab the latest signed APK from the [**Releases**](https://github.com/joshdeutc/custos/releases/latest)
+page, copy it to your Android phone and open it to install. The first time, your browser or file
+manager may ask you to allow installing apps from this source.
+
+> Every release is signed with the same key, so you can install a newer version straight over an
+> older one without uninstalling (your settings are kept).
+
+### Build from source
 
 ```bash
-git clone <repo-url>
-cd selfcontrol
+git clone https://github.com/joshdeutc/custos.git
+cd custos
 ./gradlew assembleDebug          # Windows: .\gradlew.bat assembleDebug
 ```
 
 > If Gradle can't find your SDK, create a `local.properties` file at the root with its path:
 > `sdk.dir=/path/to/Android/Sdk` (or `C:\\Users\\you\\AppData\\Local\\Android\\Sdk`).
 
-The APK is produced at `app/build/outputs/apk/debug/app-debug.apk`.
-
-### Install on the phone
-
-Plug in the phone (USB debugging on), then:
+The APK is produced at `app/build/outputs/apk/debug/app-debug.apk`. Install it on a phone with USB
+debugging enabled:
 
 ```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
-
-(Or copy the APK to the phone and install it manually.)
 
 ## First-time setup
 
