@@ -1,4 +1,4 @@
-# Contributing to SelfControl
+# Contributing to Custos
 
 Thanks for your interest! Bug reports, feature ideas, device-compatibility notes and pull requests
 are all welcome. This is a small, focused project — keep changes simple and well-scoped.
@@ -51,7 +51,7 @@ Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) first to understand how the 
 
 ## Scope & philosophy
 
-SelfControl is a **self-discipline tool**, not tamper-proof control software. It runs with no root
+Custos is a **self-discipline tool**, not tamper-proof control software. It runs with no root
 and no special privileges, and that's intentional — keep contributions within that boundary. Power
 features that require Device Owner / root are out of scope for this edition.
 

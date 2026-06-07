@@ -1,6 +1,6 @@
 # Architecture
 
-SelfControl is an Android screen-time app built **entirely on an AccessibilityService** — no root,
+Custos is an Android screen-time app built **entirely on an AccessibilityService** — no root,
 no Device Owner, no special privileges. It installs and uninstalls like any other app.
 
 The idea: a service continuously watches the foreground application, and the moment an app breaks a

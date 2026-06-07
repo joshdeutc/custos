@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="logo_selfcontrol.svg" alt="SelfControl" width="96" height="96">
+  <img src="logo_custos.svg" alt="Custos" width="96" height="96">
 </p>
 
-<h1 align="center">SelfControl</h1>
+<h1 align="center">Custos</h1>
 
 <p align="center">
   A self-discipline Android app that limits your screen time on the apps <em>you</em>
@@ -22,11 +22,11 @@
 
 ## What it is
 
-SelfControl watches the foreground app through an **AccessibilityService**. As soon as an app
+Custos watches the foreground app through an **AccessibilityService**. As soon as an app
 exceeds a rule you defined, you're sent back to the home screen. The goal isn't an unbreakable
 lock — it's to add just enough friction to break the "open Instagram on autopilot" reflex.
 
-> **Read this first.** SelfControl is a *self-discipline* tool, not tamper-proof parental control.
+> **Read this first.** Custos is a *self-discipline* tool, not tamper-proof parental control.
 > Without system privileges, a determined user can disable the accessibility service in Settings
 > or uninstall the app. It re-protects itself (intercepts the sensitive Settings pages) and
 > restarts on boot, but it adds friction — it is not an absolute lock.
@@ -102,7 +102,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 Open the app, then grant the requested permissions from its home screen:
 
 1. **Accessibility** — *required*. This is the core of the app (foreground detection + blocking).
-   Settings → Accessibility → SelfControl → Enable.
+   Settings → Accessibility → Custos → Enable.
 2. **Usage access** — *required* to measure screen time.
 3. **Notifications** (Android 13+) — for the service notifications.
 4. **Notification access** *(optional)* — to mute notifications from blocked apps.
