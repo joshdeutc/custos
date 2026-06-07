@@ -31,18 +31,6 @@ lock — it's to add just enough friction to break the "open Instagram on autopi
 > or uninstall the app. It re-protects itself (intercepts the sensitive Settings pages) and
 > restarts on boot, but it adds friction — it is not an absolute lock.
 
-## Screenshots
-
-<p align="center">
-  <img src="assets/screenshots/dashboard.png" alt="Dashboard" width="240">
-  &nbsp;
-  <img src="assets/screenshots/add-limit.png" alt="Add a limit" width="240">
-  &nbsp;
-  <img src="assets/screenshots/nuclear.png" alt="Nuclear Mode" width="240">
-</p>
-
-<!-- Add your screenshots under assets/screenshots/ — see assets/screenshots/README.md -->
-
 ## Features
 
 - ⏱️ **Daily quota** per app (e.g. 30 min/day of Instagram).
