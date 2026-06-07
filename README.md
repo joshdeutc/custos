@@ -11,14 +11,31 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/joshdeutc/custos/releases/latest"><img src="https://img.shields.io/github/v/release/joshdeutc/custos?label=latest&color=6D28D9" alt="Latest release"></a>
+  <a href="https://github.com/joshdeutc/custos/releases/latest"><img src="https://img.shields.io/github/downloads/joshdeutc/custos/total?label=APK%20downloads&color=6D28D9" alt="APK downloads"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+</p>
+
+<p align="center">
+  <a href="#download">Download</a> ·
   <a href="#features">Features</a> ·
   <a href="#how-it-works">How it works</a> ·
-  <a href="#installation">Installation</a> ·
+  <a href="#build-from-source">Build from source</a> ·
   <a href="#first-time-setup">Setup</a> ·
   <a href="docs/ARCHITECTURE.md">Docs</a>
 </p>
 
 ---
+
+## Download
+
+- 📦 **App (APK)** — get the latest signed APK from the
+  [**Releases**](https://github.com/joshdeutc/custos/releases/latest) page, copy it to your Android
+  phone (8.0+) and open it to install. The first time, allow installs from your browser / file manager.
+- 🧱 **Source code** — clone this repo and compile it yourself: see [Build from source](#build-from-source).
+
+> Every release is signed with the same key, so a newer APK installs straight over an older one
+> without uninstalling (your settings are kept).
 
 ## What it is
 
@@ -60,18 +77,7 @@ Full details in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - Android **8.0 (API 26)** or newer.
 - To build: **JDK 17** and the **Android SDK** (API 34). No rooted device required.
 
-## Installation
-
-### Download (recommended)
-
-Grab the latest signed APK from the [**Releases**](https://github.com/joshdeutc/custos/releases/latest)
-page, copy it to your Android phone and open it to install. The first time, your browser or file
-manager may ask you to allow installing apps from this source.
-
-> Every release is signed with the same key, so you can install a newer version straight over an
-> older one without uninstalling (your settings are kept).
-
-### Build from source
+## Build from source
 
 ```bash
 git clone https://github.com/joshdeutc/custos.git
