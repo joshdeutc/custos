@@ -11,7 +11,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
-    <!-- UsageStats: granted by the user via Settings → Usage access -->
+    <!-- UsageStats: user-grantable in basic/admin; DO auto-grants in deviceAdmin/me -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
         android:protectionLevel="signature|privileged|appop" />
 
@@ -32,10 +32,21 @@
 
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.jo.selfcontrol.ultimate.ACTION_WHITELIST_PROMPT" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
 
@@ -63,6 +74,22 @@
         <receiver
             android:name=".BlockedNotificationChoiceReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".CommandReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.jo.selfcontrol.ultimate.ALLOW_INSTALL" />
+                <action android:name="com.jo.selfcontrol.ultimate.BLOCK_INSTALL" />
+                <action android:name="com.jo.selfcontrol.ultimate.SET_WHITELIST_DELAY" />
+                <action android:name="com.jo.selfcontrol.ultimate.STATUS_WHITELIST" />
+                <action android:name="com.jo.selfcontrol.ultimate.ENFORCE_WHITELIST" />
+                <action android:name="com.jo.selfcontrol.ultimate.REQUEST_WHITELIST_APP" />
+                <action android:name="com.jo.selfcontrol.ultimate.CANCEL_WHITELIST_APP" />
+                <action android:name="com.jo.selfcontrol.ultimate.REMOVE_WHITELIST_APP" />
+                <action android:name="com.jo.selfcontrol.ultimate.CHECK_WHITELIST_EXPIRATION" />
+            </intent-filter>
+        </receiver>
 
         <!-- Debug-only test automation hooks (no-op in release builds) -->
         <receiver

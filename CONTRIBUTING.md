@@ -18,7 +18,7 @@ Requirements: **JDK 17** and the **Android SDK** (API 34). No rooted device need
 
 ```bash
 git clone <your-fork-url>
-cd selfcontrol
+cd custos
 ./gradlew assembleDebug          # Windows: .\gradlew.bat assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```

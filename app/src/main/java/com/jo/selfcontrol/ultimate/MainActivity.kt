@@ -3,7 +3,9 @@ package com.jo.selfcontrol.ultimate
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -24,15 +26,21 @@ import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
 import android.text.style.StyleSpan
 import android.widget.*
+import org.json.JSONObject
 import java.util.Calendar
 class MainActivity : Activity() {
 
     companion object {
         private const val TAG = "SelfControl.Main"
+        private const val REQ_IMPORT_CSV = 2001
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private lateinit var permissionsContainer: LinearLayout
+    private lateinit var rootContainer: FrameLayout
+    private lateinit var setupScreenManager: SetupScreenManager
+    private lateinit var setupView: View
+    private var isSetupShowing = false
+    private var isManualGuideOpen = false
     private lateinit var dashboardContainer: LinearLayout
     private lateinit var delayContainer: LinearLayout
     private lateinit var nuclearStatusContainer: LinearLayout
@@ -40,10 +48,50 @@ class MainActivity : Activity() {
     private lateinit var nuclearCountdownText: TextView
     private lateinit var nuclearBlockedListText: TextView
     private lateinit var serviceStatusText: TextView
+    private lateinit var deviceOwnerStatusText: TextView
     private lateinit var periodBlocksContainer: LinearLayout
+    private lateinit var installBlocksContainer: LinearLayout
+    private lateinit var requestWhitelistAppButton: Button
+    private lateinit var partialAccessContainer: LinearLayout
+
+    private lateinit var zoomCanvas: com.jo.selfcontrol.ultimate.ui.ZoomableCanvasView
+    private lateinit var securityCircle: com.jo.selfcontrol.ultimate.ui.FeatureCircleView
+    private lateinit var appLimitsCircle: com.jo.selfcontrol.ultimate.ui.FeatureCircleView
+    private lateinit var curfewCircle: com.jo.selfcontrol.ultimate.ui.FeatureCircleView
+    private lateinit var installBlocklistCircle: com.jo.selfcontrol.ultimate.ui.FeatureCircleView
+    private lateinit var nuclearCircle: com.jo.selfcontrol.ultimate.ui.FeatureCircleView
+    private lateinit var partialAccessCircle: com.jo.selfcontrol.ultimate.ui.FeatureCircleView
 
     private val selectedNuclearApps = mutableSetOf<String>()
     private var selectedDurationMs = 30 * 60 * 1000L
+
+    private var lastRenderedAllowed = emptySet<String>()
+    private var lastRenderedPending = emptyList<WhitelistManager.PendingRequest>()
+    private var lastRenderedDelayHours = -1
+    private var lastRenderedUseGlobal = false
+    private var lastRenderedPendingDelayAt = 0L
+    private var lastPendingUpdateSecond = 0L
+
+    private val appNameCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val appIconCache = java.util.concurrent.ConcurrentHashMap<String, Drawable>()
+
+    @Volatile private var cachedInstalledPackages: Set<String> = emptySet()
+    @Volatile private var lastInstalledPackagesCheck: Long = 0L
+
+    private fun getCachedInstalledPackages(): Set<String> {
+        val now = System.currentTimeMillis()
+        if (cachedInstalledPackages.isNotEmpty() && (now - lastInstalledPackagesCheck < 15_000L)) {
+            return cachedInstalledPackages
+        }
+        val set = try {
+            packageManager.getInstalledPackages(0).map { it.packageName }.toSet()
+        } catch (e: Exception) {
+            emptySet()
+        }
+        cachedInstalledPackages = set
+        lastInstalledPackagesCheck = now
+        return set
+    }
 
     private val refreshRunnable = object : Runnable {
         override fun run() {
@@ -52,21 +100,66 @@ class MainActivity : Activity() {
             refreshDelayUI()
             refreshNuclearStatus()
             refreshPeriodBlocksUI()
+            refreshInstallBlocksUI()
+            refreshPartialAccessUI()
             handler.postDelayed(this, 1000)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         Log.i(TAG, "MainActivity started")
         LimitService.start(this)
         setContentView(buildUI())
         handler.postDelayed(refreshRunnable, 500)
+        handleIncomingIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    private fun handleIncomingIntent(intent: Intent?) {
+        if (intent == null) return
+        val action = intent.action ?: return
+
+        if (action == "com.jo.selfcontrol.ultimate.ACTION_WHITELIST_PROMPT") {
+            val pkg = intent.getStringExtra("extra_package") ?: return
+            val label = intent.getStringExtra("extra_label") ?: getAppName(pkg)
+            val nm = getSystemService(NotificationManager::class.java)
+            nm?.cancel(200000 + pkg.hashCode())
+            if (::zoomCanvas.isInitialized) {
+                zoomCanvas.resetToOverview()
+            }
+            confirmRequestAddition(pkg, label)
+        } else if (action == Intent.ACTION_SEND && intent.type == "text/plain") {
+            val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return
+            val pkg = WhitelistManager.sanitizePackageName(text)
+            if (pkg.isNotBlank()) {
+                if (::zoomCanvas.isInitialized) {
+                    zoomCanvas.resetToOverview()
+                }
+                confirmRequestAddition(pkg, getAppName(pkg))
+            }
+        }
     }
 
     override fun onResume() {
         super.onResume()
         refreshPermissions()
+        if (::zoomCanvas.isInitialized) {
+            zoomCanvas.startFloatingAnimation()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (::zoomCanvas.isInitialized) {
+            zoomCanvas.stopFloatingAnimation(animateToZero = false)
+        }
     }
 
     override fun onDestroy() {
@@ -74,180 +167,336 @@ class MainActivity : Activity() {
         handler.removeCallbacks(refreshRunnable)
     }
 
+    override fun onBackPressed() {
+        if (isSetupShowing) {
+            if (isManualGuideOpen) {
+                dismissSetupScreen()
+                return
+            }
+            super.onBackPressed()
+            return
+        }
+        if (::zoomCanvas.isInitialized && zoomCanvas.zoomedCircle != null) {
+            zoomCanvas.zoomOut()
+        } else {
+            super.onBackPressed()
+        }
+    }
+
     // ──────────────────────────────────────
     //  Build UI
     // ──────────────────────────────────────
 
     private fun buildUI(): View {
-        val root = ScrollView(this).apply {
-            setBackgroundColor(Color.parseColor("#121212"))
-            isFillViewport = true
-        }
-
-        val mainLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(16), dp(16), dp(32))
-        }
-
-        // Header with title + help button
-        val headerRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(8), 0, dp(4))
-        }
-        headerRow.addView(TextView(this).apply {
-            text = "SelfControl Free"
-            textSize = 26f
-            setTextColor(Color.WHITE)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        })
-        headerRow.addView(Button(this).apply {
-            text = "❓"
-            textSize = 16f
-            setTextColor(Color.WHITE)
-            background = roundedBackground(Color.parseColor("#2A2A2A"))
-            setPadding(dp(12), dp(6), dp(12), dp(6))
-            setOnClickListener { showFullWalkthroughDialog() }
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
+        rootContainer = FrameLayout(this).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
             )
-        })
-        mainLayout.addView(headerRow)
-
-        serviceStatusText = TextView(this).apply {
-            textSize = 13f
-            setTextColor(Color.parseColor("#888888"))
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, dp(8))
+            setBackgroundColor(Color.BLACK)
         }
-        mainLayout.addView(serviceStatusText)
 
-        // Permissions Section
-        permissionsContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            visibility = View.GONE
+        zoomCanvas = com.jo.selfcontrol.ultimate.ui.ZoomableCanvasView(this)
+
+        val createContainer = { -> LinearLayout(this).apply { orientation = LinearLayout.VERTICAL } }
+
+        // =============================================
+        //  CENTRAL HUB: Delay & Limits (the big one)
+        // =============================================
+        securityCircle = com.jo.selfcontrol.ultimate.ui.FeatureCircleView(this).apply {
+            setFeatureTitle("Delay & Limits")
+            setSummaryText("Protection active")
+            onClickListener = { zoomCanvas.zoomInto(this) }
         }
-        mainLayout.addView(permissionsContainer)
+        delayContainer = createContainer()
+        securityCircle.addContent(sectionTitleWithHelp("Security & Delay", HELP_DELAY))
+        securityCircle.addContent(delayContainer)
 
-        // Settings Unlock Section
-        mainLayout.addView(sectionTitleWithHelp("Security & Delay", HELP_DELAY))
-        delayContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        // =============================================
+        //  SATELLITE 1: App Limits (top-left)
+        // =============================================
+        appLimitsCircle = com.jo.selfcontrol.ultimate.ui.FeatureCircleView(this).apply {
+            setFeatureTitle("App Limits")
+            setSummaryText("Manage apps")
+            onClickListener = { zoomCanvas.zoomInto(this) }
         }
-        mainLayout.addView(delayContainer)
-
-        mainLayout.addView(separator())
-
-        // App Limits Section
         val limitsHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
         limitsHeader.addView(sectionTitleWithHelp("App Limits", HELP_APP_LIMITS))
-        
-        limitsHeader.addView(Button(this).apply {
+        limitsHeader.addView(android.widget.Button(this@MainActivity).apply {
             text = "+"
             textSize = 18f
             setTextColor(Color.WHITE)
-            background = roundedBackground(Color.parseColor("#BB86FC"))
+            background = roundedBackground(Color.BLACK)
             setOnClickListener { showAddAppDialog() }
-            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply {
-                marginStart = dp(16)
-            }
+            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginStart = dp(16) }
         })
-        mainLayout.addView(limitsHeader)
+        appLimitsCircle.addContent(limitsHeader)
+        dashboardContainer = createContainer()
+        appLimitsCircle.addContent(dashboardContainer)
 
-        dashboardContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        // =============================================
+        //  SATELLITE 2: Curfew (top-right)
+        // =============================================
+        curfewCircle = com.jo.selfcontrol.ultimate.ui.FeatureCircleView(this).apply {
+            setFeatureTitle("Curfew")
+            setSummaryText("Sleep hours")
+            onClickListener = { zoomCanvas.zoomInto(this) }
         }
-        mainLayout.addView(dashboardContainer)
-
-        mainLayout.addView(separator())
-
-        mainLayout.addView(sectionTitleWithHelp("Curfew", HELP_CURFEW))
-        mainLayout.addView(TextView(this).apply {
-            text = "Block selected apps during sleeping hours. Curfew wins over remaining daily time."
-            textSize = 13f
-            setTextColor(Color.parseColor("#AAAAAA"))
-            setPadding(dp(4), 0, dp(4), dp(8))
-        })
         val curfewHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        curfewHeader.addView(Button(this).apply {
+        curfewHeader.addView(android.widget.Button(this@MainActivity).apply {
             text = "+ Add curfew rule"
             setTextColor(Color.WHITE)
-            background = roundedBackground(Color.parseColor("#333333"))
+            background = roundedBackground(Color.BLACK)
             setOnClickListener { showAddCurfewRuleDialog() }
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         })
-        mainLayout.addView(curfewHeader)
-        periodBlocksContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        curfewCircle.addContent(sectionTitleWithHelp("Curfew", HELP_CURFEW))
+        curfewCircle.addContent(TextView(this).apply {
+            text = "Block selected apps during sleeping hours."
+            textSize = 13f
+            setTextColor(Color.BLACK)
+            setPadding(dp(4), 0, dp(4), dp(8))
+        })
+        curfewCircle.addContent(curfewHeader)
+        periodBlocksContainer = createContainer()
+        curfewCircle.addContent(periodBlocksContainer)
+
+        // =============================================
+        //  SATELLITE 3: Whitelist (bottom-left)
+        // =============================================
+        installBlocklistCircle = com.jo.selfcontrol.ultimate.ui.FeatureCircleView(this).apply {
+            setFeatureTitle("Whitelist")
+            setSummaryText("Zero-Trust apps")
+            onClickListener = {
+                zoomCanvas.zoomInto(this)
+                postDelayed({
+                    if (zoomCanvas.zoomedCircle == this) {
+                        refreshInstallBlocksUI(force = true)
+                    }
+                }, 350)
+            }
         }
-        mainLayout.addView(periodBlocksContainer)
-
-        mainLayout.addView(separator())
-
-        // Nuclear Mode Section
-        mainLayout.addView(sectionTitleWithHelp("Nuclear Mode", HELP_NUCLEAR))
-
-        nuclearStatusContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            visibility = View.GONE
+        val installHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
+        requestWhitelistAppButton = android.widget.Button(this@MainActivity).apply {
+            if (BuildConfig.WHITELIST_ADB_ONLY) {
+                text = "🔒 Whitelist gérée via ADB"
+                setTextColor(Color.parseColor("#B0BEC5"))
+                background = roundedBackground(Color.parseColor("#263238"))
+                setOnClickListener {
+                    AlertDialog.Builder(this@MainActivity, android.R.style.Theme_DeviceDefault_Dialog)
+                        .setTitle("Whitelist gérée via ADB")
+                        .setMessage("Sur cette version, les applications autorisées sont configurées exclusivement par l'administrateur depuis un ordinateur via ADB.")
+                        .setPositiveButton("Compris", null)
+                        .show()
+                }
+            } else {
+                val sec = WhitelistManager.getEffectiveQuarantineDelaySeconds(this@MainActivity)
+                val hours = WhitelistManager.getEffectiveQuarantineDelayHours(this@MainActivity)
+                val tag = if (sec >= 3600) "${hours}h" else "${sec / 60}m"
+                text = "+ Demander une app ($tag)"
+                setTextColor(Color.WHITE)
+                background = roundedBackground(Color.BLACK)
+                setOnClickListener { showRequestWhitelistAppDialog() }
+            }
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        installHeader.addView(requestWhitelistAppButton)
+        installBlocklistCircle.addContent(sectionTitleWithHelp("App Whitelist", HELP_WHITELIST))
+        installBlocklistCircle.addContent(installHeader)
+        installBlocksContainer = createContainer()
+        installBlocklistCircle.addContent(installBlocksContainer)
+
+        // =============================================
+        //  SATELLITE 4: Nuclear Mode (bottom-right)
+        // =============================================
+        nuclearCircle = com.jo.selfcontrol.ultimate.ui.FeatureCircleView(this).apply {
+            setFeatureTitle("Nuclear")
+            setSummaryText("Total block")
+            onClickListener = { zoomCanvas.zoomInto(this) }
+        }
+        nuclearCircle.addContent(sectionTitleWithHelp("Nuclear Mode", HELP_NUCLEAR))
+        nuclearStatusContainer = createContainer().apply { visibility = View.GONE }
         nuclearCountdownText = TextView(this).apply {
             textSize = 22f
-            setTextColor(Color.parseColor("#FF5252"))
-            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.RED)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             setPadding(0, dp(8), 0, dp(8))
         }
         nuclearStatusContainer.addView(nuclearCountdownText)
         nuclearBlockedListText = TextView(this).apply {
             textSize = 13f
-            setTextColor(Color.parseColor("#CCCCCC"))
+            setTextColor(Color.BLACK)
             setPadding(dp(8), 0, dp(8), dp(12))
         }
         nuclearStatusContainer.addView(nuclearBlockedListText)
-        mainLayout.addView(nuclearStatusContainer)
+        nuclearCircle.addContent(nuclearStatusContainer)
 
-        nuclearSetupContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            visibility = View.VISIBLE
-        }
-        val nuclearButton = Button(this).apply {
+        nuclearSetupContainer = createContainer().apply { visibility = View.VISIBLE }
+        nuclearSetupContainer.addView(android.widget.Button(this@MainActivity).apply {
             text = "Activate Nuclear Mode"
             textSize = 16f
             setTextColor(Color.WHITE)
-            background = roundedBackground(Color.parseColor("#D32F2F"))
+            background = roundedBackground(Color.RED)
             setPadding(dp(16), dp(12), dp(16), dp(12))
             setOnClickListener { startNuclearActivationFlow() }
-        }
-        nuclearSetupContainer.addView(nuclearButton, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(8) })
-
-        val managePresetsButton = Button(this).apply {
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
+        nuclearSetupContainer.addView(android.widget.Button(this@MainActivity).apply {
             text = "Manage Presets"
             textSize = 14f
             setTextColor(Color.WHITE)
-            background = roundedBackground(Color.parseColor("#424242"))
+            background = roundedBackground(Color.BLACK)
             setPadding(dp(16), dp(10), dp(16), dp(10))
             setOnClickListener { showManagePresetsDialog() }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
+        nuclearCircle.addContent(nuclearSetupContainer)
+
+        // =============================================
+        //  SATELLITE 5: Partial Access
+        // =============================================
+        partialAccessCircle = com.jo.selfcontrol.ultimate.ui.FeatureCircleView(this).apply {
+            setFeatureTitle("Partial Access")
+            setSummaryText("In-app channels")
+            onClickListener = { zoomCanvas.zoomInto(this) }
         }
-        nuclearSetupContainer.addView(managePresetsButton, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(8) })
+        val partialAccessHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        partialAccessHeader.addView(sectionTitleWithHelp("Partial Access", HELP_PARTIAL_ACCESS))
+        partialAccessHeader.addView(android.widget.Button(this@MainActivity).apply {
+            text = "+"
+            textSize = 18f
+            setTextColor(Color.WHITE)
+            background = roundedBackground(Color.BLACK)
+            setOnClickListener { startScreenRuleLearning() }
+            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginStart = dp(16) }
+        })
+        partialAccessCircle.addContent(partialAccessHeader)
+        partialAccessContainer = createContainer()
+        partialAccessCircle.addContent(partialAccessContainer)
 
-        mainLayout.addView(nuclearSetupContainer)
+        // =============================================
+        //  LAYOUT: Central hub + 5 satellites (Pentagon)
+        //  Position relative to screen size
+        // =============================================
+        val dm = resources.displayMetrics
+        val screenW = dm.widthPixels
+        val screenH = dm.heightPixels
+        val baseW = minOf(screenW, screenH)
 
-        root.addView(mainLayout)
-        return root
+        val hubSize = (baseW * 0.38f).toInt()   
+        val satSize = (baseW * 0.24f).toInt()    
+
+        val hubCenterX = screenW / 2f
+        val hubCenterY = screenH / 2f - dp(30)
+        
+        val hubX = (hubCenterX - hubSize / 2f).toInt()
+        val hubY = (hubCenterY - hubSize / 2f).toInt()
+
+        // Distance from hub center to satellite center
+        val distance = (hubSize / 2f) + (satSize / 2f) + dp(15)
+
+        // Calculate 5 points of a pentagon. Angles: 270 (top), 342, 54, 126, 198
+        // Using standard trig: x = cx + dist * cos(a), y = cy + dist * sin(a)
+        fun calcX(angleDeg: Float): Int = (hubCenterX + distance * Math.cos(Math.toRadians(angleDeg.toDouble()))).toInt() - satSize / 2
+        fun calcY(angleDeg: Float): Int = (hubCenterY + distance * Math.sin(Math.toRadians(angleDeg.toDouble()))).toInt() - satSize / 2
+
+        val sat1X = calcX(270f)
+        val sat1Y = calcY(270f)
+        val sat2X = calcX(342f)
+        val sat2Y = calcY(342f)
+        val sat3X = calcX(54f)
+        val sat3Y = calcY(54f)
+        val sat4X = calcX(126f)
+        val sat4Y = calcY(126f)
+        val sat5X = calcX(198f)
+        val sat5Y = calcY(198f)
+
+        // Add hub FIRST (it's circles[0] = the connection hub)
+        zoomCanvas.addView(securityCircle, FrameLayout.LayoutParams(hubSize, hubSize).apply {
+            leftMargin = hubX; topMargin = hubY
+        })
+        zoomCanvas.addView(appLimitsCircle, FrameLayout.LayoutParams(satSize, satSize).apply {
+            leftMargin = sat1X; topMargin = sat1Y
+        })
+        zoomCanvas.addView(curfewCircle, FrameLayout.LayoutParams(satSize, satSize).apply {
+            leftMargin = sat2X; topMargin = sat2Y
+        })
+        zoomCanvas.addView(installBlocklistCircle, FrameLayout.LayoutParams(satSize, satSize).apply {
+            leftMargin = sat3X; topMargin = sat3Y
+        })
+        zoomCanvas.addView(nuclearCircle, FrameLayout.LayoutParams(satSize, satSize).apply {
+            leftMargin = sat4X; topMargin = sat4Y
+        })
+        zoomCanvas.addView(partialAccessCircle, FrameLayout.LayoutParams(satSize, satSize).apply {
+            leftMargin = sat5X; topMargin = sat5Y
+        })
+
+        val circles = listOf(securityCircle, appLimitsCircle, curfewCircle, installBlocklistCircle, nuclearCircle, partialAccessCircle)
+
+        // Hidden status texts (still needed by refresh methods)
+        serviceStatusText = TextView(this).apply {
+            textSize = 13f
+            setTextColor(Color.parseColor("#888888"))
+            gravity = Gravity.CENTER
+            visibility = View.GONE
+        }
+        deviceOwnerStatusText = TextView(this).apply {
+            textSize = 13f
+            gravity = Gravity.CENTER
+            visibility = View.GONE
+            setOnClickListener { showDeviceOwnerInfoDialog() }
+        }
+        zoomCanvas.addView(serviceStatusText)
+        zoomCanvas.addView(deviceOwnerStatusText)
+
+        rootContainer.addView(zoomCanvas)
+
+        setupScreenManager = SetupScreenManager(this) {
+            dismissSetupScreen()
+        }
+        setupView = setupScreenManager.buildView()
+        rootContainer.addView(setupView)
+
+        val isMandatoryDone = PermissionHelper.isMandatorySetupComplete(this)
+        if (isMandatoryDone) {
+            setupView.visibility = View.GONE
+            zoomCanvas.visibility = View.VISIBLE
+            isSetupShowing = false
+            zoomCanvas.post { zoomCanvas.startEntryAnimation() }
+        } else {
+            setupView.visibility = View.VISIBLE
+            zoomCanvas.visibility = View.GONE
+            isSetupShowing = true
+        }
+
+        return rootContainer
+    }
+
+    private fun dismissSetupScreen() {
+        if (!isSetupShowing) return
+        isSetupShowing = false
+        isManualGuideOpen = false
+        zoomCanvas.visibility = View.VISIBLE
+        zoomCanvas.startEntryAnimation()
+        zoomCanvas.startFloatingAnimation()
+        setupView.animate()
+            .alpha(0f)
+            .setDuration(350)
+            .withEndAction {
+                setupView.visibility = View.GONE
+                setupView.alpha = 1f
+            }
     }
 
     // ──────────────────────────────────────
@@ -255,69 +504,23 @@ class MainActivity : Activity() {
     // ──────────────────────────────────────
 
     private fun refreshPermissions() {
-        val needsUsage = !PermissionHelper.hasUsageStatsPermission(this)
-        val needsA11y = !PermissionHelper.hasAccessibilityPermission(this)
-        val needsDnd = !PermissionHelper.hasNotificationPolicyPermission(this)
-        val needsNotifListener = !PermissionHelper.hasNotificationListenerPermission(this)
-        val needsPostNotif = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-
-        if (!needsUsage && !needsA11y && !needsDnd && !needsNotifListener && !needsPostNotif) {
-            permissionsContainer.visibility = View.GONE
-            return
+        if (::setupScreenManager.isInitialized) {
+            setupScreenManager.refresh()
         }
 
-        permissionsContainer.visibility = View.VISIBLE
-        permissionsContainer.removeAllViews()
-        permissionsContainer.addView(TextView(this).apply {
-            text = "Required Permissions Missing!"
-            setTextColor(Color.parseColor("#FF5252"))
-            typeface = Typeface.DEFAULT_BOLD
-            textSize = 16f
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-        })
-
-        if (needsUsage) {
-            permissionsContainer.addView(Button(this).apply {
-                text = "Grant Usage Stats Access"
-                setOnClickListener { PermissionHelper.requestUsageStatsPermission(this@MainActivity) }
-            })
-        }
-        if (needsA11y) {
-            permissionsContainer.addView(Button(this).apply {
-                text = "Grant Accessibility Service"
-                setOnClickListener { PermissionHelper.requestAccessibilityPermission(this@MainActivity) }
-            })
-        }
-        if (needsDnd) {
-            permissionsContainer.addView(Button(this).apply {
-                text = "Enable DND priority mode"
-                background = roundedBackground(Color.parseColor("#2F3BFF"))
-                setTextColor(Color.WHITE)
-                setOnClickListener { PermissionHelper.requestNotificationPolicyPermission(this@MainActivity) }
-            })
-        }
-
-        if (needsNotifListener) {
-            permissionsContainer.addView(Button(this).apply {
-                text = "Grant Notification Access (mute blocked apps)"
-                background = roundedBackground(Color.parseColor("#2F3BFF"))
-                setTextColor(Color.WHITE)
-                setOnClickListener { PermissionHelper.requestNotificationListenerPermission(this@MainActivity) }
-            })
-        }
-
-        if (needsPostNotif) {
-            permissionsContainer.addView(Button(this).apply {
-                text = "Allow Notifications"
-                background = roundedBackground(Color.parseColor("#2F3BFF"))
-                setTextColor(Color.WHITE)
-                setOnClickListener {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001)
-                    }
-                }
-            })
+        val isMandatoryDone = PermissionHelper.isMandatorySetupComplete(this)
+        if (!isMandatoryDone) {
+            if (!isSetupShowing && ::setupView.isInitialized) {
+                isSetupShowing = true
+                isManualGuideOpen = false
+                setupView.alpha = 1f
+                setupView.visibility = View.VISIBLE
+                zoomCanvas.visibility = View.GONE
+            }
+        } else {
+            if (isSetupShowing && !isManualGuideOpen) {
+                dismissSetupScreen()
+            }
         }
     }
 
@@ -329,6 +532,20 @@ class MainActivity : Activity() {
         delayContainer.removeAllViews()
         val delayState = DelayManager.loadState(this)
         val effectiveDelay = DelayManager.getCurrentEffectiveDelaySeconds(this)
+        val now = System.currentTimeMillis()
+
+        if (delayState.unlockSettingsUnlockTime > 0) {
+            if (now >= delayState.unlockSettingsUnlockTime) {
+                securityCircle.setSummaryText("🔓 Unlocked", Color.parseColor("#4CAF50"))
+            } else {
+                val remaining = ((delayState.unlockSettingsUnlockTime - now) / 1000).toInt().coerceAtLeast(0)
+                securityCircle.setSummaryText("Unlock: ${formatShortDuration(remaining)}", Color.parseColor("#FF9800"))
+            }
+        } else if (effectiveDelay > 0) {
+            securityCircle.setSummaryText("Delay: ${formatShortDuration(effectiveDelay)}")
+        } else {
+            securityCircle.setSummaryText("No delay")
+        }
         
         // Delay Config
         val delayText = TextView(this).apply {
@@ -354,6 +571,26 @@ class MainActivity : Activity() {
             setOnClickListener { showAddDelayScheduleRuleDialog() }
         })
 
+        delayContainer.addView(Button(this).apply {
+            text = "📋 Guide Paramètres & Permissions"
+            background = roundedBackground(Color.parseColor("#1C202A"))
+            setTextColor(Color.parseColor("#8E92A4"))
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, dp(8), 0, 0) }
+            layoutParams = lp
+            setOnClickListener {
+                if (::zoomCanvas.isInitialized) zoomCanvas.zoomOut()
+                setupScreenManager.refresh()
+                setupView.alpha = 1f
+                setupView.visibility = View.VISIBLE
+                zoomCanvas.visibility = View.GONE
+                isSetupShowing = true
+                isManualGuideOpen = true
+            }
+        })
+
         if (delayState.delaySchedule.isNotEmpty()) {
             delayContainer.addView(TextView(this).apply {
                 text = "Scheduled delay rules"
@@ -368,14 +605,14 @@ class MainActivity : Activity() {
                 delayContainer.addView(LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(8), dp(8), dp(8), dp(8))
-                    background = roundedBackground(Color.parseColor("#222222"))
+                    background = roundedBackground(Color.WHITE)
                     layoutParams = LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT
                     ).apply { bottomMargin = dp(8) }
                     addView(TextView(this@MainActivity).apply {
                         text = "$days | $start -> $end | ${formatTime(rule.delaySeconds)}"
-                        setTextColor(Color.WHITE)
+                        setTextColor(Color.BLACK)
                     })
                     addView(Button(this@MainActivity).apply {
                         text = "Delete delay rule"
@@ -396,7 +633,7 @@ class MainActivity : Activity() {
             if (pending.isNotEmpty()) {
                 delayContainer.addView(TextView(this).apply {
                     text = "Pending config changes"
-                    setTextColor(Color.parseColor("#FFCA28"))
+                    setTextColor(Color.BLACK)
                     textSize = 14f
                     setPadding(0, dp(16), 0, dp(8))
                 })
@@ -405,43 +642,68 @@ class MainActivity : Activity() {
                     delayContainer.addView(LinearLayout(this).apply {
                         orientation = LinearLayout.VERTICAL
                         setPadding(dp(12), dp(12), dp(12), dp(12))
-                        background = roundedBackground(Color.parseColor("#1A1A2E"))
+                        background = roundedBackground(Color.WHITE)
                         layoutParams = LinearLayout.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.WRAP_CONTENT
                         ).apply { bottomMargin = dp(8) }
 
+                        val currentConfig = ConfigManager.loadConfig(this@MainActivity)
+                        val cardTitle: String
+                        val diffLines: List<String>
+
+                        if (update.targetType == "APP_LIMIT") {
+                            val pkg = update.targetKey
+                            val appName = getAppName(pkg)
+                            if (update.isDelete) {
+                                cardTitle = "Suppr. limite : $appName"
+                                diffLines = listOf("  • [SUPPRIMÉ] $appName")
+                            } else {
+                                cardTitle = update.description.ifBlank { "Modifier limite : $appName" }
+                                val activeLimit = currentConfig.limits.find { it.packageName == pkg }
+                                val pendingLimit = runCatching { ConfigManager.parseAppLimit(JSONObject(update.payloadJson)) }.getOrNull()
+                                diffLines = if (pendingLimit != null) describeSingleAppDiff(activeLimit, pendingLimit) else listOf("  • $appName modifié")
+                            }
+                        } else {
+                            // Show detailed diff and descriptive title for legacy or full config updates
+                            val pendingConfig = ConfigManager.fromJsonString(update.newLimitsJson)
+                            diffLines = if (pendingConfig != null) describeConfigDiff(currentConfig, pendingConfig) else emptyList()
+
+                            cardTitle = when {
+                                update.description.isNotBlank() && update.description != "Update config" && update.description != "Mise à jour configuration" -> update.description
+                                diffLines.isNotEmpty() -> {
+                                    val firstItem = diffLines.firstOrNull { it.trim().startsWith("•") || it.trim().startsWith("[") }
+                                        ?: diffLines.first()
+                                    firstItem.trim().removePrefix("•").removePrefix("  •").trim()
+                                }
+                                pendingConfig?.limits?.isNotEmpty() == true -> {
+                                    val appNames = pendingConfig.limits.joinToString(", ") { getAppName(it.packageName) }
+                                    "Limite : $appNames"
+                                }
+                                pendingConfig?.periodBlocks?.isNotEmpty() == true -> "Couvre-feu"
+                                pendingConfig?.installBlocks?.isNotEmpty() == true -> "Bloqueur d'installation"
+                                else -> "Modification en attente"
+                            }
+                        }
+
                         addView(TextView(this@MainActivity).apply {
-                            text = "📝 Pending Change — ${formatTime(remaining)}"
-                            setTextColor(Color.parseColor("#FFCA28"))
+                            text = "📝 $cardTitle — ${formatTime(remaining)}"
+                            setTextColor(Color.BLACK)
                             textSize = 14f
                             typeface = Typeface.DEFAULT_BOLD
                         })
 
-                        // Show detailed diff if possible
-                        val pendingConfig = ConfigManager.fromJsonString(update.newLimitsJson)
-                        val currentConfig = ConfigManager.loadConfig(this@MainActivity)
-                        if (pendingConfig != null) {
-                            val diffLines = describeConfigDiff(currentConfig, pendingConfig)
-                            if (diffLines.isNotEmpty()) {
-                                addView(TextView(this@MainActivity).apply {
-                                    text = diffLines.joinToString("\n")
-                                    setTextColor(Color.parseColor("#DDDDDD"))
-                                    textSize = 13f
-                                    setPadding(0, dp(6), 0, dp(6))
-                                })
-                            } else {
-                                addView(TextView(this@MainActivity).apply {
-                                    text = update.description
-                                    setTextColor(Color.WHITE)
-                                    textSize = 13f
-                                    setPadding(0, dp(4), 0, dp(4))
-                                })
-                            }
+                        if (diffLines.isNotEmpty()) {
+                            addView(TextView(this@MainActivity).apply {
+                                text = diffLines.joinToString("\n")
+                                setTextColor(Color.BLACK)
+                                textSize = 13f
+                                setPadding(0, dp(6), 0, dp(6))
+                            })
                         } else {
                             addView(TextView(this@MainActivity).apply {
                                 text = update.description
-                                setTextColor(Color.WHITE)
+                                setTextColor(Color.BLACK)
                                 textSize = 13f
                                 setPadding(0, dp(4), 0, dp(4))
                             })
@@ -485,8 +747,134 @@ class MainActivity : Activity() {
             }
         }
 
+        // Pending Whitelist quarantine requests
+        val whitelistState = WhitelistManager.loadState(this)
+        if (whitelistState.pendingRequests.isNotEmpty()) {
+            delayContainer.addView(TextView(this).apply {
+                text = "⏳ Quarantaine Whitelist (${whitelistState.pendingRequests.size})"
+                setTextColor(Color.parseColor("#FF9800"))
+                textSize = 14f
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(0, dp(16), 0, dp(8))
+            })
+
+            for (req in whitelistState.pendingRequests) {
+                val remainingSec = ((req.availableAt - now) / 1000).toInt().coerceAtLeast(0)
+                val appLabel = getAppName(req.packageName)
+
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12), dp(10), dp(12), dp(10))
+                    background = roundedBackground(Color.WHITE)
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    ).apply { bottomMargin = dp(8) }
+
+                    val row = LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+
+                        val iconView = ImageView(this@MainActivity).apply {
+                            setImageDrawable(getAppIcon(req.packageName))
+                            layoutParams = LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginEnd = dp(8) }
+                        }
+                        addView(iconView)
+
+                        val txt = LinearLayout(this@MainActivity).apply {
+                            orientation = LinearLayout.VERTICAL
+                            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                            addView(TextView(this@MainActivity).apply {
+                                text = appLabel
+                                textSize = 14f
+                                typeface = Typeface.DEFAULT_BOLD
+                                setTextColor(Color.BLACK)
+                            })
+                            addView(TextView(this@MainActivity).apply {
+                                text = "Déblocage dans ${formatTime(remainingSec)}"
+                                textSize = 12f
+                                setTextColor(Color.parseColor("#E65100"))
+                            })
+                        }
+                        addView(txt)
+                    }
+                    addView(row)
+
+                    val cancelBtn = Button(this@MainActivity).apply {
+                        text = "Annuler la demande"
+                        setTextColor(Color.WHITE)
+                        background = roundedBackground(Color.parseColor("#D32F2F"))
+                        val lp = LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        ).apply { topMargin = dp(8) }
+                        layoutParams = lp
+                        setOnClickListener {
+                            WhitelistManager.cancelPendingRequest(this@MainActivity, req.packageName)
+                            Toast.makeText(this@MainActivity, "Demande annulée", Toast.LENGTH_SHORT).show()
+                            refreshDelayUI()
+                            refreshInstallBlocksUI(force = true)
+                        }
+                    }
+                    addView(cancelBtn)
+                }
+                delayContainer.addView(card)
+            }
+        }
+
+        // Pending Whitelist delay reduction
+        if (whitelistState.pendingDelayExecuteAt > 0L && whitelistState.pendingDelayHours != null) {
+            val nowPending = System.currentTimeMillis()
+            if (whitelistState.pendingDelayExecuteAt > nowPending) {
+                val remainingSec = ((whitelistState.pendingDelayExecuteAt - nowPending) / 1000).toInt()
+                val targetText = if (whitelistState.pendingDelayUseGlobal) "Aligné sur délai général" else "${whitelistState.pendingDelayHours}h"
+                delayContainer.addView(TextView(this).apply {
+                    text = "⏳ Modification délai Whitelist en attente : ${formatTime(remainingSec)} (→ $targetText)"
+                    setTextColor(Color.parseColor("#FFCA28"))
+                    textSize = 14f
+                    setPadding(0, dp(12), 0, dp(8))
+                })
+                delayContainer.addView(Button(this).apply {
+                    text = "Annuler le changement de délai Whitelist"
+                    setTextColor(Color.WHITE)
+                    background = roundedBackground(Color.parseColor("#D32F2F"))
+                    setOnClickListener {
+                        WhitelistManager.cancelPendingDelayChange(this@MainActivity)
+                        Toast.makeText(this@MainActivity, "Modification annulée", Toast.LENGTH_SHORT).show()
+                        refreshDelayUI()
+                        refreshInstallBlocksUI(force = true)
+                    }
+                })
+            }
+        }
+
+        // ── Bouton vers la Vue d'ensemble des délais ──
+        val configuredDelays = DelayManager.getConfiguredDelays(this)
+        val dedicatedCount = configuredDelays.count { !it.isGlobal }
+        val eligibility = DelayManager.checkUninstallEligibility(this)
+
+        val overviewBtn = Button(this).apply {
+            text = if (dedicatedCount > 0) {
+                "📊 Vue d'ensemble des délais ($dedicatedCount dédié${if (dedicatedCount > 1) "s" else ""})"
+            } else {
+                "📊 Vue d'ensemble des délais (Tous alignés)"
+            }
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+            background = roundedBackground(Color.parseColor("#2A3447"))
+            val lp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(16); bottomMargin = dp(8) }
+            layoutParams = lp
+            setOnClickListener {
+                showDelaysOverviewDialog()
+            }
+        }
+        delayContainer.addView(overviewBtn)
+
         // Settings Unlock UI
-        val now = System.currentTimeMillis()
         if (delayState.unlockSettingsUnlockTime > 0) {
             if (now >= delayState.unlockSettingsUnlockTime) {
                 // Unlocked!
@@ -520,14 +908,185 @@ class MainActivity : Activity() {
             // Locked
             delayContainer.addView(Button(this).apply {
                 val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                lp.topMargin = dp(16)
+                lp.topMargin = dp(8)
                 layoutParams = lp
-                text = "Request Settings Unlock (to Uninstall)"
-                background = roundedBackground(Color.parseColor("#333333"))
-                setTextColor(Color.WHITE)
-                setOnClickListener { DelayManager.requestSettingsUnlock(this@MainActivity) }
+                if (eligibility.first) {
+                    text = "Request Settings Unlock (to Uninstall)"
+                    background = roundedBackground(Color.parseColor("#333333"))
+                    setTextColor(Color.WHITE)
+                    setOnClickListener {
+                        val res = DelayManager.requestSettingsUnlock(this@MainActivity)
+                        if (!res.first) {
+                            Toast.makeText(this@MainActivity, res.second ?: "Déverrouillage refusé", Toast.LENGTH_LONG).show()
+                        }
+                        refreshDelayUI()
+                    }
+                } else {
+                    text = "🔒 Request Settings Unlock (Verrouillé)"
+                    background = roundedBackground(Color.parseColor("#261B1B"))
+                    setTextColor(Color.parseColor("#9E7A7A"))
+                    setOnClickListener {
+                        AlertDialog.Builder(this@MainActivity, android.R.style.Theme_DeviceDefault_Dialog)
+                            .setTitle("Désinstallation verrouillée")
+                            .setMessage(
+                                "Pour demander le déverrouillage des paramètres et désinstaller l'application, les conditions suivantes doivent être respectées :\n\n" +
+                                "1. Tous les modules doivent être sur \"Aligné sur le délai général\".\n" +
+                                "2. Le délai général doit être réglé sur 0 minute.\n" +
+                                "3. Aucune modification de délai ne doit être en cours d'attente.\n\n" +
+                                "Détail actuel :\n${eligibility.second}"
+                            )
+                            .setPositiveButton("Compris", null)
+                            .show()
+                    }
+                }
             })
         }
+    }
+
+    private fun showDelaysOverviewDialog() {
+        val configuredDelays = DelayManager.getConfiguredDelays(this)
+        val maxDelaySec = configuredDelays.maxOfOrNull { it.delaySeconds }?.coerceAtLeast(1L) ?: 1L
+        val eligibility = DelayManager.checkUninstallEligibility(this)
+
+        val scroll = ScrollView(this)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(16), dp(20), dp(16))
+        }
+        scroll.addView(content)
+
+        // Subtitle explanation
+        content.addView(TextView(this).apply {
+            text = "Vue d'ensemble de tous les délais actifs et configurés sur l'appareil (ordre décroissant) :"
+            textSize = 13f
+            setTextColor(Color.parseColor("#AAAAAA"))
+            setPadding(0, 0, 0, dp(14))
+        })
+
+        // Items list
+        for (item in configuredDelays) {
+            val itemRow = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                background = roundedBackground(Color.parseColor("#1E2430"))
+                val lp = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = dp(8) }
+                layoutParams = lp
+            }
+
+            // Title & duration
+            val infoRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+
+                addView(TextView(this@MainActivity).apply {
+                    text = item.title
+                    textSize = 14f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(Color.WHITE)
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                })
+
+                addView(TextView(this@MainActivity).apply {
+                    val durationStr = if (item.description.isNotBlank()) {
+                        item.description
+                    } else if (item.delaySeconds <= 0L) {
+                        "0m (Aucun)"
+                    } else {
+                        DelayManager.formatDuration(item.delaySeconds)
+                    }
+                    text = durationStr
+                    textSize = 13f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(if (item.delaySeconds == 0L) Color.parseColor("#4CAF50") else Color.parseColor("#FFCA28"))
+                })
+            }
+            itemRow.addView(infoRow)
+
+            // Minimalist horizontal bar
+            val barContainer = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                background = roundedBackground(Color.parseColor("#2D3748"))
+                val bLp = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    dp(8)
+                ).apply { topMargin = dp(6) }
+                layoutParams = bLp
+            }
+
+            val ratio = if (maxDelaySec > 0L && item.delaySeconds > 0L) {
+                (item.delaySeconds.toFloat() / maxDelaySec.toFloat()).coerceIn(0.05f, 1f)
+            } else 0f
+
+            if (ratio > 0f) {
+                val barFill = View(this).apply {
+                    background = roundedBackground(
+                        if (item.isGlobal) Color.parseColor("#00E5FF") else Color.parseColor("#FF9800")
+                    )
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, ratio)
+                }
+                barContainer.addView(barFill)
+                if (ratio < 1f) {
+                    val barEmpty = View(this).apply {
+                        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f - ratio)
+                    }
+                    barContainer.addView(barEmpty)
+                }
+            } else {
+                val zeroFill = View(this).apply {
+                    background = roundedBackground(Color.parseColor("#4CAF50"))
+                    layoutParams = LinearLayout.LayoutParams(dp(16), ViewGroup.LayoutParams.MATCH_PARENT)
+                }
+                barContainer.addView(zeroFill)
+            }
+            itemRow.addView(barContainer)
+            content.addView(itemRow)
+        }
+
+        // Status Card at bottom
+        val statusCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = roundedBackground(
+                if (eligibility.first) Color.parseColor("#1B3320") else Color.parseColor("#33241B")
+            )
+            val lp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(12) }
+            layoutParams = lp
+
+            addView(TextView(this@MainActivity).apply {
+                text = if (eligibility.first) "🟢 Statut Désinstallation : Éligible" else "🔒 Statut Désinstallation : Verrouillé"
+                textSize = 14f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(if (eligibility.first) Color.parseColor("#81C784") else Color.parseColor("#FFB74D"))
+            })
+
+            addView(TextView(this@MainActivity).apply {
+                text = if (eligibility.first) {
+                    "Tous les modules sont alignés sur le délai général et le délai général est réglé à 0. Vous pouvez demander le déverrouillage pour désinstaller l'application."
+                } else {
+                    eligibility.second ?: "Conditions non remplies."
+                }
+                textSize = 12f
+                setTextColor(Color.parseColor("#E0E0E0"))
+                setPadding(0, dp(4), 0, 0)
+            })
+        }
+        content.addView(statusCard)
+
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setTitle("📊 Vue d'ensemble des délais")
+            .setView(scroll)
+            .setPositiveButton("Fermer", null)
+            .show()
     }
 
     private fun showChangeDelayDialog() {
@@ -706,8 +1265,12 @@ class MainActivity : Activity() {
     }
 
     private fun showEditAppDialog(pkg: String) {
-        val config = loadEditableConfig()
-        val existingLimit = config.limits.find { it.packageName == pkg }
+        val activeConfig = ConfigManager.loadConfig(this)
+        val activeLimit = activeConfig.limits.find { it.packageName == pkg }
+
+        // If there is a pending edit for this app, pre-fill with the pending values so user sees their pending change
+        val pendingInfo = DelayManager.getPendingAppLimit(this, pkg)
+        val existingLimit = if (pendingInfo != null && !pendingInfo.second) pendingInfo.first else activeLimit
 
         val mins = existingLimit?.maxMinutesPerDay ?: 30
         val existingSession = existingLimit?.session
@@ -777,6 +1340,17 @@ class MainActivity : Activity() {
             sessionFields.visibility = if (checked) View.VISIBLE else View.GONE
         }
 
+        // ── Per-rule protection timer ────────────────
+        var protectionDelaySec = existingLimit?.protectionDelaySec
+        root.addView(buildProtectionTimerRow(protectionDelaySec, activeLimit?.protectionDelaySec) { protectionDelaySec = it })
+        root.addView(TextView(this).apply {
+            text = "Overrides the global delay for this app only. A huge value makes this limit " +
+                "practically impossible to loosen on impulse."
+            textSize = 12f
+            setTextColor(Color.parseColor("#888888"))
+            setPadding(0, 0, 0, dp(8))
+        })
+
         val scroll = ScrollView(this).apply { addView(root) }
 
         val builder = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
@@ -791,8 +1365,7 @@ class MainActivity : Activity() {
                         maxSessionsPerDay = maxSessionsPicker.value
                     )
                 } else null
-                val newLimits = config.limits.filter { it.packageName != pkg }.toMutableList()
-                newLimits.add(ConfigManager.AppLimit(
+                val newLimit = ConfigManager.AppLimit(
                     packageName = pkg,
                     maxMinutesPerDay = newMins,
                     maxSecondsPerDay = newMins * 60,
@@ -801,18 +1374,68 @@ class MainActivity : Activity() {
                     allowedHoursStart = existingLimit?.allowedHoursStart ?: 0,
                     allowedHoursEnd = existingLimit?.allowedHoursEnd ?: 24 * 60,
                     allDay = existingLimit?.allDay ?: true,
-                    session = session
-                ))
-                val newConfig = ConfigManager.Config(newLimits, config.periodBlocks)
-                saveConfigWithDelay(newConfig)
+                    session = session,
+                    protectionDelaySec = protectionDelaySec,
+                    channelBlocks = existingLimit?.channelBlocks ?: emptyList()
+                )
+
+                val globalDelay = DelayManager.getCurrentEffectiveDelaySeconds(this)
+                val requirement = ConfigManager.requiredDeferForAppLimit(activeLimit, newLimit, globalDelay)
+                val unlockApplies = !requirement.fromExplicitTimer && DelayManager.isSettingsUnlocked(this)
+                val mustDefer = requirement.mustDefer && !unlockApplies
+
+                if (!mustDefer) {
+                    val cur = ConfigManager.loadConfig(this)
+                    val updatedLimits = cur.limits.filter { it.packageName != pkg }.toMutableList()
+                    updatedLimits.add(newLimit)
+                    ConfigManager.saveConfig(this, cur.copy(limits = updatedLimits))
+                    DelayManager.cancelAppLimitUpdate(this, pkg)
+                    Toast.makeText(this, "Limit updated for ${getAppName(pkg)}.", Toast.LENGTH_SHORT).show()
+                } else {
+                    DelayManager.requestAppLimitUpdate(
+                        this,
+                        pkg,
+                        newLimit,
+                        describeSingleAppChange(activeLimit, newLimit),
+                        overrideDelaySeconds = requirement.seconds
+                    )
+                    val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
+                    Toast.makeText(
+                        this,
+                        "Change queued for ${formatLongDuration(requirement.seconds)} ($scope — ${requirement.reason}).",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             }
             .setNegativeButton("Cancel", null)
 
-        if (existingLimit != null) {
+        if (existingLimit != null || activeLimit != null) {
             builder.setNeutralButton("Delete timer") { _, _ ->
-                val newLimits = config.limits.filter { it.packageName != pkg }
-                val newConfig = ConfigManager.Config(newLimits, config.periodBlocks)
-                saveConfigWithDelay(newConfig)
+                val globalDelay = DelayManager.getCurrentEffectiveDelaySeconds(this)
+                val requirement = ConfigManager.requiredDeferForAppLimit(activeLimit, null, globalDelay)
+                val unlockApplies = !requirement.fromExplicitTimer && DelayManager.isSettingsUnlocked(this)
+                val mustDefer = requirement.mustDefer && !unlockApplies
+
+                if (!mustDefer) {
+                    val cur = ConfigManager.loadConfig(this)
+                    val updatedLimits = cur.limits.filter { it.packageName != pkg }
+                    ConfigManager.saveConfig(this, cur.copy(limits = updatedLimits))
+                    DelayManager.cancelAppLimitUpdate(this, pkg)
+                    Toast.makeText(this, "Limit deleted for ${getAppName(pkg)}.", Toast.LENGTH_SHORT).show()
+                } else {
+                    DelayManager.requestAppLimitDelete(
+                        this,
+                        pkg,
+                        "Suppr. limite : ${getAppName(pkg)}",
+                        overrideDelaySeconds = requirement.seconds
+                    )
+                    val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
+                    Toast.makeText(
+                        this,
+                        "Deletion queued for ${formatLongDuration(requirement.seconds)} ($scope — ${requirement.reason}).",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             }
         }
 
@@ -846,23 +1469,34 @@ class MainActivity : Activity() {
 
     private fun saveConfigWithDelay(newConfig: ConfigManager.Config) {
         val old = loadEditableConfig()
-        val delayState = DelayManager.loadState(this)
-        val mustDefer = delayState.globalDelaySeconds > 0 &&
-            !DelayManager.isSettingsUnlocked(this) &&
-            (ConfigManager.shouldDeferLimitsChange(old, newConfig.limits) ||
-                ConfigManager.shouldDeferPeriodBlocksChange(old.periodBlocks, newConfig.periodBlocks))
 
-        val jsonString = ConfigManager.configToJsonString(newConfig)
+        // Use the EFFECTIVE delay, not the base one. The old gate tested globalDelaySeconds > 0,
+        // so with a base delay of 0 every relaxation slipped through instantly even while a
+        // "Scheduled Delay Rule" was active — the rule only ever influenced executeAt.
+        val globalDelay = DelayManager.getCurrentEffectiveDelaySeconds(this)
+        val requirement = ConfigManager.requiredDefer(old, newConfig, globalDelay)
+
+        // A rule's own protection timer outranks the global delay *and* the settings unlock —
+        // that is what "priority over the general timer" means. A 30-day curfew must not be
+        // defusable through a 1h unlock. Rules without an explicit timer keep the old behaviour.
+        val unlockApplies = !requirement.fromExplicitTimer && DelayManager.isSettingsUnlocked(this)
+        val mustDefer = requirement.mustDefer && !unlockApplies
+
         if (!mustDefer) {
             ConfigManager.saveConfig(this, newConfig)
             Toast.makeText(this, "Config updated.", Toast.LENGTH_SHORT).show()
         } else {
-            val description = describeConfigChange(old, newConfig)
-            DelayManager.requestConfigUpdate(this, jsonString, description)
-            val effectiveDelay = DelayManager.getCurrentEffectiveDelaySeconds(this)
+            DelayManager.requestConfigUpdate(
+                this,
+                ConfigManager.configToJsonString(newConfig),
+                describeConfigChange(old, newConfig),
+                overrideDelaySeconds = requirement.seconds
+            )
+            val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
             Toast.makeText(
                 this,
-                "Change queued. Waiting ${effectiveDelay}s (effective protection delay).",
+                "Change queued for ${formatLongDuration(requirement.seconds)} " +
+                    "($scope — ${requirement.reason}).",
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -872,6 +1506,7 @@ class MainActivity : Activity() {
         periodBlocksContainer.removeAllViews()
         val cfg = ConfigManager.loadConfig(this)
         if (cfg.periodBlocks.isEmpty()) {
+            curfewCircle.setSummaryText("No curfew")
             periodBlocksContainer.addView(TextView(this).apply {
                 text = "No curfew rules."
                 textSize = 14f
@@ -880,6 +1515,27 @@ class MainActivity : Activity() {
             })
             return
         }
+
+        val cal = Calendar.getInstance()
+        val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK) - 1
+        val nowMin = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+        val isNowActive = cfg.periodBlocks.any { rule ->
+            dayOfWeek in rule.allowedDays && ConfigManager.isInBlockedWindow(nowMin, rule.blockedStartMinutes, rule.blockedEndMinutes)
+        }
+
+        if (isNowActive) {
+            curfewCircle.setSummaryText("Active now", Color.parseColor("#E53935"))
+        } else {
+            val r = cfg.periodBlocks[0]
+            val start = "%02d:%02d".format(r.blockedStartMinutes / 60, r.blockedStartMinutes % 60)
+            val end = "%02d:%02d".format(r.blockedEndMinutes / 60, r.blockedEndMinutes % 60)
+            if (cfg.periodBlocks.size == 1) {
+                curfewCircle.setSummaryText("$start - $end")
+            } else {
+                curfewCircle.setSummaryText("${cfg.periodBlocks.size} rules · $start")
+            }
+        }
+
         cfg.periodBlocks.forEachIndexed { index, rule ->
             periodBlocksContainer.addView(buildPeriodRuleRow(rule, index))
         }
@@ -902,7 +1558,7 @@ class MainActivity : Activity() {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(8), dp(8), dp(8), dp(8))
-            background = roundedBackground(Color.parseColor("#222222"))
+            background = roundedBackground(Color.WHITE)
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -911,8 +1567,56 @@ class MainActivity : Activity() {
             addView(TextView(this@MainActivity).apply {
                 text = "$days\n$start -> $end\n$names\n$muteLabel"
                 textSize = 14f
-                setTextColor(Color.WHITE)
+                setTextColor(Color.BLACK)
             })
+            rule.protectionDelaySec?.let { sec ->
+                addView(TextView(this@MainActivity).apply {
+                    text = "🔒 Protected — ${formatLongDuration(sec)} to change"
+                    textSize = 12f
+                    setTextColor(Color.BLACK)
+                })
+            }
+
+            val pendingUpdates = DelayManager.loadState(this@MainActivity).requestedConfigUpdates
+            val pendingCurfewUpdate = pendingUpdates.find {
+                it.targetType == "CURFEW" && it.targetKey == rule.scheduleSignature()
+            }
+            if (pendingCurfewUpdate != null) {
+                if (pendingCurfewUpdate.isDelete) {
+                    val rem = ((pendingCurfewUpdate.executeAt - System.currentTimeMillis()) / 1000).toInt().coerceAtLeast(0)
+                    addView(TextView(this@MainActivity).apply {
+                        text = "⏳ Suppression du couvre-feu en attente (${formatTime(rem)})"
+                        setTextColor(Color.parseColor("#D32F2F"))
+                        textSize = 12f
+                        typeface = Typeface.DEFAULT_BOLD
+                        setPadding(0, dp(4), 0, 0)
+                    })
+                } else {
+                    val pendingRule = runCatching { ConfigManager.parsePeriodBlockRule(JSONObject(pendingCurfewUpdate.payloadJson)) }.getOrNull()
+                    if (pendingRule != null) {
+                        val pStart = "%02d:%02d".format(pendingRule.blockedStartMinutes / 60, pendingRule.blockedStartMinutes % 60)
+                        val pEnd = "%02d:%02d".format(pendingRule.blockedEndMinutes / 60, pendingRule.blockedEndMinutes % 60)
+                        val pDays = formatDays(pendingRule.allowedDays)
+                        val rem = ((pendingCurfewUpdate.executeAt - System.currentTimeMillis()) / 1000).toInt().coerceAtLeast(0)
+                        val changes = mutableListOf<String>()
+                        if (pStart != start || pEnd != end) changes.add("$pStart -> $pEnd")
+                        if (pDays != days) changes.add(pDays)
+                        if (pendingRule.protectionDelaySec != rule.protectionDelaySec) {
+                            val pSec = pendingRule.protectionDelaySec?.let { formatLongDuration(it) } ?: "Global"
+                            changes.add("délai: $pSec")
+                        }
+                        if (changes.isNotEmpty()) {
+                            addView(TextView(this@MainActivity).apply {
+                                text = "⏳ En attente : ${changes.joinToString(" · ")} (${formatTime(rem)})"
+                                setTextColor(Color.parseColor("#E65100"))
+                                textSize = 12f
+                                typeface = Typeface.DEFAULT_BOLD
+                                setPadding(0, dp(4), 0, 0)
+                            })
+                        }
+                    }
+                }
+            }
             val buttonRow = LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -924,7 +1628,7 @@ class MainActivity : Activity() {
             buttonRow.addView(Button(this@MainActivity).apply {
                 text = "Edit"
                 setTextColor(Color.WHITE)
-                background = roundedBackground(Color.parseColor("#BB86FC"))
+                background = roundedBackground(Color.BLACK)
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                     marginEnd = dp(4)
                 }
@@ -940,7 +1644,7 @@ class MainActivity : Activity() {
                 setOnClickListener {
                     val cur = loadEditableConfig()
                     val newList = cur.periodBlocks.toMutableList().also { it.removeAt(index) }
-                    saveConfigWithDelay(ConfigManager.Config(cur.limits, newList))
+                    saveConfigWithDelay(ConfigManager.Config(cur.limits, newList, cur.installBlocks))
                 }
             })
             addView(buttonRow)
@@ -991,7 +1695,8 @@ class MainActivity : Activity() {
                     existingEndH = existingRule.blockedEndMinutes / 60,
                     existingEndM = existingRule.blockedEndMinutes % 60,
                     existingDays = existingRule.allowedDays.toSet(),
-                    existingMute = existingRule.muteNotifications
+                    existingMute = existingRule.muteNotifications,
+                    existingProtectionDelaySec = existingRule.protectionDelaySec
                 )
             }
             .setNegativeButton("Cancel", null)
@@ -1006,7 +1711,8 @@ class MainActivity : Activity() {
         existingStartH: Int = 22, existingStartM: Int = 0,
         existingEndH: Int = 7, existingEndM: Int = 0,
         existingDays: Set<Int> = (0..6).toSet(),
-        existingMute: Boolean = false
+        existingMute: Boolean = false,
+        existingProtectionDelaySec: Int? = null
     ) {
         val wrap = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1088,6 +1794,15 @@ class MainActivity : Activity() {
         muteRow.addView(muteSwitch)
         wrap.addView(muteRow)
 
+        var protectionDelaySec = existingProtectionDelaySec
+        wrap.addView(buildProtectionTimerRow(protectionDelaySec) { protectionDelaySec = it })
+        wrap.addView(TextView(this).apply {
+            text = "Set a huge timer here to make this curfew practically permanent."
+            textSize = 12f
+            setTextColor(Color.parseColor("#888888"))
+            setPadding(0, 0, 0, dp(8))
+        })
+
         val dialogTitle = if (editIndex >= 0) "Edit curfew hours" else "Curfew hours"
         val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
             .setTitle(dialogTitle)
@@ -1109,14 +1824,564 @@ class MainActivity : Activity() {
                     blockedStartMinutes = startMin,
                     blockedEndMinutes = endMin,
                     allowedDays = selectedDays.sorted(),
-                    muteNotifications = muteNotifications
+                    muteNotifications = muteNotifications,
+                    protectionDelaySec = protectionDelaySec
                 )
                 val newList = if (editIndex >= 0) {
                     cur.periodBlocks.toMutableList().also { it[editIndex] = newRule }
                 } else {
                     cur.periodBlocks + newRule
                 }
-                saveConfigWithDelay(ConfigManager.Config(cur.limits, newList))
+                saveConfigWithDelay(ConfigManager.Config(cur.limits, newList, cur.installBlocks))
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+        styleDialogForDarkTheme(dialog)
+        dialog.show()
+    }
+
+    // ──────────────────────────────────────
+    //  Whitelist (Zero-Trust)
+    // ──────────────────────────────────────
+
+    private fun refreshInstallBlocksUI(force: Boolean = false) {
+        val state = WhitelistManager.loadState(this)
+        val allowedCount = state.allowedPackages.size
+        val pendingCount = state.pendingRequests.size
+
+        if (pendingCount > 0) {
+            installBlocklistCircle.setSummaryText("$allowedCount autorisées · $pendingCount en attente")
+        } else {
+            installBlocklistCircle.setSummaryText("$allowedCount apps autorisées")
+        }
+
+        if (::requestWhitelistAppButton.isInitialized) {
+            val reqSec = WhitelistManager.getEffectiveQuarantineDelaySeconds(this)
+            val reqHours = WhitelistManager.getEffectiveQuarantineDelayHours(this)
+            val reqTag = if (reqSec >= 3600) "${reqHours}h" else "${reqSec / 60}m"
+            requestWhitelistAppButton.text = "+ Demander une app ($reqTag)"
+        }
+
+        // Performance critical: do NOT build 400+ UI views if user is not looking inside this circle
+        if (::zoomCanvas.isInitialized && zoomCanvas.zoomedCircle != installBlocklistCircle) {
+            return
+        }
+
+        val installedSet = getCachedInstalledPackages()
+        val displayAllowed = state.allowedPackages
+            .filter { installedSet.isEmpty() || it in installedSet }
+            .filterNot { WhitelistManager.isGuarded(this, it) }
+            .toSet()
+
+        val currentSecond = System.currentTimeMillis() / 1000
+        val needTimeRefresh = pendingCount > 0 && (currentSecond - lastPendingUpdateSecond >= 30)
+        val stateChanged = displayAllowed != lastRenderedAllowed ||
+            state.pendingRequests != lastRenderedPending ||
+            state.quarantineDelayHours != lastRenderedDelayHours ||
+            state.useGlobalDelay != lastRenderedUseGlobal ||
+            state.pendingDelayExecuteAt != lastRenderedPendingDelayAt
+
+        if (!force && !stateChanged && !needTimeRefresh) {
+            return
+        }
+
+        lastRenderedAllowed = displayAllowed
+        lastRenderedPending = state.pendingRequests
+        lastRenderedDelayHours = state.quarantineDelayHours
+        lastRenderedUseGlobal = state.useGlobalDelay
+        lastRenderedPendingDelayAt = state.pendingDelayExecuteAt
+        lastPendingUpdateSecond = currentSecond
+
+        installBlocksContainer.removeAllViews()
+        val now = System.currentTimeMillis()
+
+        // 0. Configuration du Délai de Quarantaine
+        val effectiveHours = WhitelistManager.getEffectiveQuarantineDelayHours(this)
+        val delayDesc = if (state.useGlobalDelay) {
+            "${effectiveHours}h (Aligné sur délai général)"
+        } else {
+            "${effectiveHours}h"
+        }
+
+        val delayCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = roundedBackground(Color.parseColor("#1E2430"))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(10) }
+
+            val row = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+
+                val txt = TextView(this@MainActivity).apply {
+                    text = "⏱️ Délai de quarantaine : $delayDesc"
+                    setTextColor(Color.parseColor("#E0E6ED"))
+                    textSize = 13f
+                    typeface = Typeface.DEFAULT_BOLD
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                }
+                addView(txt)
+
+                val editBtn = Button(this@MainActivity).apply {
+                    text = "Modifier"
+                    textSize = 12f
+                    setTextColor(Color.WHITE)
+                    background = roundedBackground(Color.parseColor("#3A4558"))
+                    setPadding(dp(12), dp(4), dp(12), dp(4))
+                    setOnClickListener { showChangeWhitelistDelayDialog() }
+                }
+                addView(editBtn)
+            }
+            addView(row)
+
+            if (state.pendingDelayExecuteAt > now && state.pendingDelayHours != null) {
+                val remainSec = ((state.pendingDelayExecuteAt - now) / 1000).toInt()
+                val targetText = if (state.pendingDelayUseGlobal) "Aligné sur délai général" else "${state.pendingDelayHours}h"
+                val pendingRow = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(8), 0, 0)
+                    addView(TextView(this@MainActivity).apply {
+                        text = "⏳ Réduction vers $targetText dans ${formatTime(remainSec)}"
+                        setTextColor(Color.parseColor("#FFCA28"))
+                        textSize = 12f
+                        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    })
+                    addView(Button(this@MainActivity).apply {
+                        text = "Annuler"
+                        textSize = 11f
+                        setTextColor(Color.WHITE)
+                        background = roundedBackground(Color.parseColor("#C62828"))
+                        setPadding(dp(8), dp(2), dp(8), dp(2))
+                        setOnClickListener {
+                            WhitelistManager.cancelPendingDelayChange(this@MainActivity)
+                            Toast.makeText(this@MainActivity, "Modification annulée", Toast.LENGTH_SHORT).show()
+                            refreshInstallBlocksUI(force = true)
+                            refreshDelayUI()
+                        }
+                    })
+                }
+                addView(pendingRow)
+            }
+        }
+        installBlocksContainer.addView(delayCard)
+
+        // 1. Quarantaine (Demandes en attente)
+        if (state.pendingRequests.isNotEmpty()) {
+            installBlocksContainer.addView(TextView(this).apply {
+                text = "⏳ En quarantaine ($pendingCount)"
+                textSize = 14f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.parseColor("#E65100"))
+                setPadding(dp(8), dp(8), dp(8), dp(4))
+            })
+
+            for (req in state.pendingRequests) {
+                val remainMs = req.availableAt - now
+                if (remainMs <= 0L) continue
+                val remainHours = remainMs / 3600_000L
+                val remainMins = (remainMs % 3600_000L) / 60_000L
+                val timeStr = if (remainHours > 0) "${remainHours}h ${remainMins}m" else "${remainMins}m"
+                val appLabel = getAppName(req.packageName)
+
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(10), dp(8), dp(10), dp(8))
+                    background = roundedBackground(Color.WHITE)
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    ).apply { bottomMargin = dp(6) }
+
+                    val icon = getAppIcon(req.packageName)
+                    val iconView = ImageView(this@MainActivity).apply {
+                        setImageDrawable(icon)
+                        layoutParams = LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginEnd = dp(8) }
+                    }
+                    addView(iconView)
+
+                    val textLayout = LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                        addView(TextView(this@MainActivity).apply {
+                            text = appLabel
+                            textSize = 14f
+                            typeface = Typeface.DEFAULT_BOLD
+                            setTextColor(Color.BLACK)
+                        })
+                        addView(TextView(this@MainActivity).apply {
+                            text = "Débloquée dans $timeStr"
+                            textSize = 12f
+                            setTextColor(Color.parseColor("#E65100"))
+                        })
+                    }
+                    addView(textLayout)
+
+                    addView(Button(this@MainActivity).apply {
+                        text = "Annuler"
+                        textSize = 11f
+                        setTextColor(Color.WHITE)
+                        background = roundedBackground(Color.parseColor("#C62828"))
+                        setOnClickListener {
+                            WhitelistManager.cancelPendingRequest(this@MainActivity, req.packageName)
+                            Toast.makeText(this@MainActivity, "Demande annulée", Toast.LENGTH_SHORT).show()
+                            refreshInstallBlocksUI()
+                        }
+                    })
+                }
+                installBlocksContainer.addView(row)
+            }
+        }
+
+        // 2. Applications autorisées (Whitelist)
+        installBlocksContainer.addView(TextView(this).apply {
+            text = "✅ Applications autorisées ($allowedCount)"
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.BLACK)
+            setPadding(dp(8), dp(10), dp(8), dp(4))
+        })
+
+        val sortedList = displayAllowed.sortedBy { pkg ->
+            getAppName(pkg).lowercase()
+        }
+
+        for (pkg in sortedList) {
+            val appLabel = getAppName(pkg)
+            val icon = getAppIcon(pkg)
+
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), dp(6), dp(10), dp(6))
+                background = roundedBackground(Color.WHITE)
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = dp(4) }
+
+                val iconView = ImageView(this@MainActivity).apply {
+                    setImageDrawable(icon)
+                    layoutParams = LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginEnd = dp(8) }
+                }
+                addView(iconView)
+
+                val textLayout = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    addView(TextView(this@MainActivity).apply {
+                        text = appLabel
+                        textSize = 14f
+                        typeface = Typeface.DEFAULT_BOLD
+                        setTextColor(Color.BLACK)
+                    })
+                    addView(TextView(this@MainActivity).apply {
+                        text = pkg
+                        textSize = 11f
+                        setTextColor(Color.parseColor("#757575"))
+                    })
+                }
+                addView(textLayout)
+
+                if (pkg != packageName) {
+                    addView(Button(this@MainActivity).apply {
+                        text = "Bloquer"
+                        textSize = 11f
+                        setTextColor(Color.WHITE)
+                        background = roundedBackground(Color.BLACK)
+                        setOnClickListener {
+                            showConfirmRemoveFromWhitelistDialog(pkg, appLabel)
+                        }
+                    })
+                }
+            }
+            installBlocksContainer.addView(row)
+        }
+    }
+
+    private fun showRequestWhitelistAppDialog() {
+        if (BuildConfig.WHITELIST_ADB_ONLY) {
+            AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+                .setTitle("Ajout restreint")
+                .setMessage("Sur cette version, l'ajout d'applications autorisées est administré exclusivement via ADB.\n\nDemandez à l'administrateur d'autoriser l'application depuis son ordinateur.")
+                .setPositiveButton("Compris", null)
+                .show()
+            return
+        }
+
+        val state = WhitelistManager.loadState(this)
+        val hiddenPackages = WhitelistManager.loadHiddenState(this)
+        val pm = packageManager
+        val candidates = try {
+            pm.getInstalledApplications(PackageManager.MATCH_UNINSTALLED_PACKAGES)
+                .filter { app ->
+                    val isHiddenByUs = app.packageName in hiddenPackages
+                    val isLaunchable = pm.getLaunchIntentForPackage(app.packageName) != null
+                    !WhitelistManager.isGuarded(this, app.packageName) &&
+                        app.packageName != packageName &&
+                        app.packageName !in state.allowedPackages &&
+                        (isHiddenByUs || isLaunchable)
+                }
+                .sortedWith(
+                    compareByDescending<ApplicationInfo> { it.packageName in hiddenPackages }
+                        .thenBy { getAppName(it.packageName).lowercase() }
+                )
+        } catch (e: Exception) {
+            emptyList()
+        }
+
+        val items = mutableListOf<String>()
+        val packageMap = mutableListOf<String>()
+
+        items.add("✏️ Saisir un nom de package...")
+        packageMap.add("")
+
+        for (app in candidates) {
+            val label = getAppName(app.packageName)
+            val prefix = if (app.packageName in hiddenPackages) "⚡ Récemment installée / Bloquée : " else ""
+            items.add("$prefix$label (${app.packageName})")
+            packageMap.add(app.packageName)
+        }
+
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setTitle("Demander une application")
+            .setItems(items.toTypedArray()) { _, which ->
+                if (which == 0) {
+                    showCustomPackageInputDialog()
+                } else {
+                    val pkg = packageMap[which]
+                    confirmRequestAddition(pkg, getAppName(pkg))
+                }
+            }
+            .setNegativeButton("Annuler", null)
+            .create()
+        styleDialogForDarkTheme(dialog)
+        dialog.show()
+    }
+
+    private fun showCustomPackageInputDialog() {
+        val input = EditText(this).apply {
+            hint = "com.exemple.application"
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.parseColor("#888888"))
+        }
+        val wrap = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(16), dp(24), dp(8))
+            addView(input)
+        }
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setTitle("Nom exact du package")
+            .setView(wrap)
+            .setPositiveButton("Suivant") { _, _ ->
+                val pkg = input.text.toString().trim()
+                if (pkg.isNotEmpty()) {
+                    confirmRequestAddition(pkg, getAppName(pkg))
+                }
+            }
+            .setNegativeButton("Annuler", null)
+            .create()
+        styleDialogForDarkTheme(dialog)
+        dialog.show()
+    }
+
+    private fun confirmRequestAddition(pkg: String, label: String) {
+        if (BuildConfig.WHITELIST_ADB_ONLY) {
+            Toast.makeText(this, "Ajout restreint : administré via ADB uniquement", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val delaySec = WhitelistManager.getEffectiveQuarantineDelaySeconds(this)
+        val delayHours = WhitelistManager.getEffectiveQuarantineDelayHours(this)
+        val delayText = if (delaySec >= 3600) "${delayHours} heure(s)" else "${delaySec / 60} minute(s)"
+        val unlockTime = System.currentTimeMillis() + delaySec * 1000L
+        val unlockDateStr = java.text.SimpleDateFormat("dd/MM/yyyy à HH:mm", java.util.Locale.FRANCE).format(java.util.Date(unlockTime))
+
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setTitle("Mettre en quarantaine ?")
+            .setMessage(
+                "L'application \"$label\" sera placée dans un sas de quarantaine de $delayText.\n\n" +
+                    "Pendant cette période, elle reste complètement bloquée et masquée.\n" +
+                    "Elle rejoindra automatiquement la Whitelist le $unlockDateStr."
+            )
+            .setPositiveButton("Confirmer ($delayText)") { _, _ ->
+                val ok = WhitelistManager.requestAppAddition(this, pkg, delaySec)
+                if (ok) {
+                    Toast.makeText(this, "\"$label\" mise en quarantaine ($delayText)", Toast.LENGTH_LONG).show()
+                    refreshInstallBlocksUI(force = true)
+                    refreshDelayUI()
+                } else {
+                    Toast.makeText(this, "Application déjà dans la whitelist ou en attente", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Annuler", null)
+            .create()
+        styleDialogForDarkTheme(dialog)
+        dialog.show()
+    }
+
+    private fun showChangeWhitelistDelayDialog() {
+        val globalDelaySec = DelayManager.getCurrentEffectiveDelaySeconds(this)
+        val globalDelayHours = (globalDelaySec / 3600).coerceAtLeast(1)
+        val globalDesc = if (globalDelaySec >= 3600) "${globalDelayHours}h" else "${globalDelaySec / 60}m"
+        val options = arrayOf(
+            "Délai dédié : 12 heures",
+            "Délai dédié : 24 heures (Défaut)",
+            "Délai dédié : 48 heures",
+            "Délai dédié : 72 heures",
+            "Délai dédié personnalisé...",
+            "🔗 Aligner sur le délai général ($globalDesc)"
+        )
+
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setTitle("Délai de quarantaine Whitelist")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> applyWhitelistDelayChange(12, false)
+                    1 -> applyWhitelistDelayChange(24, false)
+                    2 -> applyWhitelistDelayChange(48, false)
+                    3 -> applyWhitelistDelayChange(72, false)
+                    4 -> showCustomWhitelistDelayDialog()
+                    5 -> applyWhitelistDelayChange(globalDelayHours, true)
+                }
+            }
+            .setNegativeButton("Annuler", null)
+            .create()
+        styleDialogForDarkTheme(dialog)
+        dialog.show()
+    }
+
+    private fun applyWhitelistDelayChange(hours: Int, useGlobal: Boolean) {
+        val result = WhitelistManager.setQuarantineDelay(this, hours, useGlobal)
+        Toast.makeText(this, result, Toast.LENGTH_LONG).show()
+        refreshInstallBlocksUI(force = true)
+        refreshDelayUI()
+    }
+
+    private fun showCustomWhitelistDelayDialog() {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(dp(24), dp(16), dp(24), dp(16))
+        }
+
+        val picker = NumberPicker(this).apply {
+            minValue = 1
+            maxValue = 720
+            value = WhitelistManager.getEffectiveQuarantineDelayHours(this@MainActivity)
+            wrapSelectorWheel = false
+        }
+        layout.addView(picker)
+
+        layout.addView(TextView(this).apply {
+            text = " heure(s)"
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            setPadding(dp(8), 0, 0, 0)
+        })
+
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setTitle("Délai personnalisé (heures)")
+            .setView(layout)
+            .setPositiveButton("Confirmer") { _, _ ->
+                applyWhitelistDelayChange(picker.value, false)
+            }
+            .setNegativeButton("Retour") { _, _ -> showChangeWhitelistDelayDialog() }
+            .create()
+        styleDialogForDarkTheme(dialog)
+        dialog.show()
+    }
+
+    private fun showConfirmRemoveFromWhitelistDialog(pkg: String, label: String) {
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setTitle("Bloquer \"$label\" ?")
+            .setMessage(
+                "L'application sera immédiatement retirée de la Whitelist.\n\n" +
+                    "Elle sera masquée du lanceur et son accès sera instantanément verrouillé."
+            )
+            .setPositiveButton("Bloquer immédiatement") { _, _ ->
+                WhitelistManager.removePackageFromWhitelist(this, pkg)
+                Toast.makeText(this, "\"$label\" a été bloquée", Toast.LENGTH_SHORT).show()
+                refreshInstallBlocksUI(force = true)
+                refreshDelayUI()
+            }
+            .setNegativeButton("Annuler", null)
+            .create()
+        styleDialogForDarkTheme(dialog)
+        dialog.show()
+    }
+
+    // ── CSV import ──────────────────────────────────────
+
+    private fun launchCsvPicker() {
+        // Providers report CSV as text/csv, text/comma-separated-values, text/plain or
+        // application/octet-stream depending on the source — filtering would hide real files.
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        try {
+            startActivityForResult(intent, REQ_IMPORT_CSV)
+        } catch (e: Exception) {
+            Toast.makeText(this, "No file picker available: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_IMPORT_CSV || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        val text = try {
+            contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+        } catch (e: Exception) {
+            Log.e(TAG, "CSV read failed: ${e.message}")
+            null
+        }
+        if (text.isNullOrBlank()) {
+            Toast.makeText(this, "Could not read that file.", Toast.LENGTH_LONG).show()
+            return
+        }
+        confirmCsvImport(text)
+    }
+
+    private fun confirmCsvImport(text: String) {
+        val result = InstallBlockManager.parseCsv(text)
+        if (result.entries.isEmpty()) {
+            val hint = if (result.rejected.isEmpty()) {
+                "The file is empty."
+            } else {
+                "${result.rejected.size} line(s) rejected. Expected columns: group,package"
+            }
+            Toast.makeText(this, "No valid row found. $hint", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val perGroup = result.entries.groupBy({ it.first }, { it.second })
+            .entries.sortedBy { it.key }
+            .joinToString("\n") { "  • ${it.key}: ${it.value.distinct().size} package(s)" }
+        val rejectedNote = if (result.rejected.isEmpty()) "" else
+            "\n\n${result.rejected.size} line(s) ignored (not a package name):\n" +
+                result.rejected.take(5).joinToString("\n") { "  ✗ $it" } +
+                if (result.rejected.size > 5) "\n  …" else ""
+
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setTitle("Import ${result.packageCount} package(s)?")
+            .setMessage(
+                "$perGroup$rejectedNote\n\n" +
+                    "Merge is add-only: existing groups gain packages, nothing is removed and no " +
+                    "timer changes. That makes it a hardening, so it applies immediately."
+            )
+            .setPositiveButton("Import") { _, _ ->
+                val cur = loadEditableConfig()
+                saveConfigWithDelay(InstallBlockManager.mergeIntoConfig(cur, result))
             }
             .setNegativeButton("Cancel", null)
             .create()
@@ -1131,25 +2396,67 @@ class MainActivity : Activity() {
     }
 
     private fun describeConfigChange(old: ConfigManager.Config, newConfig: ConfigManager.Config): String {
-        val diffLines = describeConfigDiff(old, newConfig)
-        if (diffLines.isNotEmpty()) {
-            return diffLines.joinToString("; ")
+        // App limits changes
+        val oldLimits = old.limits.associateBy { it.packageName }
+        val newLimits = newConfig.limits.associateBy { it.packageName }
+        val allPkgs = (oldLimits.keys + newLimits.keys).toSortedSet()
+        for (pkg in allPkgs) {
+            val o = oldLimits[pkg]
+            val n = newLimits[pkg]
+            val name = getAppName(pkg)
+            if (o == null && n != null) return "Ajout limite : $name"
+            if (o != null && n == null) return "Suppr. limite : $name"
+            if (o != null && n != null && o != n) {
+                if (o.protectionDelaySec != n.protectionDelaySec) {
+                    val target = n.protectionDelaySec?.let { DelayManager.formatDuration(it.toLong()) } ?: "Global"
+                    return "Délai protection: $name (→ $target)"
+                }
+                if (o.maxMinutesPerDay != n.maxMinutesPerDay) {
+                    return "Limite $name: ${o.maxMinutesPerDay}m → ${n.maxMinutesPerDay}m"
+                }
+                return "Modifier limite : $name"
+            }
         }
 
-        val oldPkgs = old.limits.map { it.packageName }.toSet()
-        val newPkgs = newConfig.limits.map { it.packageName }.toSet()
+        // Curfews
+        if (newConfig.periodBlocks.size > old.periodBlocks.size) return "Nouveau couvre-feu"
+        if (newConfig.periodBlocks.size < old.periodBlocks.size) return "Suppr. couvre-feu"
+        for (i in 0 until minOf(old.periodBlocks.size, newConfig.periodBlocks.size)) {
+            val o = old.periodBlocks[i]
+            val n = newConfig.periodBlocks[i]
+            if (o != n) {
+                val apps = n.packages.take(2).joinToString(", ") { getAppName(it) }
+                if (o.protectionDelaySec != n.protectionDelaySec) {
+                    val target = n.protectionDelaySec?.let { DelayManager.formatDuration(it.toLong()) } ?: "Global"
+                    return "Délai protection: Couvre-feu (→ $target)"
+                }
+                return "Modifier couvre-feu ($apps)"
+            }
+        }
 
-        val removed = oldPkgs - newPkgs
-        if (removed.size == 1) return "Delete timer: ${getAppName(removed.first())}"
-        if (removed.size > 1) return "Delete ${removed.size} timers"
+        // Install blocks
+        val oldGroups = old.installBlocks.associateBy { it.name }
+        val newGroups = newConfig.installBlocks.associateBy { it.name }
+        for (g in newConfig.installBlocks) {
+            val og = oldGroups[g.name]
+            if (og == null) return "Ajout bloqueur : ${g.name}"
+            if (og != g) {
+                if (og.protectionDelaySec != g.protectionDelaySec) {
+                    val target = g.protectionDelaySec?.let { DelayManager.formatDuration(it.toLong()) } ?: "Global"
+                    return "Délai protection: ${g.name} (→ $target)"
+                }
+                return "Modifier bloqueur : ${g.name}"
+            }
+        }
+        for (og in old.installBlocks) {
+            if (newGroups[og.name] == null) return "Suppr. bloqueur : ${og.name}"
+        }
 
-        val added = newPkgs - oldPkgs
-        if (added.size == 1) return "Add timer: ${getAppName(added.first())}"
+        val diffLines = describeConfigDiff(old, newConfig)
+        val meaningful = diffLines.firstOrNull { it.trim().startsWith("•") || it.trim().startsWith("[") }
+        if (meaningful != null) return meaningful.trim().removePrefix("•").removePrefix("  •").trim()
 
-        if (newConfig.periodBlocks.size > old.periodBlocks.size) return "Add curfew rule"
-        if (newConfig.periodBlocks.size < old.periodBlocks.size) return "Delete curfew rule"
-
-        return "Update config"
+        return "Mise à jour configuration"
     }
 
     private fun describeConfigDiff(current: ConfigManager.Config, pending: ConfigManager.Config): List<String> {
@@ -1166,22 +2473,29 @@ class MainActivity : Activity() {
             val name = getAppName(pkg)
             when {
                 old == null && new != null -> {
-                    limitChanges.add("  \u2022 [NEW] $name: ${new.maxMinutesPerDay}m/day")
-                    new.session?.let { limitChanges.add("    \u21b3 session: ${it.sessionDurationSec/60}m, cooldown ${it.cooldownSec/60}m, max ${it.maxSessionsPerDay}/day") }
+                    limitChanges.add("  • [NOUVEAU] $name: ${new.maxMinutesPerDay}m/jour")
+                    new.session?.let { limitChanges.add("    ↳ session: ${it.sessionDurationSec/60}m, cooldown ${it.cooldownSec/60}m, max ${it.maxSessionsPerDay}/j") }
+                    new.protectionDelaySec?.let { limitChanges.add("    ↳ délai protection: ${DelayManager.formatDuration(it.toLong())}") }
                 }
                 old != null && new == null ->
-                    limitChanges.add("  \u2022 [REMOVED] $name")
+                    limitChanges.add("  • [SUPPRIMÉ] $name")
                 old != null && new != null -> {
                     if (old.maxMinutesPerDay != new.maxMinutesPerDay) {
-                        limitChanges.add("  \u2022 $name: ${old.maxMinutesPerDay}m/day \u2192 ${new.maxMinutesPerDay}m/day")
+                        limitChanges.add("  • $name: ${old.maxMinutesPerDay}m/jour → ${new.maxMinutesPerDay}m/jour")
                     }
                     val sessionDesc = describeSessionDiff(name, old.session, new.session)
                     if (sessionDesc != null) limitChanges.add(sessionDesc)
+
+                    if (old.protectionDelaySec != new.protectionDelaySec) {
+                        val oldProt = old.protectionDelaySec?.let { DelayManager.formatDuration(it.toLong()) } ?: "Global"
+                        val newProt = new.protectionDelaySec?.let { DelayManager.formatDuration(it.toLong()) } ?: "Global"
+                        limitChanges.add("  • $name délai protection: $oldProt → $newProt")
+                    }
                 }
             }
         }
         if (limitChanges.isNotEmpty()) {
-            lines.add("App Limits:")
+            lines.add("Limites d'applications :")
             lines.addAll(limitChanges)
         }
 
@@ -1198,7 +2512,25 @@ class MainActivity : Activity() {
                 val apps = n.packages.joinToString(", ") { getAppName(it) }
                 val start = "%02d:%02d".format(n.blockedStartMinutes / 60, n.blockedStartMinutes % 60)
                 val end = "%02d:%02d".format(n.blockedEndMinutes / 60, n.blockedEndMinutes % 60)
-                curfewChanges.add("  \u2022 [MODIFIED] $apps $start\u2192$end (${formatDays(n.allowedDays)})")
+                val changes = mutableListOf<String>()
+                if (o.blockedStartMinutes != n.blockedStartMinutes || o.blockedEndMinutes != n.blockedEndMinutes) {
+                    val oldStart = "%02d:%02d".format(o.blockedStartMinutes / 60, o.blockedStartMinutes % 60)
+                    val oldEnd = "%02d:%02d".format(o.blockedEndMinutes / 60, o.blockedEndMinutes % 60)
+                    changes.add("horaires: $oldStart-$oldEnd → $start-$end")
+                }
+                if (o.allowedDays != n.allowedDays) {
+                    changes.add("jours: ${formatDays(o.allowedDays)} → ${formatDays(n.allowedDays)}")
+                }
+                if (o.packages != n.packages) {
+                    changes.add("apps: $apps")
+                }
+                if (o.protectionDelaySec != n.protectionDelaySec) {
+                    val oldProt = o.protectionDelaySec?.let { DelayManager.formatDuration(it.toLong()) } ?: "Global"
+                    val newProt = n.protectionDelaySec?.let { DelayManager.formatDuration(it.toLong()) } ?: "Global"
+                    changes.add("délai: $oldProt → $newProt")
+                }
+                val detail = if (changes.isNotEmpty()) changes.joinToString(", ") else "$start→$end (${formatDays(n.allowedDays)})"
+                curfewChanges.add("  • [MODIF] Couvre-feu ($apps): $detail")
             }
         }
         // Added rules
@@ -1208,7 +2540,7 @@ class MainActivity : Activity() {
                 val apps = r.packages.joinToString(", ") { getAppName(it) }
                 val start = "%02d:%02d".format(r.blockedStartMinutes / 60, r.blockedStartMinutes % 60)
                 val end = "%02d:%02d".format(r.blockedEndMinutes / 60, r.blockedEndMinutes % 60)
-                curfewChanges.add("  \u2022 [NEW] $apps blocked $start\u2192$end (${formatDays(r.allowedDays)})")
+                curfewChanges.add("  • [NOUVEAU] Couvre-feu $apps $start→$end (${formatDays(r.allowedDays)})")
             }
         }
         // Removed rules
@@ -1216,13 +2548,54 @@ class MainActivity : Activity() {
             for (i in newRules.size until oldRules.size) {
                 val r = oldRules[i]
                 val apps = r.packages.joinToString(", ") { getAppName(it) }
-                curfewChanges.add("  \u2022 [REMOVED] $apps curfew")
+                curfewChanges.add("  • [SUPPRIMÉ] Couvre-feu $apps")
             }
         }
 
         if (curfewChanges.isNotEmpty()) {
-            lines.add("Curfew Rules:")
+            lines.add("Couvre-feux :")
             lines.addAll(curfewChanges)
+        }
+
+        // Install Blocks diff
+        val oldGroups = current.installBlocks.associateBy { it.name }
+        val newGroups = pending.installBlocks.associateBy { it.name }
+        val allGroupNames = (oldGroups.keys + newGroups.keys).toSortedSet()
+        val installChanges = mutableListOf<String>()
+
+        for (name in allGroupNames) {
+            val oldG = oldGroups[name]
+            val newG = newGroups[name]
+            when {
+                oldG == null && newG != null -> {
+                    installChanges.add("  • [NOUVEAU] Bloqueur $name (${newG.packages.size} apps)")
+                }
+                oldG != null && newG == null -> {
+                    installChanges.add("  • [SUPPRIMÉ] Bloqueur $name")
+                }
+                oldG != null && newG != null -> {
+                    val changes = mutableListOf<String>()
+                    if (oldG.packages != newG.packages) {
+                        val added = newG.packages - oldG.packages.toSet()
+                        val removed = oldG.packages - newG.packages.toSet()
+                        if (added.isNotEmpty()) changes.add("+${added.size} apps")
+                        if (removed.isNotEmpty()) changes.add("-${removed.size} apps")
+                    }
+                    if (oldG.protectionDelaySec != newG.protectionDelaySec) {
+                        val oldProt = oldG.protectionDelaySec?.let { DelayManager.formatDuration(it.toLong()) } ?: "Global"
+                        val newProt = newG.protectionDelaySec?.let { DelayManager.formatDuration(it.toLong()) } ?: "Global"
+                        changes.add("délai: $oldProt → $newProt")
+                    }
+                    if (changes.isNotEmpty()) {
+                        installChanges.add("  • Bloqueur $name: ${changes.joinToString(", ")}")
+                    }
+                }
+            }
+        }
+
+        if (installChanges.isNotEmpty()) {
+            lines.add("Bloqueurs d'installation :")
+            lines.addAll(installChanges)
         }
 
         return lines
@@ -1241,6 +2614,44 @@ class MainActivity : Activity() {
             old != null && new != null && old != new -> "  • $appName session: ${fmt(old)} → ${fmt(new)}"
             else -> null
         }
+    }
+
+    private fun describeSingleAppDiff(old: ConfigManager.AppLimit?, new: ConfigManager.AppLimit): List<String> {
+        val lines = mutableListOf<String>()
+        val name = getAppName(new.packageName)
+        if (old == null) {
+            lines.add("  • [NOUVEAU] $name: ${new.maxMinutesPerDay}m/jour")
+            new.session?.let { lines.add("    ↳ session: ${it.sessionDurationSec/60}m, cooldown ${it.cooldownSec/60}m, max ${it.maxSessionsPerDay}/j") }
+            new.protectionDelaySec?.let { lines.add("    ↳ délai protection: ${DelayManager.formatDuration(it.toLong())}") }
+        } else {
+            if (old.maxMinutesPerDay != new.maxMinutesPerDay) {
+                lines.add("  • $name: ${old.maxMinutesPerDay}m/jour → ${new.maxMinutesPerDay}m/jour")
+            }
+            val sessionDesc = describeSessionDiff(name, old.session, new.session)
+            if (sessionDesc != null) lines.add(sessionDesc)
+            if (old.protectionDelaySec != new.protectionDelaySec) {
+                val oldProt = old.protectionDelaySec?.let { DelayManager.formatDuration(it.toLong()) } ?: "Global"
+                val newProt = new.protectionDelaySec?.let { DelayManager.formatDuration(it.toLong()) } ?: "Global"
+                lines.add("  • $name délai protection: $oldProt → $newProt")
+            }
+        }
+        if (lines.isEmpty()) {
+            lines.add("  • $name: aucune modification majeure")
+        }
+        return lines
+    }
+
+    private fun describeSingleAppChange(old: ConfigManager.AppLimit?, new: ConfigManager.AppLimit): String {
+        val name = getAppName(new.packageName)
+        if (old == null) return "Ajout limite : $name"
+        if (old.protectionDelaySec != new.protectionDelaySec) {
+            val target = new.protectionDelaySec?.let { DelayManager.formatDuration(it.toLong()) } ?: "Global"
+            return "Délai protection: $name (→ $target)"
+        }
+        if (old.maxMinutesPerDay != new.maxMinutesPerDay) {
+            return "Limite $name: ${old.maxMinutesPerDay}m → ${new.maxMinutesPerDay}m"
+        }
+        return "Modifier limite : $name"
     }
 
     private fun formatDays(days: List<Int>): String {
@@ -1264,7 +2675,18 @@ class MainActivity : Activity() {
         else
             "Service starting..."
 
+        deviceOwnerStatusText.text = DeviceOwnerHelper.statusLabel(this)
+        val isDO = DeviceOwnerHelper.isDeviceOwner(this)
+        deviceOwnerStatusText.setBackgroundColor(
+            Color.parseColor(if (isDO) "#1B3D1B" else "#3D2F1B")
+        )
+        deviceOwnerStatusText.setTextColor(
+            Color.parseColor(if (isDO) "#A5D6A7" else "#FFCC80")
+        )
+
+        val blockedCount = limits.keys.count { it in blocked }
         if (limits.isEmpty()) {
+            appLimitsCircle.setSummaryText("No limits")
             dashboardContainer.removeAllViews()
             dashboardContainer.addView(TextView(this).apply {
                 text = "No limits configured."
@@ -1273,9 +2695,20 @@ class MainActivity : Activity() {
                 setPadding(dp(8), dp(12), dp(8), dp(12))
             })
             return
+        } else if (blockedCount > 0) {
+            appLimitsCircle.setSummaryText("${limits.size} apps · $blockedCount blocked", Color.parseColor("#E53935"))
+        } else {
+            appLimitsCircle.setSummaryText("${limits.size} apps")
         }
 
-        if (dashboardContainer.childCount != limits.size) {
+        // Rebuild the rows whenever the set of monitored packages changes. Comparing by
+        // childCount alone was buggy: an empty list leaves a "No limits configured."
+        // placeholder (childCount == 1), so adding the FIRST app (limits.size == 1) matched
+        // and the rebuild was skipped — the app only appeared once a second was added.
+        val currentTags = (0 until dashboardContainer.childCount).mapNotNull {
+            (dashboardContainer.getChildAt(it) as? LinearLayout)?.tag as? String
+        }.toSet()
+        if (currentTags != limits.keys) {
             dashboardContainer.removeAllViews()
             for ((pkg, limit) in limits) {
                 dashboardContainer.addView(buildAppRow(pkg, limit))
@@ -1294,9 +2727,22 @@ class MainActivity : Activity() {
             val usageText = row.findViewWithTag<TextView>("usage_$pkg")
             val statusText = row.findViewWithTag<TextView>("status_$pkg")
             val sessionText = row.findViewWithTag<TextView>("session_$pkg")
+            val delayBadge = row.findViewWithTag<TextView>("delay_$pkg")
+
+            val pendingInfo = DelayManager.getPendingAppLimit(this, pkg)
+            val pendingLimit = if (pendingInfo != null && !pendingInfo.second) pendingInfo.first else null
+            val isDeletePending = pendingInfo?.second == true
 
             progressBar?.progress = if (maxSeconds > 0) ((usedSeconds * 100) / maxSeconds).coerceAtMost(100) else 0
-            usageText?.text = "${formatTime(usedSeconds)} / ${formatTime(maxSeconds)}"
+            
+            // Usage text with pending quota transition
+            val baseUsage = "${formatTime(usedSeconds)} / ${formatTime(maxSeconds)}"
+            if (pendingLimit != null && pendingLimit.maxSecondsPerDay != maxSeconds) {
+                val pMins = pendingLimit.maxMinutesPerDay
+                usageText?.text = "$baseUsage (⏳ → ${pMins}m)"
+            } else {
+                usageText?.text = baseUsage
+            }
 
             if (isBlocked) {
                 statusText?.text = "BLOCKED"
@@ -1306,13 +2752,62 @@ class MainActivity : Activity() {
                 statusText?.visibility = View.GONE
             }
 
+            // Session text with pending session transition
             val sessionCfg = limit.session
-            if (sessionCfg != null && sessionText != null) {
-                val st = SessionManager.statusOf(this, pkg, sessionCfg, System.currentTimeMillis())
-                sessionText.text = formatSessionStatus(st)
-                sessionText.visibility = View.VISIBLE
-            } else {
-                sessionText?.visibility = View.GONE
+            val pendingSession = pendingLimit?.session
+            if (sessionText != null) {
+                if (sessionCfg != null) {
+                    val st = SessionManager.statusOf(this, pkg, sessionCfg, System.currentTimeMillis())
+                    val baseSession = formatSessionStatus(st)
+                    if (pendingLimit != null && pendingSession == null) {
+                        sessionText.text = "$baseSession (⏳ → désactivée)"
+                        sessionText.visibility = View.VISIBLE
+                    } else if (pendingSession != null && (pendingSession.sessionDurationSec != sessionCfg.sessionDurationSec || pendingSession.cooldownSec != sessionCfg.cooldownSec || pendingSession.maxSessionsPerDay != sessionCfg.maxSessionsPerDay)) {
+                        sessionText.text = "$baseSession (⏳ → cooldown ${pendingSession.cooldownSec / 60}m)"
+                        sessionText.visibility = View.VISIBLE
+                    } else {
+                        sessionText.text = baseSession
+                        sessionText.visibility = View.VISIBLE
+                    }
+                } else if (pendingSession != null) {
+                    sessionText.text = "⏳ Session en attente : ${pendingSession.sessionDurationSec / 60}m/cooldown ${pendingSession.cooldownSec / 60}m"
+                    sessionText.visibility = View.VISIBLE
+                } else {
+                    sessionText.visibility = View.GONE
+                }
+            }
+
+            // Delay badge with transition
+            if (delayBadge != null) {
+                if (isDeletePending) {
+                    delayBadge.text = "⏳ Suppression en attente"
+                    delayBadge.setTextColor(Color.parseColor("#D32F2F"))
+                } else {
+                    val activeDelaySec = limit.protectionDelaySec
+                    val pendingDelaySec = pendingLimit?.protectionDelaySec
+                    if (activeDelaySec != null && activeDelaySec > 0) {
+                        val activeStr = formatShortDuration(activeDelaySec)
+                        if (pendingDelaySec != null && pendingDelaySec != activeDelaySec) {
+                            val pendingStr = formatShortDuration(pendingDelaySec)
+                            delayBadge.text = "🛡️ $activeStr (⏳ → $pendingStr)"
+                            delayBadge.setTextColor(Color.parseColor("#E65100"))
+                        } else {
+                            delayBadge.text = "🛡️ $activeStr"
+                            delayBadge.setTextColor(Color.parseColor("#2E7D32"))
+                        }
+                    } else {
+                        val globalDelay = DelayManager.getCurrentEffectiveDelaySeconds(this)
+                        val globalStr = if (globalDelay > 0) formatShortDuration(globalDelay) else "0s"
+                        if (pendingDelaySec != null && pendingDelaySec > 0) {
+                            val pendingStr = formatShortDuration(pendingDelaySec)
+                            delayBadge.text = "🛡️ Global (⏳ → $pendingStr)"
+                            delayBadge.setTextColor(Color.parseColor("#E65100"))
+                        } else {
+                            delayBadge.text = "🛡️ Global ($globalStr)"
+                            delayBadge.setTextColor(Color.parseColor("#757575"))
+                        }
+                    }
+                }
             }
         }
     }
@@ -1348,7 +2843,7 @@ class MainActivity : Activity() {
             tag = pkg
             gravity = Gravity.CENTER_VERTICAL
             isClickable = true
-            background = roundedBackground(Color.parseColor("#222222"))
+            background = roundedBackground(Color.WHITE)
             setOnClickListener { showEditAppDialog(pkg) }
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 bottomMargin = dp(8)
@@ -1377,7 +2872,7 @@ class MainActivity : Activity() {
         nameRow.addView(TextView(this).apply {
             text = getAppName(pkg)
             textSize = 14f
-            setTextColor(Color.WHITE)
+            setTextColor(Color.BLACK)
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
         })
@@ -1408,23 +2903,38 @@ class MainActivity : Activity() {
         infoCol.addView(TextView(this).apply {
             tag = "usage_$pkg"
             textSize = 12f
-            setTextColor(Color.parseColor("#AAAAAA"))
+            setTextColor(Color.BLACK)
         })
 
-        infoCol.addView(TextView(this).apply {
+        val bottomRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(2)
+            }
+        }
+
+        bottomRow.addView(TextView(this).apply {
             tag = "session_$pkg"
             textSize = 11f
-            setTextColor(Color.parseColor("#80CBC4"))
+            setTextColor(Color.BLACK)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             visibility = View.GONE
         })
+
+        bottomRow.addView(TextView(this).apply {
+            tag = "delay_$pkg"
+            textSize = 11f
+            setTextColor(Color.parseColor("#555555"))
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.END
+        })
+
+        infoCol.addView(bottomRow)
 
         row.addView(infoCol)
         return row
     }
-
-    // ──────────────────────────────────────
-    //  Nuclear Mode
-    // ──────────────────────────────────────
 
     private fun refreshNuclearStatus() {
         val state = LimitService.getNuclearState()
@@ -1434,6 +2944,7 @@ class MainActivity : Activity() {
 
             val remaining = state.endTimestamp - System.currentTimeMillis()
             val remainSec = (remaining / 1000).toInt().coerceAtLeast(0)
+            nuclearCircle.setSummaryText(formatTime(remainSec), Color.parseColor("#E53935"))
             nuclearCountdownText.text = "Time Remaining: ${formatTime(remainSec)}"
 
             val appNames = state.blockedPackages.joinToString("\n") { "  • ${getAppName(it)}" }
@@ -1479,6 +2990,7 @@ class MainActivity : Activity() {
             }
             nuclearStatusContainer.addView(controls)
         } else {
+            nuclearCircle.setSummaryText("Inactive")
             nuclearStatusContainer.visibility = View.GONE
             nuclearSetupContainer.visibility = View.VISIBLE
         }
@@ -1762,31 +3274,217 @@ class MainActivity : Activity() {
     // ──────────────────────────────────────
 
     private fun getAppName(pkg: String): String {
-        return try {
-            val ai = packageManager.getApplicationInfo(pkg, 0)
-            packageManager.getApplicationLabel(ai).toString()
-        } catch (e: PackageManager.NameNotFoundException) {
-            pkg.substringAfterLast('.')
+        return appNameCache.getOrPut(pkg) {
+            try {
+                val ai = packageManager.getApplicationInfo(pkg, 0)
+                packageManager.getApplicationLabel(ai).toString()
+            } catch (e: PackageManager.NameNotFoundException) {
+                val segments = pkg.split('.').filterNot { it in setOf("com", "fr", "ch", "org", "net", "io", "android", "app") }
+                segments.lastOrNull()?.replaceFirstChar { it.uppercase() } ?: pkg.substringAfterLast('.')
+            }
         }
     }
 
     private fun getAppIcon(pkg: String): Drawable {
-        return try {
-            packageManager.getApplicationIcon(pkg)
-        } catch (e: PackageManager.NameNotFoundException) {
-            getDrawable(android.R.drawable.sym_def_app_icon)!!
+        return appIconCache.getOrPut(pkg) {
+            try {
+                packageManager.getApplicationIcon(pkg)
+            } catch (e: PackageManager.NameNotFoundException) {
+                getDrawable(android.R.drawable.sym_def_app_icon)!!
+            }
         }
     }
 
     private fun formatTime(seconds: Int): String {
-        val h = seconds / 3600
+        val d = seconds / 86400
+        val h = (seconds % 86400) / 3600
         val m = (seconds % 3600) / 60
         val s = seconds % 60
         return when {
+            d > 0 -> "${d}j ${h}h${m.toString().padStart(2, '0')}m${s.toString().padStart(2, '0')}s"
             h > 0 -> "${h}h${m.toString().padStart(2, '0')}m${s.toString().padStart(2, '0')}s"
             m > 0 -> "${m}m${s.toString().padStart(2, '0')}s"
             else -> "${s}s"
         }
+    }
+
+    private fun formatShortDuration(seconds: Int): String {
+        if (seconds <= 0) return "0s"
+        val d = seconds / 86_400
+        val h = (seconds % 86_400) / 3600
+        val m = (seconds % 3600) / 60
+        val s = seconds % 60
+        return when {
+            d > 0 -> if (h > 0) "${d}d ${h}h" else "${d}d"
+            h > 0 -> if (m > 0) "${h}h ${m}m" else "${h}h"
+            m > 0 -> "${m}m"
+            else -> "${s}s"
+        }
+    }
+
+    /**
+     * Coarse, readable duration for protection timers, which run to weeks — [formatTime] would
+     * render 30 days as "720h00m00s".
+     */
+    private fun formatLongDuration(seconds: Int): String {
+        if (seconds <= 0) return "no delay"
+        val d = seconds / 86_400
+        val h = (seconds % 86_400) / 3600
+        val m = (seconds % 3600) / 60
+        val parts = mutableListOf<String>()
+        if (d > 0) parts.add("${d}d")
+        if (h > 0) parts.add("${h}h")
+        if (m > 0 && d == 0) parts.add("${m}min")
+        if (parts.isEmpty()) parts.add("${seconds}s")
+        return parts.joinToString(" ")
+    }
+
+    /** Label for a rule's own timer — null means "inherit the global delay". */
+    private fun protectionTimerLabel(seconds: Int?): String =
+        if (seconds == null) "global delay" else formatLongDuration(seconds)
+
+    /**
+     * Pick a rule's own protection timer. Presets rather than a NumberPicker: the useful range
+     * runs from an hour to a month, which no scroll wheel handles gracefully.
+     *
+     * Lowering the value is itself a relaxation, so it goes back through the delay gate at save
+     * time (ConfigManager.requiredDefer) — the dialog says so rather than silently deferring.
+     */
+    private fun showProtectionTimerDialog(current: Int?, onPicked: (Int?) -> Unit) {
+        val presets = listOf<Pair<String, Int?>>(
+            "Use global delay" to null,
+            "1 hour" to 3_600,
+            "6 hours" to 21_600,
+            "24 hours" to 86_400,
+            "3 days" to 259_200,
+            "7 days" to 604_800,
+            "30 days" to 2_592_000
+        )
+
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(8), dp(24), dp(8))
+        }
+        column.addView(TextView(this).apply {
+            text = "Currently: ${protectionTimerLabel(current)}.\n\n" +
+                "This timer replaces the global delay for this rule only. Raising it applies " +
+                "immediately; lowering or removing it has to wait out the current timer."
+            textSize = 13f
+            setTextColor(Color.parseColor("#AAAAAA"))
+            setPadding(0, 0, 0, dp(12))
+        })
+
+        // The choices live in a custom view, not in setItems(): AlertController gives the message
+        // and the setItems() list the same slot, so a builder with both renders the text and
+        // silently drops every choice — the dialog came up with nothing but "Cancel".
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setTitle("Protection timer")
+            .setView(ScrollView(this).apply { addView(column) })
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        fun addChoice(label: String, highlighted: Boolean, onClick: () -> Unit) {
+            column.addView(Button(this).apply {
+                text = label
+                textSize = 14f
+                setTextColor(Color.WHITE)
+                background = roundedBackground(
+                    if (highlighted) Color.parseColor("#BB86FC") else Color.parseColor("#333333")
+                )
+                setOnClickListener {
+                    dialog.dismiss()
+                    onClick()
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = dp(6) }
+            })
+        }
+
+        for ((label, value) in presets) {
+            addChoice(label, highlighted = value == current) { onPicked(value) }
+        }
+        addChoice("Custom (hours)…", highlighted = false) {
+            showCustomProtectionTimerDialog(current, onPicked)
+        }
+
+        styleDialogForDarkTheme(dialog)
+        dialog.show()
+    }
+
+    private fun showCustomProtectionTimerDialog(current: Int?, onPicked: (Int?) -> Unit) {
+        val picker = NumberPicker(this).apply {
+            minValue = 1
+            maxValue = 8_760          // one year
+            value = ((current ?: 3_600) / 3_600).coerceIn(1, 8_760)
+            wrapSelectorWheel = false
+        }
+        val wrap = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(16), dp(24), dp(16))
+            addView(TextView(this@MainActivity).apply {
+                text = "Hours"
+                setTextColor(Color.WHITE)
+            })
+            addView(picker)
+        }
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setTitle("Custom protection timer")
+            .setView(wrap)
+            .setPositiveButton("OK") { _, _ -> onPicked(picker.value * 3_600) }
+            .setNegativeButton("Back") { _, _ -> showProtectionTimerDialog(current, onPicked) }
+            .create()
+        styleDialogForDarkTheme(dialog)
+        dialog.show()
+    }
+
+    /**
+     * "Protection timer: X" plus a button that reassigns [holder] — used by the app-limit and
+     * curfew editors, which both keep the pending value in a local var until Save.
+     */
+    private fun buildProtectionTimerRow(
+        initial: Int?,
+        activeSeconds: Int? = null,
+        onChanged: (Int?) -> Unit
+    ): LinearLayout {
+        var current = initial
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(16), 0, dp(4))
+        }
+        val labelText = if (activeSeconds != null && activeSeconds != current) {
+            "Protection timer: ${protectionTimerLabel(current)} (Actuel : ${protectionTimerLabel(activeSeconds)})"
+        } else {
+            "Protection timer: ${protectionTimerLabel(current)}"
+        }
+        val label = TextView(this).apply {
+            text = labelText
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        row.addView(label)
+        row.addView(Button(this).apply {
+            text = "Change"
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            background = roundedBackground(Color.parseColor("#333333"))
+            setOnClickListener {
+                showProtectionTimerDialog(current) { picked ->
+                    current = picked
+                    val newText = if (activeSeconds != null && activeSeconds != picked) {
+                        "Protection timer: ${protectionTimerLabel(picked)} (Actuel : ${protectionTimerLabel(activeSeconds)})"
+                    } else {
+                        "Protection timer: ${protectionTimerLabel(picked)}"
+                    }
+                    label.text = newText
+                    onChanged(picked)
+                }
+            }
+        })
+        return row
     }
 
     private fun dp(value: Int): Int {
@@ -1849,9 +3547,14 @@ class MainActivity : Activity() {
             "Choose a delay duration (e.g. 30 minutes, 1 hour).",
             "Once set, ANY change you make (adding/removing apps, editing curfews, uninstalling) will require waiting for the full delay before it takes effect.",
             "This gives you time to reconsider — by the time the delay expires, the urge to change your settings will likely have passed.",
-            "Think of it like a cooling-off period for your digital willpower."
+            "Think of it like a cooling-off period for your digital willpower.",
+            "Any single rule can also carry its OWN timer, which overrides this global one — see " +
+                "the 'Protection timer' row when editing a limit, a curfew or an install group.",
+            "A rule's own timer also survives a settings unlock, so a heavily protected curfew " +
+                "cannot be defused through the unlock shortcut."
         ),
-        tip = "Start with a short delay (30min) and increase it as you get comfortable."
+        tip = "Start with a short delay (30min) and increase it as you get comfortable. Save a " +
+            "huge per-rule timer for the one or two rules you never want to negotiate with."
     )
 
     private val HELP_APP_LIMITS = HelpContent(
@@ -1884,6 +3587,20 @@ class MainActivity : Activity() {
         tip = "Great for social media at night — set a curfew from 10pm to 7am on weekdays."
     )
 
+    private val HELP_WHITELIST = HelpContent(
+        title = "App Whitelist (Zero-Trust)",
+        emoji = "🛡️",
+        summary = "Seules les applications inscrites sur cette Whitelist sont autorisées à tourner sur l'appareil. Toute application non approuvée est immédiatement verrouillée et masquée.",
+        steps = listOf(
+            "Chaque application tierce doit figurer dans la Whitelist pour être accessible.",
+            "Pour ajouter une nouvelle app, appuyez sur '+ Demander une app'.",
+            "L'application est placée en quarantaine pendant le délai configuré (ex. 12h ou 24h) avant d'être débloquée (sas anti-impulsion).",
+            "Pendant ce délai, l'application reste complètement inaccessible et masquée.",
+            "Retirer une application de la Whitelist est immédiat : elle est verrouillée sur-le-champ."
+        ),
+        tip = "Ce système Zero-Trust offre une protection totale contre les contournements par ADB ou Play Store : même si une application est installée, elle est instantanément neutralisée tant qu'elle n'est pas approuvée."
+    )
+
     private val HELP_NUCLEAR = HelpContent(
         title = "Nuclear Mode",
         emoji = "☢️",
@@ -1898,6 +3615,20 @@ class MainActivity : Activity() {
             "You CANNOT cancel it early. Just wait it out."
         ),
         tip = "Use this when you really need to focus: exams, deep work, or when you just need a digital detox."
+    )
+
+    private val HELP_PARTIAL_ACCESS = HelpContent(
+        title = "Partial Access",
+        emoji = "🎯",
+        summary = "Block specific pages or features inside apps without blocking the entire app.",
+        steps = listOf(
+            "Tap the + button to select an app you want to restrict.",
+            "The app will open with a red overlay 'Capture Mode'.",
+            "Navigate to the forbidden section (e.g. YouTube Shorts) and tap the red overlay.",
+            "It turns green. Now tap the button you want to be redirected to (e.g. Home tab).",
+            "The rule is saved. Whenever you open the forbidden page, you'll be redirected instantly."
+        ),
+        tip = "Perfect for blocking mindless scrolling feeds while keeping useful parts of the app."
     )
 
     private fun showFeatureHelpDialog(help: HelpContent) {
@@ -1974,6 +3705,38 @@ class MainActivity : Activity() {
             .create()
         styleDialogForDarkTheme(dialog)
         dialog.show()
+    }
+
+    private fun showDeviceOwnerInfoDialog() {
+        val isDO = DeviceOwnerHelper.isDeviceOwner(this)
+        val title = if (isDO) "Device Owner — Actif" else "Device Owner — Inactif"
+        val pkg = packageName
+        val message = if (isDO) buildString {
+            appendLine("L'app est Device Owner. Protections actives :")
+            appendLine()
+            appendLine("• setUninstallBlocked → désinstaller via Settings impossible")
+            appendLine("• setPackagesSuspended → blocage OS-level (vs HOME spam A11Y)")
+            appendLine("• ENABLED_ACCESSIBILITY_SERVICES forcé toutes les 30s")
+            appendLine("• Installation depuis sources inconnues bloquée")
+            appendLine()
+            appendLine("Pour désactiver (urgence) :")
+            appendLine("adb shell am broadcast \\")
+            appendLine("  -a $pkg.REMOVE_OWNER")
+        } else buildString {
+            appendLine("L'app n'est PAS Device Owner. Mode actuel : AccessibilityService.")
+            appendLine()
+            appendLine("Pour activer la protection maximale, exécute (Magisk root requis) :")
+            appendLine()
+            appendLine("adb shell \"su -c 'dpm set-device-owner \\")
+            appendLine("  $pkg/.AdminReceiver'\"")
+            appendLine()
+            appendLine("Prérequis : aucun compte Google / Samsung sur l'appareil.")
+        }
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton("OK", null)
+            .show()
     }
 
     private fun showFullWalkthroughDialog() {
@@ -2057,7 +3820,7 @@ class MainActivity : Activity() {
         container.addView(buildPage(allHelp[0]))
 
         val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
-            .setTitle("How SelfControl Works")
+            .setTitle("How Custos Works")
             .setView(container)
             .setPositiveButton("Next") { _, _ -> }
             .setNegativeButton("Close", null)
@@ -2096,6 +3859,9 @@ class MainActivity : Activity() {
     private fun roundedBackground(color: Int): GradientDrawable {
         return GradientDrawable().apply {
             setColor(color)
+            if (color == Color.WHITE) {
+                setStroke((2f * resources.displayMetrics.density).toInt(), Color.BLACK)
+            }
             cornerRadius = 12f * resources.displayMetrics.density
         }
     }
@@ -2205,9 +3971,20 @@ class MainActivity : Activity() {
 
     private data class AppInfo(
         val packageName: String,
-        val label: String,
-        val icon: Drawable
+        val label: String
     )
+
+    /**
+     * Lazily-loaded, cached app icons. Decoding every installed app's icon up front on the
+     * UI thread was the main cause of the slow app picker (much worse on Samsung, which ships
+     * far more preinstalled apps than a Pixel). Icons are now resolved only for the rows the
+     * ListView actually renders, and cached so scrolling stays smooth.
+     */
+    private val iconCache = HashMap<String, Drawable>()
+    private fun appIcon(pkg: String): Drawable = iconCache.getOrPut(pkg) {
+        try { packageManager.getApplicationIcon(pkg) }
+        catch (_: Exception) { getDrawable(android.R.drawable.sym_def_app_icon)!! }
+    }
 
     private fun getInstalledLaunchableApps(): List<AppInfo> {
         val pm = packageManager
@@ -2221,9 +3998,7 @@ class MainActivity : Activity() {
             .map { app ->
                 AppInfo(
                     packageName = app.packageName,
-                    label = pm.getApplicationLabel(app).toString(),
-                    icon = try { pm.getApplicationIcon(app) }
-                           catch (_: Exception) { getDrawable(android.R.drawable.sym_def_app_icon)!! }
+                    label = pm.getApplicationLabel(app).toString()
                 )
             }
             .sortedBy { it.label.lowercase() }
@@ -2271,7 +4046,7 @@ class MainActivity : Activity() {
                     layoutParams = LinearLayout.LayoutParams(sz, sz).apply {
                         marginEnd = dp(12)
                     }
-                    setImageDrawable(app.icon)
+                    setImageDrawable(appIcon(app.packageName))
                 }
 
                 val label = TextView(this@MainActivity).apply {
@@ -2351,7 +4126,7 @@ class MainActivity : Activity() {
                     layoutParams = LinearLayout.LayoutParams(sz, sz).apply {
                         marginEnd = dp(12)
                     }
-                    setImageDrawable(app.icon)
+                    setImageDrawable(appIcon(app.packageName))
                 }
 
                 val label = TextView(this@MainActivity).apply {
@@ -2387,5 +4162,301 @@ class MainActivity : Activity() {
         }
         listView.adapter = adapter
         return listView
+    }
+
+    // ==========================================
+    //  PARTIAL ACCESS (SCREEN RULES)
+    // ==========================================
+    private fun refreshPartialAccessUI() {
+        if (!::partialAccessContainer.isInitialized) return
+        partialAccessContainer.removeAllViews()
+        val rules = ScreenRuleManager.load(this)
+        if (rules.isEmpty()) {
+            partialAccessCircle.setSummaryText("0 rules")
+            partialAccessContainer.addView(TextView(this).apply {
+                text = "No partial access rules configured."
+                setTextColor(Color.GRAY)
+                setPadding(dp(8), dp(8), dp(8), dp(8))
+            })
+            return
+        } else if (rules.size == 1) {
+            partialAccessCircle.setSummaryText(rules[0].name)
+        } else {
+            partialAccessCircle.setSummaryText("${rules.size} rules")
+        }
+
+        for (rule in rules) {
+            val label = try {
+                packageManager.getApplicationLabel(packageManager.getApplicationInfo(rule.packageName, 0)).toString()
+            } catch (_: Exception) {
+                rule.packageName
+            }
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = roundedBackground(Color.parseColor("#F5F5F5"))
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(6) }
+
+                addView(TextView(this@MainActivity).apply {
+                    text = rule.name
+                    textSize = 15f
+                    setTextColor(Color.BLACK)
+                    typeface = Typeface.DEFAULT_BOLD
+                })
+                addView(TextView(this@MainActivity).apply {
+                    val health = "✓ ${rule.successes}   ✗ ${rule.failures}"
+                    text = "$label · ${rule.blockedIds.size} marker(s) · $health"
+                    textSize = 12f
+                    setTextColor(Color.parseColor("#666666"))
+                })
+
+                val pendingMs = ScreenRuleManager.pendingRemovalRemainingMs(this@MainActivity, rule.name)
+                addView(TextView(this@MainActivity).apply {
+                    text = if (ScreenRuleManager.PERMANENT_ON_THIS_FLAVOR) {
+                        "🔒 Permanent sur ce build (retrait ADB uniquement)"
+                    } else {
+                        "🛡️ Protection timer: ${protectionTimerLabel(rule.protectionDelaySec)}"
+                    }
+                    textSize = 12f
+                    setTextColor(if (ScreenRuleManager.PERMANENT_ON_THIS_FLAVOR) Color.parseColor("#7B1FA2") else Color.parseColor("#666666"))
+                    setPadding(0, dp(4), 0, 0)
+                })
+
+                if (!rule.blockedHours.isNullOrBlank()) {
+                    addView(TextView(this@MainActivity).apply {
+                        text = "⏰ Horaires actifs: ${rule.blockedHours}"
+                        textSize = 12f
+                        setTextColor(Color.parseColor("#666666"))
+                        setPadding(0, dp(2), 0, 0)
+                    })
+                }
+
+                when {
+                    ScreenRuleManager.PERMANENT_ON_THIS_FLAVOR -> {
+                        // Permanent on this build: no removal button via UI
+                    }
+                    pendingMs != null -> {
+                        addView(TextView(this@MainActivity).apply {
+                            text = "Retrait dans ${formatLongDuration((pendingMs / 1000).toInt())}"
+                            textSize = 12f
+                            setTextColor(Color.RED)
+                            setPadding(0, dp(6), 0, dp(4))
+                        })
+                        addView(Button(this@MainActivity).apply {
+                            text = "Cancel removal"
+                            setTextColor(Color.WHITE)
+                            background = roundedBackground(Color.BLACK)
+                            setOnClickListener {
+                                ScreenRuleManager.cancelRemoval(this@MainActivity, rule.name)
+                                refreshPartialAccessUI()
+                            }
+                        })
+                    }
+                    else -> {
+                        val actionsRow = LinearLayout(this@MainActivity).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            setPadding(0, dp(8), 0, 0)
+                        }
+                        actionsRow.addView(Button(this@MainActivity).apply {
+                            text = "Timer"
+                            textSize = 12f
+                            setTextColor(Color.WHITE)
+                            background = roundedBackground(Color.parseColor("#333333"))
+                            setOnClickListener {
+                                showProtectionTimerDialog(rule.protectionDelaySec) { picked ->
+                                    ScreenRuleManager.updateProtectionDelay(this@MainActivity, rule.name, picked)
+                                    refreshPartialAccessUI()
+                                }
+                            }
+                            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                                marginEnd = dp(8)
+                            }
+                        })
+                        actionsRow.addView(Button(this@MainActivity).apply {
+                            text = "Remove"
+                            textSize = 12f
+                            setTextColor(Color.WHITE)
+                            background = roundedBackground(Color.BLACK)
+                            setOnClickListener { onRemoveScreenRule(rule) }
+                            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                        })
+                        addView(actionsRow)
+                    }
+                }
+            }
+            partialAccessContainer.addView(card)
+        }
+    }
+
+    private fun onRemoveScreenRule(rule: ScreenRuleManager.ScreenRule) {
+        when (val outcome = ScreenRuleManager.requestRemoval(this, rule.name)) {
+            is ScreenRuleManager.RemovalOutcome.Permanent -> {
+                AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+                    .setTitle("Permanent rule")
+                    .setMessage(
+                        "On this build a partial-access rule can no longer be removed from the " +
+                            "phone once created — only via adb from a PC. That is deliberate."
+                    )
+                    .setPositiveButton("Got it", null)
+                    .show()
+            }
+            is ScreenRuleManager.RemovalOutcome.Immediate ->
+                Toast.makeText(this, "Rule removed.", Toast.LENGTH_SHORT).show()
+            is ScreenRuleManager.RemovalOutcome.Deferred -> {
+                val scope = if (outcome.fromRuleTimer) "rule delay" else "general delay"
+                Toast.makeText(
+                    this,
+                    "Removal scheduled in ${formatLongDuration(outcome.seconds)} ($scope).",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            is ScreenRuleManager.RemovalOutcome.AlreadyPending ->
+                Toast.makeText(
+                    this,
+                    "Removal already pending (${formatLongDuration((outcome.remainingMs / 1000).toInt())}).",
+                    Toast.LENGTH_LONG
+                ).show()
+            is ScreenRuleManager.RemovalOutcome.NotFound ->
+                Toast.makeText(this, "Rule not found.", Toast.LENGTH_SHORT).show()
+        }
+        refreshPartialAccessUI()
+    }
+
+    private fun startScreenRuleLearning() {
+        if (AppWatcherService.serviceInstance == null) {
+            Toast.makeText(
+                this,
+                "First enable Custos's accessibility service in Settings.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        val apps = getInstalledLaunchableApps()
+        val selected = mutableSetOf<String>()
+        val listView = buildAppCheckListView(apps, selected)
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setTitle("Which app?")
+            .setView(listView)
+            .setPositiveButton("Next") { _, _ ->
+                val pkg = selected.firstOrNull()
+                if (pkg == null) {
+                    Toast.makeText(this, "Pick an app.", Toast.LENGTH_SHORT).show()
+                } else {
+                    askScreenRuleDetails(pkg, apps.firstOrNull { it.packageName == pkg }?.label ?: pkg)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+        styleDialogForDarkTheme(dialog)
+        dialog.show()
+    }
+
+    private fun askScreenRuleDetails(pkg: String, label: String) {
+        val existingRules = ScreenRuleManager.load(this)
+        val existingForPkg = existingRules.filter { it.packageName == pkg }
+
+        // Find next unused rule index for this app
+        var ruleIndex = existingForPkg.size + 1
+        var defaultName = "$label — part $ruleIndex"
+        while (existingRules.any { it.name.equals(defaultName, ignoreCase = true) }) {
+            ruleIndex++
+            defaultName = "$label — part $ruleIndex"
+        }
+
+        val nameInput = EditText(this).apply {
+            setText(defaultName)
+            hint = "e.g. $label — Stories, $label — Actus..."
+            setTextColor(Color.BLACK)
+            selectAll()
+        }
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), 0)
+            addView(TextView(this@MainActivity).apply {
+                text = "Rule name"
+                setTextColor(Color.parseColor("#666666"))
+                textSize = 12f
+            })
+            addView(nameInput)
+            addView(TextView(this@MainActivity).apply {
+                text = if (existingForPkg.isNotEmpty()) {
+                    "💡 You already have ${existingForPkg.size} rule(s) for $label. You can create multiple rules per app (e.g. to block different tabs or screens)."
+                } else {
+                    "💡 You can create multiple rules per app (e.g. to block different tabs or screens). Give each rule a distinct name."
+                }
+                setTextColor(Color.parseColor("#888888"))
+                textSize = 11f
+                setPadding(0, dp(4), 0, dp(6))
+            })
+        }
+
+        var pickedTimer: Int? = if (ScreenRuleManager.PERMANENT_ON_THIS_FLAVOR) null else 360 * 60
+
+        if (!ScreenRuleManager.PERMANENT_ON_THIS_FLAVOR) {
+            val timerRow = buildProtectionTimerRow(pickedTimer) { picked ->
+                pickedTimer = picked
+            }
+            layout.addView(timerRow)
+        } else {
+            layout.addView(TextView(this).apply {
+                text = "🔒 Permanent sur le flavor me — le retrait se fait uniquement par commande adb."
+                setTextColor(Color.parseColor("#D32F2F"))
+                textSize = 12f
+                setPadding(0, dp(12), 0, dp(4))
+            })
+        }
+
+        fun launchCapture(finalName: String, delaySec: Int) {
+            val svc = AppWatcherService.serviceInstance
+            if (svc == null) {
+                Toast.makeText(this@MainActivity, "Accessibility service unavailable.", Toast.LENGTH_LONG).show()
+                return
+            }
+            ScreenLearnSession.start(svc, pkg, finalName, delaySec)
+            packageManager.getLaunchIntentForPackage(pkg)?.let { startActivity(it) }
+        }
+
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setTitle("New rule")
+            .setView(layout)
+            .setPositiveButton("Start capture") { _, _ ->
+                val chosenName = nameInput.text.toString().trim().ifBlank { defaultName }
+                val delaySec = if (ScreenRuleManager.PERMANENT_ON_THIS_FLAVOR) 0
+                    else (pickedTimer ?: 0)
+
+                val collision = existingRules.firstOrNull { it.name.equals(chosenName, ignoreCase = true) }
+                if (collision != null) {
+                    var suffix = 2
+                    var autoUnique = "$chosenName ($suffix)"
+                    while (existingRules.any { it.name.equals(autoUnique, ignoreCase = true) }) {
+                        suffix++
+                        autoUnique = "$chosenName ($suffix)"
+                    }
+                    val conflictBuilder = AlertDialog.Builder(this@MainActivity, android.R.style.Theme_DeviceDefault_Dialog)
+                        .setTitle("Rule already exists")
+                        .setMessage("A rule named '$chosenName' already exists. Do you want to keep both rules?")
+                        .setPositiveButton("Keep both ($autoUnique)") { _, _ ->
+                            launchCapture(autoUnique, delaySec)
+                        }
+                        .setNeutralButton("Cancel", null)
+
+                    if (!ScreenRuleManager.PERMANENT_ON_THIS_FLAVOR) {
+                        conflictBuilder.setNegativeButton("Replace existing") { _, _ ->
+                            launchCapture(chosenName, delaySec)
+                        }
+                    }
+                    val conflictDialog = conflictBuilder.create()
+                    styleDialogForDarkTheme(conflictDialog)
+                    conflictDialog.show()
+                } else {
+                    launchCapture(chosenName, delaySec)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+        styleDialogForDarkTheme(dialog)
+        dialog.show()
     }
 }

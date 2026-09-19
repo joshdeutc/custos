@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.app.admin.DevicePolicyManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -103,12 +104,17 @@ class LimitService : Service() {
 
     private var lastSystemQueryTime = 0L
     private var lastEnforceTime = 0L
+    private var lastA11YReEnableTime = 0L
     private val SYSTEM_SYNC_INTERVAL_MS = 3_000L
+    private val A11Y_REENABLE_INTERVAL_MS = 30_000L
 
     @Volatile
     private var startupComplete = false
 
     private var configLastModified = 0L
+
+    /** Kept so onDestroy can unregister it — see [registerPackageAddedReceiver]. */
+    private var packageAddedReceiver: android.content.BroadcastReceiver? = null
 
     @Volatile
     private var nuclearDndApplied: Boolean = false
@@ -119,7 +125,9 @@ class LimitService : Service() {
             // Regularly check if pending delay actions should be applied
             DelayManager.applyPendingConfigsIfReady(this@LimitService)
             DelayManager.applyPendingDelayIfReady(this@LimitService)
+            WhitelistManager.checkAndPromotePendingRequests(this@LimitService)
             checkConfigReload()
+            checkA11YReEnable()
 
             enforceLimit()
             checkLimitsAndDelayHandler.postDelayed(this, ENFORCE_INTERVAL_MS)
@@ -130,6 +138,12 @@ class LimitService : Service() {
         super.onCreate()
         Log.i(TAG, "🚀 LimitService onCreate")
         instance = this
+
+        // Re-apply Device Owner policies on every service start. Idempotent + heals any drift.
+        if (DeviceOwnerHelper.isDeviceOwner(this)) {
+            DeviceOwnerHelper.applyInitialPolicies(this)
+            Log.i(TAG, "🔐 Device Owner policies applied")
+        }
 
         // Restore persisted state BEFORE clearing OS suspensions. If we have valid state
         // from the same logical day, we want to keep apps suspended (re-applied below).
@@ -151,18 +165,9 @@ class LimitService : Service() {
             logicalDayStartMs = currentDayStart
         }
 
-        createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("Starting..."))
-        isRunning = true
-        WatchdogReceiver.schedule(this)
-        DailyResetReceiver.schedule(this)
-        currentlyMutedBySelfControl.clear()
-        currentlyMutedBySelfControl.addAll(BlockedNotificationManager.getCurrentlyMutedBySelfControl(this))
-        // Restore muted packages into the NotificationListener in-memory set
-        SelfControlNotificationListener.mutedPackages.addAll(currentlyMutedBySelfControl)
-
-        loadNuclearState()
-
+        // Config must be loaded BEFORE the suspension sweep below: install-blocked packages
+        // have to be named in `keep`, or the sweep would un-suspend the ones we hold via the
+        // suspension fallback (hideApp refused) and leave them usable until the next tick.
         config = ConfigManager.loadConfig(this)
         configLastModified = ConfigManager.getConfigLastModified(this)
         limitsByPackage.clear()
@@ -180,6 +185,35 @@ class LimitService : Service() {
         if (periodBlockRules.isNotEmpty()) {
             Log.i(TAG, "🌙 Period blocks: ${periodBlockRules.size} rule(s)")
         }
+
+        if (DeviceOwnerHelper.isDeviceOwner(this)) {
+            // Sweep stale OS-level suspensions, EXCEPT for apps the persisted state says
+            // must remain blocked. Re-apply suspendApp for those to heal any OS drift
+            // (e.g. if a manual unsuspend happened while the service was dead).
+            val keep = suspendedApps + InstallBlockManager.blockedInstalledPackages(this, config)
+            DeviceOwnerHelper.clearAllStuckSuspensions(this, keep = keep)
+            for (pkg in suspendedApps) {
+                DeviceOwnerHelper.suspendApp(this, pkg)
+            }
+        }
+
+        // Catch up on anything installed while the service was dead, and release groups whose
+        // protection timer expired and were removed from the config in the meantime.
+        InstallBlockManager.enforce(this, config)
+        WhitelistManager.enforce(this)
+        registerPackageAddedReceiver()
+
+        createNotificationChannel()
+        startForeground(NOTIFICATION_ID, buildNotification("Starting..."))
+        isRunning = true
+        WatchdogReceiver.schedule(this)
+        DailyResetReceiver.schedule(this)
+        currentlyMutedBySelfControl.clear()
+        currentlyMutedBySelfControl.addAll(BlockedNotificationManager.getCurrentlyMutedBySelfControl(this))
+        // Restore muted packages into the NotificationListener in-memory set
+        SelfControlNotificationListener.mutedPackages.addAll(currentlyMutedBySelfControl)
+
+        loadNuclearState()
 
         updateNotification("Active — ${config.limits.size} app(s) monitored")
 
@@ -272,6 +306,7 @@ class LimitService : Service() {
             suspendedApps.clear()
             AppWatcherService.blockedApps.clear()
             for (pkg in appsToUnsuspend) {
+                DeviceOwnerHelper.unsuspendApp(this, pkg)
                 ensureNotificationUnmuted(pkg)
             }
 
@@ -316,6 +351,9 @@ class LimitService : Service() {
         // Enforce curfew notification muting for ALL packages in period block rules
         enforceCurfewNotificationMuting()
 
+        // Time-boxed install window enforcement
+        InstallWindowManager.enforce(this)
+
         // Check if any suspended apps should be unblocked (curfew ended, allowed hours started, etc.)
         checkAndUnblockApps()
 
@@ -325,6 +363,11 @@ class LimitService : Service() {
                 blockApp(currentApp, "curfew")
                 return
             }
+        }
+
+        if (currentApp in InstallWindowManager.INSTALLER_PACKAGES && InstallWindowManager.isOpen(this)) {
+            // Installer app (e.g. Play Store) is permitted while the install window is open
+            return
         }
 
         val limit = limitsByPackage[currentApp] ?: return
@@ -469,6 +512,9 @@ class LimitService : Service() {
     }
 
     private fun shouldStayBlockedForNonCurfewReasons(packageName: String): Boolean {
+        if (packageName in InstallWindowManager.INSTALLER_PACKAGES && InstallWindowManager.isOpen(this)) {
+            return false
+        }
         val nuclear = nuclearState
         if (nuclear != null && nuclear.active && !NuclearManager.isExpired(nuclear) &&
             packageName in nuclear.blockedPackages
@@ -562,6 +608,7 @@ class LimitService : Service() {
             // No reason to keep blocking
             suspendedApps.remove(pkg)
             AppWatcherService.blockedApps.remove(pkg)
+            DeviceOwnerHelper.unsuspendApp(this, pkg)
             ensureNotificationUnmuted(pkg)
             Log.i(TAG, "🔓 Unblocked $pkg (no longer restricted)")
             EventLog.log(this, "UNBLOCK", "$pkg (no longer restricted)")
@@ -576,6 +623,9 @@ class LimitService : Service() {
         }
         suspendedApps.add(packageName)
         AppWatcherService.blockedApps.add(packageName)
+        // OS-level suspension via Device Owner — clean, instant, no UI flash.
+        // No-op when not DO; A11Y HOME spam acts as fallback.
+        DeviceOwnerHelper.suspendApp(this, packageName)
         if (!alreadyTracked) {
             updateNotification("🚫 $packageName blocked")
             handleBlockedNotificationPolicyOnBlock(packageName, reason)
@@ -719,6 +769,20 @@ class LimitService : Service() {
         }
     }
 
+    /**
+     * Periodically (every 30s) re-write the secure setting that lists enabled accessibility
+     * services so AppWatcherService stays bound even if the user toggles it off in Settings.
+     * No-op when the app is not Device Owner.
+     */
+    private fun checkA11YReEnable() {
+        val now = System.currentTimeMillis()
+        if (now - lastA11YReEnableTime < A11Y_REENABLE_INTERVAL_MS) return
+        lastA11YReEnableTime = now
+        if (DeviceOwnerHelper.isDeviceOwner(this)) {
+            DeviceOwnerHelper.enforceA11YReEnable(this)
+        }
+    }
+
     private fun checkConfigReload() {
         try {
             val newModified = ConfigManager.getConfigLastModified(this)
@@ -737,6 +801,7 @@ class LimitService : Service() {
                 if (pkg in suspendedApps) {
                     suspendedApps.remove(pkg)
                     AppWatcherService.blockedApps.remove(pkg)
+                    DeviceOwnerHelper.unsuspendApp(this, pkg)
                     ensureNotificationUnmuted(pkg)
                     Log.i(TAG, "🔓 Config reload — $pkg removed, unblocked")
                 }
@@ -750,6 +815,11 @@ class LimitService : Service() {
             periodBlockRules.clear()
             periodBlockRules.addAll(newConfig.periodBlocks)
             if (changed) persistState()
+
+            // Picks up newly added groups AND releases packages whose group's protection timer
+            // ran out — this is the path a queued removal takes once DelayManager applies it.
+            InstallBlockManager.enforce(this, newConfig)
+            WhitelistManager.enforce(this)
 
             updateNotification("Config reloaded — ${newPackages.size} app(s)")
             Log.i(TAG, "🔄 Config reloaded")
@@ -778,10 +848,42 @@ class LimitService : Service() {
         updateNotification("Nuclear cancel request removed")
     }
 
+    /**
+     * Runtime-registered so it is exempt from the Android 8+ restrictions on manifest-declared
+     * implicit broadcasts — `ACTION_PACKAGE_ADDED` would otherwise never reach us. The service is
+     * a permanent foreground service, so its lifetime is the right scope for this.
+     */
+    private fun registerPackageAddedReceiver() {
+        if (packageAddedReceiver != null) return
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(ctx: Context, intent: Intent) {
+                val pkg = intent.data?.schemeSpecificPart ?: return
+                InstallBlockManager.onPackageAdded(ctx, pkg)
+                WhitelistManager.onPackageAdded(ctx, pkg)
+            }
+        }
+        val filter = android.content.IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_ADDED)
+            addAction(Intent.ACTION_PACKAGE_REPLACED)
+            addDataScheme("package")
+        }
+        try {
+            registerReceiver(receiver, filter)
+            packageAddedReceiver = receiver
+            Log.i(TAG, "📦 PACKAGE_ADDED receiver registered (install blocklist)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register PACKAGE_ADDED receiver: ${e.message}")
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
         checkLimitsAndDelayHandler.removeCallbacks(enforceRunnable)
+        packageAddedReceiver?.let {
+            runCatching { unregisterReceiver(it) }
+            packageAddedReceiver = null
+        }
         Log.i(TAG, "💀 LimitService destroyed")
     }
 
@@ -801,7 +903,7 @@ class LimitService : Service() {
 
         val choiceChannel = NotificationChannel(
             CHOICE_CHANNEL_ID,
-            "SelfControl choices",
+            "Custos choices",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
             description = "Action prompts when an app becomes blocked"
@@ -812,7 +914,7 @@ class LimitService : Service() {
 
     private fun buildNotification(text: String): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("SelfControl")
+            .setContentTitle("Custos")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
             .setOngoing(true)
