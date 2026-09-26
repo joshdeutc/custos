@@ -20,8 +20,8 @@ android {
         applicationId "com.jo.selfcontrol.ultimate"
         minSdk 26
         targetSdk 34
-        versionCode 4
-        versionName "1.3"
+        versionCode 5
+        versionName "1.4"
         // Persistent on-device event log (records foreground-app history) — OFF by default
         // for privacy. The blocking engine never needs it; it exists only for local debugging.
         buildConfigField "boolean", "EVENT_LOG_ENABLED", "false"
