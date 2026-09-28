@@ -71,6 +71,7 @@ class MainActivity : Activity() {
     private var lastRenderedDelayHours = -1
     private var lastRenderedUseGlobal = false
     private var lastRenderedPendingDelayAt = 0L
+    private var lastRenderedPendingDisableAt = 0L
     private var lastPendingUpdateSecond = 0L
 
     private val appNameCache = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -1849,9 +1850,14 @@ class MainActivity : Activity() {
         val state = WhitelistManager.loadState(this)
         val allowedCount = state.allowedPackages.size
         val pendingCount = state.pendingRequests.size
+        val now = System.currentTimeMillis()
+        val isPendingDisable = state.enabled && state.pendingDisableExecuteAt > now
 
         if (!state.enabled) {
             installBlocklistCircle.setSummaryText("Désactivée · Accès libre")
+        } else if (isPendingDisable) {
+            val remainSec = ((state.pendingDisableExecuteAt - now) / 1000).toInt().coerceAtLeast(0)
+            installBlocklistCircle.setSummaryText("Désactivation dans ${formatTime(remainSec)}")
         } else if (pendingCount > 0) {
             installBlocklistCircle.setSummaryText("$allowedCount autorisées · $pendingCount en attente")
         } else {
@@ -1877,13 +1883,16 @@ class MainActivity : Activity() {
             .toSet()
 
         val currentSecond = System.currentTimeMillis() / 1000
-        val needTimeRefresh = pendingCount > 0 && (currentSecond - lastPendingUpdateSecond >= 30)
+        val isPendingDelay = state.pendingDelayExecuteAt > now
+        val needTimeRefresh = (pendingCount > 0 && (currentSecond - lastPendingUpdateSecond >= 30)) ||
+            ((isPendingDisable || isPendingDelay) && (currentSecond - lastPendingUpdateSecond >= 1))
         val stateChanged = state.enabled != lastRenderedEnabled ||
             displayAllowed != lastRenderedAllowed ||
             state.pendingRequests != lastRenderedPending ||
             state.quarantineDelayHours != lastRenderedDelayHours ||
             state.useGlobalDelay != lastRenderedUseGlobal ||
-            state.pendingDelayExecuteAt != lastRenderedPendingDelayAt
+            state.pendingDelayExecuteAt != lastRenderedPendingDelayAt ||
+            state.pendingDisableExecuteAt != lastRenderedPendingDisableAt
 
         if (!force && !stateChanged && !needTimeRefresh) {
             return
@@ -1895,17 +1904,23 @@ class MainActivity : Activity() {
         lastRenderedDelayHours = state.quarantineDelayHours
         lastRenderedUseGlobal = state.useGlobalDelay
         lastRenderedPendingDelayAt = state.pendingDelayExecuteAt
+        lastRenderedPendingDisableAt = state.pendingDisableExecuteAt
         lastPendingUpdateSecond = currentSecond
 
         installBlocksContainer.removeAllViews()
-        val now = System.currentTimeMillis()
 
-        // Toggle Whitelist (Active / Inactive)
+        // Toggle Whitelist (Active / Inactive / Pending Deactivation)
+        val cardBg = when {
+            isPendingDisable -> Color.parseColor("#332314")
+            state.enabled -> Color.parseColor("#152C22")
+            else -> Color.parseColor("#2C1D1D")
+        }
+
         val toggleCard = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = roundedBackground(if (state.enabled) Color.parseColor("#152C22") else Color.parseColor("#2C1D1D"))
+            background = roundedBackground(cardBg)
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -1916,17 +1931,29 @@ class MainActivity : Activity() {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
 
                 addView(TextView(this@MainActivity).apply {
-                    text = if (state.enabled) "🛡️ Whitelist ACTIVE (Zero-Trust)" else "🔓 Whitelist INACTIVE"
-                    setTextColor(if (state.enabled) Color.parseColor("#4CAF50") else Color.parseColor("#E57373"))
+                    text = when {
+                        isPendingDisable -> "⏳ Whitelist (Désactivation programmée)"
+                        state.enabled -> "🛡️ Whitelist ACTIVE (Zero-Trust)"
+                        else -> "🔓 Whitelist INACTIVE"
+                    }
+                    setTextColor(when {
+                        isPendingDisable -> Color.parseColor("#FFCA28")
+                        state.enabled -> Color.parseColor("#4CAF50")
+                        else -> Color.parseColor("#E57373")
+                    })
                     textSize = 14f
                     typeface = Typeface.DEFAULT_BOLD
                 })
                 addView(TextView(this@MainActivity).apply {
-                    text = if (state.enabled)
-                        "Seules les applications autorisées peuvent s'ouvrir."
-                    else
-                        "Toutes les applications sont accessibles librement (mode permissif)."
-                    setTextColor(Color.parseColor("#90A4AE"))
+                    text = when {
+                        isPendingDisable -> {
+                            val remainSec = ((state.pendingDisableExecuteAt - now) / 1000).toInt().coerceAtLeast(0)
+                            "Désactivation dans ${formatTime(remainSec)}. Protection active jusqu'au terme."
+                        }
+                        state.enabled -> "Seules les applications autorisées peuvent s'ouvrir."
+                        else -> "Toutes les applications sont accessibles librement (mode permissif)."
+                    }
+                    setTextColor(if (isPendingDisable) Color.parseColor("#FFE082") else Color.parseColor("#90A4AE"))
                     textSize = 12f
                     setPadding(0, dp(2), dp(8), 0)
                 })
@@ -1935,25 +1962,62 @@ class MainActivity : Activity() {
 
             if (!BuildConfig.WHITELIST_ADB_ONLY) {
                 val toggleBtn = Button(this@MainActivity).apply {
-                    text = if (state.enabled) "Désactiver" else "Activer"
+                    text = when {
+                        isPendingDisable -> "Annuler"
+                        state.enabled -> "Désactiver"
+                        else -> "Activer"
+                    }
                     textSize = 12f
                     setTextColor(Color.WHITE)
-                    background = roundedBackground(if (state.enabled) Color.parseColor("#C62828") else Color.parseColor("#2E7D32"))
+                    background = roundedBackground(when {
+                        isPendingDisable -> Color.parseColor("#5D4037")
+                        state.enabled -> Color.parseColor("#C62828")
+                        else -> Color.parseColor("#2E7D32")
+                    })
                     setPadding(dp(12), dp(6), dp(12), dp(6))
                     setOnClickListener {
-                        if (state.enabled) {
-                            AlertDialog.Builder(this@MainActivity, android.R.style.Theme_DeviceDefault_Dialog)
-                                .setTitle("Désactiver la Whitelist ?")
-                                .setMessage("Toutes les applications seront accessibles librement et démasquées sur l'appareil.")
-                                .setPositiveButton("Désactiver") { _, _ ->
-                                    WhitelistManager.setWhitelistEnabled(this@MainActivity, false)
-                                    refreshInstallBlocksUI(force = true)
-                                }
-                                .setNegativeButton("Annuler", null)
-                                .show()
+                        if (isPendingDisable) {
+                            WhitelistManager.cancelPendingDisable(this@MainActivity)
+                            Toast.makeText(this@MainActivity, "Désactivation annulée : la Whitelist reste active", Toast.LENGTH_SHORT).show()
+                            refreshInstallBlocksUI(force = true)
+                            refreshDelayUI()
+                        } else if (state.enabled) {
+                            val delaySec = WhitelistManager.getEffectiveQuarantineDelaySeconds(this@MainActivity)
+                            if (DelayManager.isSettingsUnlocked(this@MainActivity) || delaySec <= 0L) {
+                                AlertDialog.Builder(this@MainActivity, android.R.style.Theme_DeviceDefault_Dialog)
+                                    .setTitle("Désactiver la Whitelist ?")
+                                    .setMessage("Toutes les applications seront accessibles librement et démasquées sur l'appareil.")
+                                    .setPositiveButton("Désactiver immédiatement") { _, _ ->
+                                        WhitelistManager.setWhitelistEnabled(this@MainActivity, false)
+                                        Toast.makeText(this@MainActivity, "Whitelist désactivée", Toast.LENGTH_SHORT).show()
+                                        refreshInstallBlocksUI(force = true)
+                                        refreshDelayUI()
+                                    }
+                                    .setNegativeButton("Annuler", null)
+                                    .show()
+                            } else {
+                                val delayText = DelayManager.formatDuration(delaySec)
+                                AlertDialog.Builder(this@MainActivity, android.R.style.Theme_DeviceDefault_Dialog)
+                                    .setTitle("Demander la désactivation ?")
+                                    .setMessage(
+                                        "La désactivation est protégée par votre délai anti-impulsion ($delayText).\n\n" +
+                                        "Pendant ce délai, la Whitelist reste ACTIVE et continue de bloquer les applications non autorisées.\n\n" +
+                                        "À la fin du délai, la Whitelist sera automatiquement désactivée. Vous pourrez annuler à tout moment."
+                                    )
+                                    .setPositiveButton("Confirmer ($delayText)") { _, _ ->
+                                        val (_, msg) = WhitelistManager.requestDisableWhitelist(this@MainActivity)
+                                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
+                                        refreshInstallBlocksUI(force = true)
+                                        refreshDelayUI()
+                                    }
+                                    .setNegativeButton("Annuler", null)
+                                    .show()
+                            }
                         } else {
                             WhitelistManager.setWhitelistEnabled(this@MainActivity, true)
+                            Toast.makeText(this@MainActivity, "Whitelist activée (Zero-Trust)", Toast.LENGTH_SHORT).show()
                             refreshInstallBlocksUI(force = true)
+                            refreshDelayUI()
                         }
                     }
                 }

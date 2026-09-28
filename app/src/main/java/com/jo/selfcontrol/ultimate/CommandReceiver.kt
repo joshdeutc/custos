@@ -66,6 +66,7 @@ class CommandReceiver : BroadcastReceiver() {
             "com.jo.selfcontrol.ultimate.ENFORCE_WHITELIST" -> handleEnforceWhitelist(context)
             "com.jo.selfcontrol.ultimate.REQUEST_WHITELIST_APP" -> handleRequestWhitelistApp(context, intent)
             "com.jo.selfcontrol.ultimate.CANCEL_WHITELIST_APP" -> handleCancelWhitelistApp(context, intent)
+            "com.jo.selfcontrol.ultimate.CANCEL_DISABLE_WHITELIST" -> handleCancelDisableWhitelist(context)
             "com.jo.selfcontrol.ultimate.REMOVE_WHITELIST_APP" -> handleRemoveWhitelistApp(context, intent)
             "com.jo.selfcontrol.ultimate.CHECK_WHITELIST_EXPIRATION" ->
                 WhitelistManager.checkAndPromotePendingRequests(context)
@@ -258,12 +259,21 @@ class CommandReceiver : BroadcastReceiver() {
             val remainSec = (state.pendingDelayExecuteAt - System.currentTimeMillis()) / 1000
             Log.w("SelfControl.Cmd", "  Pending delay change: ${state.pendingDelayHours}h (global=${state.pendingDelayUseGlobal}) executes in ${remainSec}s")
         }
+        if (state.pendingDisableExecuteAt > 0L) {
+            val remainSec = (state.pendingDisableExecuteAt - System.currentTimeMillis()) / 1000
+            Log.w("SelfControl.Cmd", "  Pending deactivation: executes in ${remainSec}s at ${java.util.Date(state.pendingDisableExecuteAt)}")
+        }
         Log.w("SelfControl.Cmd", "  Allowed apps count: ${state.allowedPackages.size}")
         Log.w("SelfControl.Cmd", "  Pending requests: ${state.pendingRequests.size}")
         for (req in state.pendingRequests) {
             val remainMin = (req.availableAt - System.currentTimeMillis()) / 60000
             Log.w("SelfControl.Cmd", "    - ${req.packageName} (unlocks in ${remainMin}m at ${java.util.Date(req.availableAt)})")
         }
+    }
+
+    private fun handleCancelDisableWhitelist(context: Context) {
+        val ok = WhitelistManager.cancelPendingDisable(context)
+        Log.w("SelfControl.Cmd", "=== CANCEL_DISABLE_WHITELIST → ${if (ok) "CANCELED" else "NO PENDING DISABLE"} ===")
     }
 
     private fun handleSetWhitelistEnabled(context: Context, intent: Intent) {

@@ -215,7 +215,8 @@ object WhitelistManager {
         val useGlobalDelay: Boolean = false,
         val pendingDelayHours: Int? = null,
         val pendingDelayUseGlobal: Boolean = false,
-        val pendingDelayExecuteAt: Long = 0L
+        val pendingDelayExecuteAt: Long = 0L,
+        val pendingDisableExecuteAt: Long = 0L
     )
 
     @Volatile private var cachedState: WhitelistState? = null
@@ -263,6 +264,7 @@ object WhitelistManager {
             val pendingDelayHours = if (json.has("pending_delay_hours") && !json.isNull("pending_delay_hours")) json.getInt("pending_delay_hours") else null
             val pendingDelayUseGlobal = json.optBoolean("pending_delay_use_global", false)
             val pendingDelayExecuteAt = json.optLong("pending_delay_execute_at", 0L)
+            val pendingDisableExecuteAt = json.optLong("pending_disable_execute_at", 0L)
 
             val state = WhitelistState(
                 enabled = enabled,
@@ -272,7 +274,8 @@ object WhitelistManager {
                 useGlobalDelay = useGlobal,
                 pendingDelayHours = pendingDelayHours,
                 pendingDelayUseGlobal = pendingDelayUseGlobal,
-                pendingDelayExecuteAt = pendingDelayExecuteAt
+                pendingDelayExecuteAt = pendingDelayExecuteAt,
+                pendingDisableExecuteAt = pendingDisableExecuteAt
             )
             cachedState = state
             lastStateModified = lastMod
@@ -300,6 +303,24 @@ object WhitelistManager {
 
         val now = System.currentTimeMillis()
         var modified = false
+
+        // -1. Check pending whitelist deactivation
+        if (state.pendingDisableExecuteAt in 1..now) {
+            state = state.copy(
+                enabled = false,
+                pendingDisableExecuteAt = 0L
+            )
+            saveState(ctx, state)
+            val hidden = loadHiddenState(ctx)
+            for (pkg in hidden) {
+                release(ctx, pkg)
+            }
+            saveHiddenState(ctx, emptySet())
+            Log.w(TAG, "Pending whitelist disable executed -> Whitelist DISABLED")
+            EventLog.log(ctx, "WHITELIST", "Pending deactivation executed -> Whitelist DISABLED")
+            notifyWhitelistDisabled(ctx)
+            return state
+        }
 
         // 0. Check pending delay change
         if (state.pendingDelayExecuteAt in 1..now && state.pendingDelayHours != null) {
@@ -351,8 +372,9 @@ object WhitelistManager {
         val now = System.currentTimeMillis()
         val nextPending = state.pendingRequests.map { it.availableAt }.filter { it > now }.minOrNull()
         val nextDelay = if (state.pendingDelayExecuteAt > now) state.pendingDelayExecuteAt else null
+        val nextDisable = if (state.pendingDisableExecuteAt > now) state.pendingDisableExecuteAt else null
 
-        val candidateTimes = listOfNotNull(nextPending, nextDelay)
+        val candidateTimes = listOfNotNull(nextPending, nextDelay, nextDisable)
         if (candidateTimes.isEmpty()) return
         val targetTime = candidateTimes.min()
 
@@ -416,6 +438,39 @@ object WhitelistManager {
         }
     }
 
+    private fun notifyWhitelistDisabled(ctx: Context) {
+        try {
+            ensureNotificationChannel(ctx)
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            val launchIntent = Intent(ctx, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pi = PendingIntent.getActivity(
+                ctx,
+                99991,
+                launchIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notif = NotificationCompat.Builder(ctx, NOTIF_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("🛡️ Whitelist désactivée")
+                .setContentText("Le délai est terminé. Le mode permissif est maintenant actif.")
+                .setStyle(NotificationCompat.BigTextStyle().bigText(
+                    "Le délai d'attente est écoulé.\n" +
+                    "La Whitelist a été désactivée. Toutes les applications sont à nouveau accessibles."
+                ))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(pi)
+                .build()
+
+            nm.notify(300099, notif)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to post whitelist disabled notification: ${e.message}")
+        }
+    }
+
     @Synchronized
     fun saveState(ctx: Context, state: WhitelistState) {
         val file = File(ctx.filesDir, STATE_FILE)
@@ -441,6 +496,7 @@ object WhitelistManager {
                 }
                 put("pending_delay_use_global", state.pendingDelayUseGlobal)
                 put("pending_delay_execute_at", state.pendingDelayExecuteAt)
+                put("pending_disable_execute_at", state.pendingDisableExecuteAt)
             }
             file.writeText(json.toString(2))
             cachedState = state
@@ -561,8 +617,9 @@ object WhitelistManager {
 
     /**
      * Enables or disables the whitelist.
-     * When disabled, any quarantined / hidden packages are immediately released.
-     * When enabled, enforcement runs across installed packages.
+     * When enabled, enforcement runs across installed packages and any pending deactivation is cleared.
+     * When disabled, if fromAdb, settings unlocked, or delay <= 0, packages are immediately released.
+     * Otherwise, schedules pending deactivation behind effective quarantine delay.
      */
     fun setWhitelistEnabled(ctx: Context, enabled: Boolean, fromAdb: Boolean = false): Boolean {
         if (BuildConfig.WHITELIST_ADB_ONLY && !fromAdb) {
@@ -571,21 +628,79 @@ object WhitelistManager {
         }
         synchronized(this) {
             val state = loadState(ctx)
-            if (state.enabled == enabled) return true
-            saveState(ctx, state.copy(enabled = enabled))
             if (enabled) {
+                if (state.enabled && state.pendingDisableExecuteAt == 0L) return true
+                saveState(ctx, state.copy(enabled = true, pendingDisableExecuteAt = 0L))
                 enforce(ctx)
+                Log.w(TAG, "Whitelist ENABLED")
+                EventLog.log(ctx, "WHITELIST", "Whitelist ENABLED")
+                return true
             } else {
-                val hidden = loadHiddenState(ctx)
-                for (pkg in hidden) {
-                    release(ctx, pkg)
+                if (!state.enabled) return true
+                val delaySec = getEffectiveQuarantineDelaySeconds(ctx)
+                if (fromAdb || DelayManager.isSettingsUnlocked(ctx) || delaySec <= 0L) {
+                    saveState(ctx, state.copy(enabled = false, pendingDisableExecuteAt = 0L))
+                    val hidden = loadHiddenState(ctx)
+                    for (pkg in hidden) {
+                        release(ctx, pkg)
+                    }
+                    saveHiddenState(ctx, emptySet())
+                    Log.w(TAG, "Whitelist DISABLED immediately")
+                    EventLog.log(ctx, "WHITELIST", "Whitelist DISABLED immediately (fromAdb=$fromAdb)")
+                    return true
+                } else {
+                    requestDisableWhitelist(ctx, fromAdb = false)
+                    return false
                 }
-                saveHiddenState(ctx, emptySet())
             }
-            Log.w(TAG, "Whitelist ${if (enabled) "ENABLED" else "DISABLED"}")
-            EventLog.log(ctx, "WHITELIST", "Whitelist ${if (enabled) "ENABLED" else "DISABLED"}")
+        }
+    }
+
+    /**
+     * Requests deactivation of the whitelist.
+     * - Immediate if fromAdb, settings unlocked, or delay <= 0.
+     * - Otherwise deferred by the effective quarantine delay.
+     */
+    fun requestDisableWhitelist(ctx: Context, fromAdb: Boolean = false): Pair<Boolean, String> {
+        if (BuildConfig.WHITELIST_ADB_ONLY && !fromAdb) {
+            return false to "Action refusée : cette version requiert ADB."
+        }
+        val state = loadState(ctx)
+        if (!state.enabled) {
+            return true to "La Whitelist est déjà désactivée."
+        }
+        val delaySec = getEffectiveQuarantineDelaySeconds(ctx)
+        val now = System.currentTimeMillis()
+
+        if (fromAdb || DelayManager.isSettingsUnlocked(ctx) || delaySec <= 0L) {
+            setWhitelistEnabled(ctx, false, fromAdb = true)
+            return true to "Whitelist désactivée immédiatement."
+        }
+
+        val executeAt = now + delaySec * 1000L
+        saveState(ctx, state.copy(pendingDisableExecuteAt = executeAt))
+        scheduleNextUnlockAlarm(ctx)
+
+        val durationDesc = DelayManager.formatDuration(delaySec)
+        Log.w(TAG, "Whitelist deactivation scheduled for ${java.util.Date(executeAt)} (in $durationDesc)")
+        EventLog.log(ctx, "WHITELIST", "Whitelist deactivation scheduled in $durationDesc")
+        return false to "Désactivation programmée dans $durationDesc (anti-impulsion)"
+    }
+
+    /**
+     * Cancels any pending deactivation of the whitelist.
+     * Hardening action, applies immediately.
+     */
+    fun cancelPendingDisable(ctx: Context): Boolean {
+        val state = loadState(ctx)
+        if (state.pendingDisableExecuteAt > 0L) {
+            saveState(ctx, state.copy(pendingDisableExecuteAt = 0L))
+            scheduleNextUnlockAlarm(ctx)
+            Log.w(TAG, "Canceled pending whitelist deactivation")
+            EventLog.log(ctx, "WHITELIST", "Canceled pending whitelist deactivation")
             return true
         }
+        return false
     }
 
     fun isWhitelisted(ctx: Context, pkg: String): Boolean {

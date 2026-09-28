@@ -316,19 +316,36 @@ object DelayManager {
             )
         )
 
-        // 2. Quarantaine Whitelist (uniquement si non alignée sur le général)
+        // 2. Quarantaine Whitelist (uniquement si active)
         try {
             val wlState = WhitelistManager.loadState(context)
-            if (!wlState.useGlobalDelay) {
-                val wlSec = wlState.quarantineDelayHours * 3600L
-                list.add(
-                    ConfiguredDelayItem(
-                        title = "🛡️ Quarantaine Whitelist",
-                        delaySeconds = wlSec,
-                        isGlobal = false,
-                        description = "${wlState.quarantineDelayHours}h (Dédié)"
+            if (wlState.enabled) {
+                val now = System.currentTimeMillis()
+                val pendingDesc = if (wlState.pendingDisableExecuteAt > now) {
+                    val rem = (wlState.pendingDisableExecuteAt - now) / 1000
+                    " (⏳ Désactivation dans ${formatDuration(rem)})"
+                } else ""
+
+                if (!wlState.useGlobalDelay) {
+                    val wlSec = wlState.quarantineDelayHours * 3600L
+                    list.add(
+                        ConfiguredDelayItem(
+                            title = "🛡️ Quarantaine Whitelist",
+                            delaySeconds = wlSec,
+                            isGlobal = false,
+                            description = "${wlState.quarantineDelayHours}h (Dédié)$pendingDesc"
+                        )
                     )
-                )
+                } else if (wlState.pendingDisableExecuteAt > now) {
+                    list.add(
+                        ConfiguredDelayItem(
+                            title = "🛡️ Whitelist (Zero-Trust)",
+                            delaySeconds = globalSec,
+                            isGlobal = true,
+                            description = "Aligné sur délai général$pendingDesc"
+                        )
+                    )
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error reading Whitelist delay: ${e.message}")
@@ -475,6 +492,10 @@ object DelayManager {
                 if (wlState.pendingDelayExecuteAt > now) {
                     val rem = ((wlState.pendingDelayExecuteAt - now) / 1000)
                     return false to "Une modification du délai Whitelist est encore en attente (${formatDuration(rem)} restantes)."
+                }
+                if (wlState.pendingDisableExecuteAt > now) {
+                    val rem = ((wlState.pendingDisableExecuteAt - now) / 1000)
+                    return false to "Une désactivation de la Whitelist est en cours (${formatDuration(rem)} restantes)."
                 }
             }
         } catch (e: Exception) {
