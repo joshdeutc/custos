@@ -114,6 +114,11 @@ class MainActivity : Activity() {
         Log.i(TAG, "MainActivity started")
         LimitService.start(this)
         setContentView(buildUI())
+        Thread {
+            try {
+                getInstalledLaunchableApps()
+            } catch (_: Exception) {}
+        }.start()
         handler.postDelayed(refreshRunnable, 500)
         handleIncomingIntent(intent)
     }
@@ -1250,6 +1255,10 @@ class MainActivity : Activity() {
 
     private fun showAddAppDialog() {
         val apps = getInstalledLaunchableApps()
+        if (apps.isEmpty()) {
+            Toast.makeText(this, "Aucune application détectée.", Toast.LENGTH_SHORT).show()
+            return
+        }
         var selectedIdx = 0
 
         val listView = buildAppRadioListView(apps) { idx -> selectedIdx = idx }
@@ -1435,6 +1444,7 @@ class MainActivity : Activity() {
                     updatedLimits.add(newLimit)
                     ConfigManager.saveConfig(this, cur.copy(limits = updatedLimits))
                     DelayManager.cancelAppLimitUpdate(this, pkg)
+                    refreshDashboard()
                     Toast.makeText(this, "Limit updated for ${getAppName(pkg)}.", Toast.LENGTH_SHORT).show()
                 } else {
                     DelayManager.requestAppLimitUpdate(
@@ -1479,6 +1489,7 @@ class MainActivity : Activity() {
                         val updatedLimits = cur.limits.filter { it.packageName != pkg }
                         ConfigManager.saveConfig(this, cur.copy(limits = updatedLimits))
                         DelayManager.cancelAppLimitUpdate(this, pkg)
+                        refreshDashboard()
                         Toast.makeText(this, "Limit deleted for ${getAppName(pkg)}.", Toast.LENGTH_SHORT).show()
                     } else {
                         DelayManager.requestAppLimitDelete(
@@ -2895,7 +2906,10 @@ class MainActivity : Activity() {
 
     private fun refreshDashboard() {
         val usage = LimitService.getUsageData()
-        val limits = LimitService.getLimits()
+        val curConfig = ConfigManager.loadConfig(this)
+        val configLimits = curConfig.limits.associateBy { it.packageName }
+        val serviceLimits = LimitService.getLimits()
+        val limits = if (configLimits.isNotEmpty()) configLimits else serviceLimits
         val blocked = LimitService.getBlockedApps()
 
         serviceStatusText.text = if (LimitService.isRunning)
@@ -4222,23 +4236,41 @@ class MainActivity : Activity() {
         catch (_: Exception) { getDrawable(android.R.drawable.sym_def_app_icon)!! }
     }
 
+    @Volatile private var cachedLaunchableApps: List<AppInfo>? = null
+
     private fun getInstalledLaunchableApps(): List<AppInfo> {
+        cachedLaunchableApps?.let { return it }
         val pm = packageManager
-        return pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            .filter { app ->
-                val pkg = app.packageName
-                pkg != packageName &&
-                    !pkg.startsWith("com.android.providers.") &&
-                    pm.getLaunchIntentForPackage(pkg) != null
+        val intent = Intent(Intent.ACTION_MAIN, null).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+        val resolveList = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            pm.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(0L))
+        } else {
+            @Suppress("DEPRECATION")
+            pm.queryIntentActivities(intent, 0)
+        }
+        val list = resolveList.mapNotNull { resolveInfo ->
+            val pkg = resolveInfo.activityInfo?.packageName ?: return@mapNotNull null
+            if (pkg == packageName || pkg.startsWith("com.android.providers.")) return@mapNotNull null
+            val label = try {
+                resolveInfo.loadLabel(pm).toString()
+            } catch (e: Exception) {
+                pkg
             }
-            .map { app ->
-                AppInfo(
-                    packageName = app.packageName,
-                    label = pm.getApplicationLabel(app).toString()
-                )
-            }
-            .sortedBy { it.label.lowercase() }
+            AppInfo(packageName = pkg, label = label)
+        }.distinctBy { it.packageName }.sortedBy { it.label.lowercase() }
+
+        cachedLaunchableApps = list
+        return list
     }
+
+    private class CheckAppViewHolder(
+        val row: LinearLayout,
+        val icon: ImageView,
+        val label: TextView,
+        val cb: CheckBox
+    )
 
     /**
      * Build a custom multi-select or single-select ListView with app icons.
@@ -4266,53 +4298,58 @@ class MainActivity : Activity() {
 
             override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
                 val app = apps[position]
-                val row = (convertView as? LinearLayout) ?: LinearLayout(this@MainActivity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(12), dp(8), dp(12), dp(8))
-                    layoutParams = AbsListView.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                    )
-                }
-                row.removeAllViews()
-
-                val icon = ImageView(this@MainActivity).apply {
-                    val sz = dp(32)
-                    layoutParams = LinearLayout.LayoutParams(sz, sz).apply {
-                        marginEnd = dp(12)
+                val holder: CheckAppViewHolder
+                val row: LinearLayout
+                if (convertView == null) {
+                    row = LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        setPadding(dp(12), dp(8), dp(12), dp(8))
+                        layoutParams = AbsListView.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        )
                     }
-                    setImageDrawable(appIcon(app.packageName))
+                    val icon = ImageView(this@MainActivity).apply {
+                        val sz = dp(32)
+                        layoutParams = LinearLayout.LayoutParams(sz, sz).apply {
+                            marginEnd = dp(12)
+                        }
+                    }
+                    val label = TextView(this@MainActivity).apply {
+                        textSize = 15f
+                        setTextColor(Color.WHITE)
+                        maxLines = 1
+                        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    }
+                    val cb = CheckBox(this@MainActivity).apply {
+                        buttonTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#BB86FC"))
+                    }
+                    row.addView(icon)
+                    row.addView(label)
+                    row.addView(cb)
+                    holder = CheckAppViewHolder(row, icon, label, cb)
+                    row.tag = holder
+                } else {
+                    row = convertView as LinearLayout
+                    holder = row.tag as CheckAppViewHolder
                 }
 
-                val label = TextView(this@MainActivity).apply {
-                    text = app.label
-                    textSize = 15f
-                    setTextColor(Color.WHITE)
-                    maxLines = 1
-                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                }
-
-                val cb = CheckBox(this@MainActivity).apply {
-                    isChecked = checked[position]
-                    setOnCheckedChangeListener(null)
-                    buttonTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#BB86FC"))
-                }
-
-                row.addView(icon)
-                row.addView(label)
-                row.addView(cb)
+                holder.icon.setImageDrawable(appIcon(app.packageName))
+                holder.label.text = app.label
+                holder.cb.setOnCheckedChangeListener(null)
+                holder.cb.isChecked = checked[position]
 
                 row.setOnClickListener {
                     checked[position] = !checked[position]
-                    cb.isChecked = checked[position]
+                    holder.cb.isChecked = checked[position]
                     if (checked[position]) {
                         checkedSet.add(app.packageName)
                     } else {
                         checkedSet.remove(app.packageName)
                     }
                 }
-                cb.setOnCheckedChangeListener { _, isChecked ->
+                holder.cb.setOnCheckedChangeListener { _, isChecked ->
                     checked[position] = isChecked
                     if (isChecked) checkedSet.add(app.packageName) else checkedSet.remove(app.packageName)
                 }
@@ -4323,6 +4360,13 @@ class MainActivity : Activity() {
         listView.adapter = adapter
         return listView
     }
+
+    private class RadioAppViewHolder(
+        val row: LinearLayout,
+        val icon: ImageView,
+        val label: TextView,
+        val rb: RadioButton
+    )
 
     /**
      * Build a custom single-select ListView with app icons.
@@ -4346,48 +4390,53 @@ class MainActivity : Activity() {
 
             override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
                 val app = apps[position]
-                val row = (convertView as? LinearLayout) ?: LinearLayout(this@MainActivity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(12), dp(8), dp(12), dp(8))
-                    layoutParams = AbsListView.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                    )
-                }
-                row.removeAllViews()
-
-                val icon = ImageView(this@MainActivity).apply {
-                    val sz = dp(32)
-                    layoutParams = LinearLayout.LayoutParams(sz, sz).apply {
-                        marginEnd = dp(12)
+                val holder: RadioAppViewHolder
+                val row: LinearLayout
+                if (convertView == null) {
+                    row = LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        setPadding(dp(12), dp(8), dp(12), dp(8))
+                        layoutParams = AbsListView.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        )
                     }
-                    setImageDrawable(appIcon(app.packageName))
+                    val icon = ImageView(this@MainActivity).apply {
+                        val sz = dp(32)
+                        layoutParams = LinearLayout.LayoutParams(sz, sz).apply {
+                            marginEnd = dp(12)
+                        }
+                    }
+                    val label = TextView(this@MainActivity).apply {
+                        textSize = 15f
+                        setTextColor(Color.WHITE)
+                        maxLines = 1
+                        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    }
+                    val rb = RadioButton(this@MainActivity).apply {
+                        buttonTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#BB86FC"))
+                    }
+                    row.addView(icon)
+                    row.addView(label)
+                    row.addView(rb)
+                    holder = RadioAppViewHolder(row, icon, label, rb)
+                    row.tag = holder
+                } else {
+                    row = convertView as LinearLayout
+                    holder = row.tag as RadioAppViewHolder
                 }
 
-                val label = TextView(this@MainActivity).apply {
-                    text = app.label
-                    textSize = 15f
-                    setTextColor(Color.WHITE)
-                    maxLines = 1
-                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                }
-
-                val rb = RadioButton(this@MainActivity).apply {
-                    isChecked = position == selectedPosition
-                    buttonTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#BB86FC"))
-                }
-
-                row.addView(icon)
-                row.addView(label)
-                row.addView(rb)
+                holder.icon.setImageDrawable(appIcon(app.packageName))
+                holder.label.text = app.label
+                holder.rb.isChecked = (position == selectedPosition)
 
                 row.setOnClickListener {
                     selectedPosition = position
                     onSelected(position)
                     notifyDataSetChanged()
                 }
-                rb.setOnClickListener {
+                holder.rb.setOnClickListener {
                     selectedPosition = position
                     onSelected(position)
                     notifyDataSetChanged()

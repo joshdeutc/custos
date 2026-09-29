@@ -78,6 +78,15 @@ class LimitService : Service() {
             BlockedNotificationManager.setMuteWhenBlockedPreference(context, packageName, mute)
             instance?.onBlockedNotificationChoiceApplied(packageName, mute)
         }
+
+        fun notifyConfigChanged(context: Context) {
+            val inst = instance
+            if (inst != null) {
+                inst.checkConfigReload(force = true)
+            } else {
+                start(context)
+            }
+        }
     }
 
     private lateinit var config: ConfigManager.Config
@@ -784,10 +793,10 @@ class LimitService : Service() {
         }
     }
 
-    private fun checkConfigReload() {
+    fun checkConfigReload(force: Boolean = false) {
         try {
             val newModified = ConfigManager.getConfigLastModified(this)
-            if (newModified <= configLastModified) return
+            if (!force && newModified <= configLastModified) return
 
             val newConfig = ConfigManager.loadConfig(this)
             configLastModified = newModified

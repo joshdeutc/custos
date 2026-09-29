@@ -174,6 +174,7 @@ class ConfigManager {
             try {
                 localFile.writeText(configToJsonString(config))
                 Log.i(TAG, "✅ Config saved successfully")
+                LimitService.notifyConfigChanged(context)
             } catch (e: Exception) {
                 Log.e(TAG, "❌ Error saving config: ${e.message}")
             }
