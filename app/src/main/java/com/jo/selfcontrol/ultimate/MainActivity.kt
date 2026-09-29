@@ -1367,6 +1367,49 @@ class MainActivity : Activity() {
                         maxSessionsPerDay = maxSessionsPicker.value
                     )
                 } else null
+
+                if (BuildConfig.PERMANENT_APP_LIMITS && activeLimit != null) {
+                    if (newMins > activeLimit.maxMinutesPerDay) {
+                        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+                            .setTitle("Augmentation restreinte")
+                            .setMessage(
+                                "Sur cette version, les limites d'applications sont permanentes. Seule la réduction du quota est autorisée depuis l'appareil.\n\n" +
+                                "Pour augmenter le quota, utilisez la commande ADB :\n" +
+                                "adb shell am broadcast -p com.jo.selfcontrol.ultimate -a com.jo.selfcontrol.ultimate.SET_APP_LIMIT --es pkg \"$pkg\" --ei minutes $newMins"
+                            )
+                            .setPositiveButton("OK", null)
+                            .create().also { styleDialogForDarkTheme(it); it.show() }
+                        return@setPositiveButton
+                    }
+                    if (activeLimit.session != null && session == null) {
+                        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+                            .setTitle("Session restreinte")
+                            .setMessage(
+                                "Sur cette version, vous ne pouvez pas désactiver une limite de session active depuis l'appareil.\n\n" +
+                                "Pour modifier ou retirer cette règle, utilisez ADB."
+                            )
+                            .setPositiveButton("OK", null)
+                            .create().also { styleDialogForDarkTheme(it); it.show() }
+                        return@setPositiveButton
+                    }
+                    if (activeLimit.session != null && session != null) {
+                        val relaxed = session.sessionDurationSec > activeLimit.session.sessionDurationSec ||
+                                session.cooldownSec < activeLimit.session.cooldownSec ||
+                                session.maxSessionsPerDay > activeLimit.session.maxSessionsPerDay
+                        if (relaxed) {
+                            AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+                                .setTitle("Assouplissement restreint")
+                                .setMessage(
+                                    "Sur cette version, vous ne pouvez pas assouplir la session (durée plus longue, cooldown plus court ou plus de sessions) depuis l'appareil.\n\n" +
+                                    "Pour assouplir cette règle, utilisez ADB."
+                                )
+                                .setPositiveButton("OK", null)
+                                .create().also { styleDialogForDarkTheme(it); it.show() }
+                            return@setPositiveButton
+                        }
+                    }
+                }
+
                 val newLimit = ConfigManager.AppLimit(
                     packageName = pkg,
                     maxMinutesPerDay = newMins,
@@ -1412,31 +1455,45 @@ class MainActivity : Activity() {
             .setNegativeButton("Cancel", null)
 
         if (existingLimit != null || activeLimit != null) {
-            builder.setNeutralButton("Delete timer") { _, _ ->
-                val globalDelay = DelayManager.getCurrentEffectiveDelaySeconds(this)
-                val requirement = ConfigManager.requiredDeferForAppLimit(activeLimit, null, globalDelay)
-                val unlockApplies = !requirement.fromExplicitTimer && DelayManager.isSettingsUnlocked(this)
-                val mustDefer = requirement.mustDefer && !unlockApplies
+            if (BuildConfig.PERMANENT_APP_LIMITS) {
+                builder.setNeutralButton("🔒 Suppr. via ADB") { _, _ ->
+                    AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+                        .setTitle("Suppression protégée")
+                        .setMessage(
+                            "Sur cette version, les limites d'applications sont permanentes et ne peuvent pas être supprimées depuis l'appareil.\n\n" +
+                            "Pour supprimer cette limite, connectez le téléphone en ADB et exécutez :\n\n" +
+                            "adb shell am broadcast -p com.jo.selfcontrol.ultimate -a com.jo.selfcontrol.ultimate.REMOVE_APP_LIMIT --es pkg \"$pkg\""
+                        )
+                        .setPositiveButton("OK", null)
+                        .create().also { styleDialogForDarkTheme(it); it.show() }
+                }
+            } else {
+                builder.setNeutralButton("Delete timer") { _, _ ->
+                    val globalDelay = DelayManager.getCurrentEffectiveDelaySeconds(this)
+                    val requirement = ConfigManager.requiredDeferForAppLimit(activeLimit, null, globalDelay)
+                    val unlockApplies = !requirement.fromExplicitTimer && DelayManager.isSettingsUnlocked(this)
+                    val mustDefer = requirement.mustDefer && !unlockApplies
 
-                if (!mustDefer) {
-                    val cur = ConfigManager.loadConfig(this)
-                    val updatedLimits = cur.limits.filter { it.packageName != pkg }
-                    ConfigManager.saveConfig(this, cur.copy(limits = updatedLimits))
-                    DelayManager.cancelAppLimitUpdate(this, pkg)
-                    Toast.makeText(this, "Limit deleted for ${getAppName(pkg)}.", Toast.LENGTH_SHORT).show()
-                } else {
-                    DelayManager.requestAppLimitDelete(
-                        this,
-                        pkg,
-                        "Suppr. limite : ${getAppName(pkg)}",
-                        overrideDelaySeconds = requirement.seconds
-                    )
-                    val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
-                    Toast.makeText(
-                        this,
-                        "Deletion queued for ${formatLongDuration(requirement.seconds)} ($scope — ${requirement.reason}).",
-                        Toast.LENGTH_LONG
-                    ).show()
+                    if (!mustDefer) {
+                        val cur = ConfigManager.loadConfig(this)
+                        val updatedLimits = cur.limits.filter { it.packageName != pkg }
+                        ConfigManager.saveConfig(this, cur.copy(limits = updatedLimits))
+                        DelayManager.cancelAppLimitUpdate(this, pkg)
+                        Toast.makeText(this, "Limit deleted for ${getAppName(pkg)}.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        DelayManager.requestAppLimitDelete(
+                            this,
+                            pkg,
+                            "Suppr. limite : ${getAppName(pkg)}",
+                            overrideDelaySeconds = requirement.seconds
+                        )
+                        val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
+                        Toast.makeText(
+                            this,
+                            "Deletion queued for ${formatLongDuration(requirement.seconds)} ($scope — ${requirement.reason}).",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                 }
             }
         }
@@ -1471,6 +1528,11 @@ class MainActivity : Activity() {
 
     private fun saveConfigWithDelay(newConfig: ConfigManager.Config) {
         val old = loadEditableConfig()
+
+        if (BuildConfig.PERMANENT_CURFEW && newConfig.periodBlocks.size < old.periodBlocks.size) {
+            Toast.makeText(this, "Suppression de couvre-feu restreinte sur cette version.", Toast.LENGTH_SHORT).show()
+            return
+        }
 
         // Use the EFFECTIVE delay, not the base one. The old gate tested globalDelaySeconds > 0,
         // so with a base delay of 0 every relaxation slipped through instantly even while a
@@ -1571,12 +1633,21 @@ class MainActivity : Activity() {
                 textSize = 14f
                 setTextColor(Color.BLACK)
             })
-            rule.protectionDelaySec?.let { sec ->
+            if (BuildConfig.PERMANENT_CURFEW) {
                 addView(TextView(this@MainActivity).apply {
-                    text = "🔒 Protected — ${formatLongDuration(sec)} to change"
+                    text = "🔒 Permanente (Suppression via ADB)"
                     textSize = 12f
-                    setTextColor(Color.BLACK)
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(Color.parseColor("#7B1FA2"))
                 })
+            } else {
+                rule.protectionDelaySec?.let { sec ->
+                    addView(TextView(this@MainActivity).apply {
+                        text = "🔒 Protected — ${formatLongDuration(sec)} to change"
+                        textSize = 12f
+                        setTextColor(Color.BLACK)
+                    })
+                }
             }
 
             val pendingUpdates = DelayManager.loadState(this@MainActivity).requestedConfigUpdates
@@ -1627,28 +1698,50 @@ class MainActivity : Activity() {
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 ).apply { topMargin = dp(4) }
             }
-            buttonRow.addView(Button(this@MainActivity).apply {
-                text = "Edit"
-                setTextColor(Color.WHITE)
-                background = roundedBackground(Color.BLACK)
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginEnd = dp(4)
-                }
-                setOnClickListener { showEditCurfewRuleDialog(index, rule) }
-            })
-            buttonRow.addView(Button(this@MainActivity).apply {
-                text = "Delete"
-                setTextColor(Color.WHITE)
-                background = roundedBackground(Color.parseColor("#D32F2F"))
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginStart = dp(4)
-                }
-                setOnClickListener {
-                    val cur = loadEditableConfig()
-                    val newList = cur.periodBlocks.toMutableList().also { it.removeAt(index) }
-                    saveConfigWithDelay(ConfigManager.Config(cur.limits, newList, cur.installBlocks))
-                }
-            })
+            if (BuildConfig.PERMANENT_CURFEW) {
+                buttonRow.addView(Button(this@MainActivity).apply {
+                    text = "🔒 Suppr. via ADB"
+                    setTextColor(Color.WHITE)
+                    background = roundedBackground(Color.parseColor("#7B1FA2"))
+                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    setOnClickListener {
+                        val apps = rule.packages.joinToString(", ") { getAppName(it) }
+                        AlertDialog.Builder(this@MainActivity, android.R.style.Theme_DeviceDefault_Dialog)
+                            .setTitle("Couvre-feu permanent")
+                            .setMessage(
+                                "Sur cette version, les règles de couvre-feu sont permanentes et ne peuvent pas être supprimées ou modifiées depuis l'appareil.\n\n" +
+                                "Règle : $apps ($start -> $end)\n\n" +
+                                "Pour la supprimer via ADB, connectez le téléphone au PC et exécutez :\n\n" +
+                                "adb shell am broadcast -p com.jo.selfcontrol.ultimate -a com.jo.selfcontrol.ultimate.REMOVE_CURFEW --ei index $index"
+                            )
+                            .setPositiveButton("OK", null)
+                            .create().also { styleDialogForDarkTheme(it); it.show() }
+                    }
+                })
+            } else {
+                buttonRow.addView(Button(this@MainActivity).apply {
+                    text = "Edit"
+                    setTextColor(Color.WHITE)
+                    background = roundedBackground(Color.BLACK)
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        marginEnd = dp(4)
+                    }
+                    setOnClickListener { showEditCurfewRuleDialog(index, rule) }
+                })
+                buttonRow.addView(Button(this@MainActivity).apply {
+                    text = "Delete"
+                    setTextColor(Color.WHITE)
+                    background = roundedBackground(Color.parseColor("#D32F2F"))
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        marginStart = dp(4)
+                    }
+                    setOnClickListener {
+                        val cur = loadEditableConfig()
+                        val newList = cur.periodBlocks.toMutableList().also { it.removeAt(index) }
+                        saveConfigWithDelay(ConfigManager.Config(cur.limits, newList, cur.installBlocks))
+                    }
+                })
+            }
             addView(buttonRow)
         }
     }
@@ -1818,6 +1911,10 @@ class MainActivity : Activity() {
                 }
                 if (selectedDays.isEmpty()) {
                     Toast.makeText(this, "Select at least one day", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                if (BuildConfig.PERMANENT_CURFEW && editIndex >= 0) {
+                    Toast.makeText(this, "Modification de couvre-feu restreinte sur cette version.", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
                 val cur = loadEditableConfig()
@@ -2910,7 +3007,15 @@ class MainActivity : Activity() {
 
             // Delay badge with transition
             if (delayBadge != null) {
-                if (isDeletePending) {
+                if (BuildConfig.PERMANENT_APP_LIMITS) {
+                    val activeDelaySec = limit.protectionDelaySec
+                    if (activeDelaySec != null && activeDelaySec > 0) {
+                        delayBadge.text = "🔒 Permanente (${formatShortDuration(activeDelaySec)})"
+                    } else {
+                        delayBadge.text = "🔒 Permanente"
+                    }
+                    delayBadge.setTextColor(Color.parseColor("#7B1FA2"))
+                } else if (isDeletePending) {
                     delayBadge.text = "⏳ Suppression en attente"
                     delayBadge.setTextColor(Color.parseColor("#D32F2F"))
                 } else {

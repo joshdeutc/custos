@@ -67,7 +67,10 @@ class CommandReceiver : BroadcastReceiver() {
             "com.jo.selfcontrol.ultimate.REQUEST_WHITELIST_APP" -> handleRequestWhitelistApp(context, intent)
             "com.jo.selfcontrol.ultimate.CANCEL_WHITELIST_APP" -> handleCancelWhitelistApp(context, intent)
             "com.jo.selfcontrol.ultimate.CANCEL_DISABLE_WHITELIST" -> handleCancelDisableWhitelist(context)
-            "com.jo.selfcontrol.ultimate.REMOVE_WHITELIST_APP" -> handleRemoveWhitelistApp(context, intent)
+            "com.jo.selfcontrol.ultimate.REMOVE_APP_LIMIT" -> handleRemoveAppLimit(context, intent)
+            "com.jo.selfcontrol.ultimate.SET_APP_LIMIT" -> handleSetAppLimit(context, intent)
+            "com.jo.selfcontrol.ultimate.REMOVE_CURFEW" -> handleRemoveCurfew(context, intent)
+            "com.jo.selfcontrol.ultimate.SET_CURFEW" -> handleSetCurfew(context, intent)
             "com.jo.selfcontrol.ultimate.CHECK_WHITELIST_EXPIRATION" ->
                 WhitelistManager.checkAndPromotePendingRequests(context)
         }
@@ -334,5 +337,161 @@ class CommandReceiver : BroadcastReceiver() {
         }
         val ok = WhitelistManager.removePackageFromWhitelist(context, pkg)
         Log.w("SelfControl.Cmd", "=== REMOVE_WHITELIST_APP $pkg → ${if (ok) "REMOVED" else "NOT FOUND"} ===")
+    }
+
+    /**
+     * Administrator escape hatch: remove an app limit by package name, bypassing UI permanence.
+     *   adb shell am broadcast -p com.jo.selfcontrol.ultimate \
+     *     -a com.jo.selfcontrol.ultimate.REMOVE_APP_LIMIT --es pkg "com.instagram.android"
+     */
+    private fun handleRemoveAppLimit(context: Context, intent: Intent) {
+        val pkg = intent.getStringExtra("pkg")
+        if (pkg.isNullOrBlank()) {
+            Log.e("SelfControl.Cmd", "REMOVE_APP_LIMIT: missing --es pkg")
+            return
+        }
+        val cur = ConfigManager.loadConfig(context)
+        val exists = cur.limits.any { it.packageName == pkg }
+        if (!exists) {
+            Log.w("SelfControl.Cmd", "=== REMOVE_APP_LIMIT '$pkg' → not found ===")
+            return
+        }
+        val updatedLimits = cur.limits.filter { it.packageName != pkg }
+        ConfigManager.saveConfig(context, cur.copy(limits = updatedLimits))
+        DelayManager.cancelAppLimitUpdate(context, pkg)
+        Log.w("SelfControl.Cmd", "=== REMOVE_APP_LIMIT '$pkg' → REMOVED ===")
+        EventLog.log(context, "LIMIT", "App limit removed via ADB: $pkg")
+    }
+
+    /**
+     * Administrator escape hatch: set or update an app limit by package name.
+     *   adb shell am broadcast -p com.jo.selfcontrol.ultimate \
+     *     -a com.jo.selfcontrol.ultimate.SET_APP_LIMIT --es pkg "com.instagram.android" --ei minutes 45
+     */
+    private fun handleSetAppLimit(context: Context, intent: Intent) {
+        val pkg = intent.getStringExtra("pkg")
+        if (pkg.isNullOrBlank()) {
+            Log.e("SelfControl.Cmd", "SET_APP_LIMIT: missing --es pkg")
+            return
+        }
+        val minutes = intent.getIntExtra("minutes", -1)
+        if (minutes < 0) {
+            Log.e("SelfControl.Cmd", "SET_APP_LIMIT: missing or invalid --ei minutes <X>")
+            return
+        }
+        val cur = ConfigManager.loadConfig(context)
+        val existing = cur.limits.find { it.packageName == pkg }
+
+        val sessionMin = if (intent.hasExtra("sessionMinutes")) intent.getIntExtra("sessionMinutes", 0) else null
+        val cooldownMin = if (intent.hasExtra("cooldownMinutes")) intent.getIntExtra("cooldownMinutes", 60) else null
+        val session = if (sessionMin != null && sessionMin > 0) {
+            ConfigManager.SessionConfig(
+                sessionDurationSec = sessionMin * 60,
+                cooldownSec = (cooldownMin ?: 60) * 60,
+                maxSessionsPerDay = intent.getIntExtra("maxSessions", existing?.session?.maxSessionsPerDay ?: 5)
+            )
+        } else if (intent.getBooleanExtra("removeSession", false)) {
+            null
+        } else {
+            existing?.session
+        }
+
+        val newLimit = ConfigManager.AppLimit(
+            packageName = pkg,
+            maxMinutesPerDay = minutes,
+            maxSecondsPerDay = minutes * 60,
+            allowedDays = existing?.allowedDays ?: listOf(0, 1, 2, 3, 4, 5, 6),
+            allowedHoursStart = existing?.allowedHoursStart ?: 0,
+            allowedHoursEnd = existing?.allowedHoursEnd ?: 24 * 60,
+            allDay = existing?.allDay ?: true,
+            session = session,
+            protectionDelaySec = existing?.protectionDelaySec,
+            channelBlocks = existing?.channelBlocks ?: emptyList()
+        )
+        val updatedLimits = cur.limits.filter { it.packageName != pkg }.toMutableList()
+        updatedLimits.add(newLimit)
+        ConfigManager.saveConfig(context, cur.copy(limits = updatedLimits))
+        DelayManager.cancelAppLimitUpdate(context, pkg)
+        Log.w("SelfControl.Cmd", "=== SET_APP_LIMIT '$pkg' -> $minutes min/day ===")
+        EventLog.log(context, "LIMIT", "App limit set via ADB: $pkg -> $minutes min/day")
+    }
+
+    /**
+     * Administrator escape hatch: remove a curfew rule by index, package, signature, or all.
+     *   adb shell am broadcast -p com.jo.selfcontrol.ultimate \
+     *     -a com.jo.selfcontrol.ultimate.REMOVE_CURFEW --ei index 0
+     */
+    private fun handleRemoveCurfew(context: Context, intent: Intent) {
+        val cur = ConfigManager.loadConfig(context)
+        if (cur.periodBlocks.isEmpty()) {
+            Log.w("SelfControl.Cmd", "=== REMOVE_CURFEW: no curfew rules active ===")
+            return
+        }
+        val updatedRules: List<ConfigManager.PeriodBlockRule>
+        if (intent.getBooleanExtra("all", false)) {
+            updatedRules = emptyList()
+            Log.w("SelfControl.Cmd", "=== REMOVE_CURFEW: all rules cleared ===")
+        } else if (intent.hasExtra("index")) {
+            val idx = intent.getIntExtra("index", -1)
+            if (idx !in cur.periodBlocks.indices) {
+                Log.e("SelfControl.Cmd", "REMOVE_CURFEW: invalid index $idx (total=${cur.periodBlocks.size})")
+                return
+            }
+            val rule = cur.periodBlocks[idx]
+            updatedRules = cur.periodBlocks.filterIndexed { i, _ -> i != idx }
+            Log.w("SelfControl.Cmd", "=== REMOVE_CURFEW: rule at index $idx removed (${rule.packages}) ===")
+        } else if (intent.hasExtra("pkg")) {
+            val pkg = intent.getStringExtra("pkg") ?: ""
+            updatedRules = cur.periodBlocks.filterNot { it.packages.contains(pkg) }
+            Log.w("SelfControl.Cmd", "=== REMOVE_CURFEW: rules containing pkg '$pkg' removed ===")
+        } else if (intent.hasExtra("signature")) {
+            val sig = intent.getStringExtra("signature") ?: ""
+            updatedRules = cur.periodBlocks.filterNot { it.scheduleSignature() == sig }
+            Log.w("SelfControl.Cmd", "=== REMOVE_CURFEW: rule with signature '$sig' removed ===")
+        } else {
+            Log.e("SelfControl.Cmd", "REMOVE_CURFEW: specify --ei index <X>, --es pkg <pkg>, --es signature <sig>, or --ez all true")
+            return
+        }
+        ConfigManager.saveConfig(context, cur.copy(periodBlocks = updatedRules))
+        EventLog.log(context, "CURFEW", "Curfew rule removed via ADB")
+    }
+
+    /**
+     * Administrator escape hatch: set or add a curfew rule via ADB.
+     *   adb shell am broadcast -p com.jo.selfcontrol.ultimate \
+     *     -a com.jo.selfcontrol.ultimate.SET_CURFEW --es pkgs "com.instagram.android" --ei startHour 22 --ei endHour 7
+     */
+    private fun handleSetCurfew(context: Context, intent: Intent) {
+        val pkgsStr = intent.getStringExtra("pkgs") ?: intent.getStringExtra("pkg")
+        if (pkgsStr.isNullOrBlank()) {
+            Log.e("SelfControl.Cmd", "SET_CURFEW: missing --es pkgs <comma-separated pkgs>")
+            return
+        }
+        val pkgs = pkgsStr.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        val startMin = if (intent.hasExtra("startHour")) {
+            intent.getIntExtra("startHour", 22) * 60 + intent.getIntExtra("startMin", 0)
+        } else {
+            intent.getIntExtra("start", 22 * 60)
+        }
+        val endMin = if (intent.hasExtra("endHour")) {
+            intent.getIntExtra("endHour", 7) * 60 + intent.getIntExtra("endMin", 0)
+        } else {
+            intent.getIntExtra("end", 7 * 60)
+        }
+        val days = intent.getStringExtra("days")?.split(",")?.mapNotNull { it.trim().toIntOrNull() } ?: (0..6).toList()
+        val mute = intent.getBooleanExtra("mute", false)
+
+        val newRule = ConfigManager.PeriodBlockRule(
+            packages = pkgs,
+            blockedStartMinutes = startMin,
+            blockedEndMinutes = endMin,
+            allowedDays = days,
+            muteNotifications = mute
+        )
+        val cur = ConfigManager.loadConfig(context)
+        val updated = cur.periodBlocks + newRule
+        ConfigManager.saveConfig(context, cur.copy(periodBlocks = updated))
+        Log.w("SelfControl.Cmd", "=== SET_CURFEW: added curfew for $pkgs ($startMin -> $endMin) ===")
+        EventLog.log(context, "CURFEW", "Curfew rule added via ADB: $pkgs")
     }
 }

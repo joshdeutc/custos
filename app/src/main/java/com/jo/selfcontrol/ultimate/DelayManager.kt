@@ -657,6 +657,10 @@ object DelayManager {
         description: String,
         overrideDelaySeconds: Int? = null
     ) {
+        if (BuildConfig.PERMANENT_APP_LIMITS) {
+            Log.w(TAG, "Refused app limit deletion request: flavor enforces PERMANENT_APP_LIMITS ($pkg)")
+            return
+        }
         val state = loadState(context)
         val effectiveDelaySeconds = overrideDelaySeconds ?: getEffectiveDelaySeconds(state)
         val executeAt = System.currentTimeMillis() + (effectiveDelaySeconds * 1000L)
@@ -750,7 +754,12 @@ object DelayManager {
                 "CURFEW" -> {
                     val sig = update.targetKey
                     if (update.isDelete) {
-                        activeConfig.copy(periodBlocks = activeConfig.periodBlocks.filter { it.scheduleSignature() != sig })
+                        if (BuildConfig.PERMANENT_CURFEW) {
+                            Log.w(TAG, "Ignored pending curfew deletion: PERMANENT_CURFEW is true ($sig)")
+                            activeConfig
+                        } else {
+                            activeConfig.copy(periodBlocks = activeConfig.periodBlocks.filter { it.scheduleSignature() != sig })
+                        }
                     } else {
                         val newRule = runCatching { ConfigManager.parsePeriodBlockRule(JSONObject(update.payloadJson)) }.getOrNull()
                         if (newRule != null) {
