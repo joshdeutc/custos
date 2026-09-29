@@ -122,7 +122,6 @@ object WhitelistManager {
         "com.english.progress.learn",
         "com.google.android.safetycore",
         "com.ttxapps.drivesync",
-        "com.jo.tapology",
         "com.google.android.apps.authenticator2",
         "com.chess",
         // Additional apps from user devices (Redmi, etc.)
@@ -186,7 +185,11 @@ object WhitelistManager {
      * installation on a new phone does not lock out existing legitimate applications.
      */
     fun getInitialAllowedPackages(ctx: Context): Set<String> {
-        val result = INITIAL_ALLOWED_PACKAGES.filterNot { isGuarded(ctx, it) }.toMutableSet()
+        val result = if (BuildConfig.WHITELIST_ADB_ONLY) {
+            mutableSetOf<String>()
+        } else {
+            INITIAL_ALLOWED_PACKAGES.filterNot { isGuarded(ctx, it) }.toMutableSet()
+        }
         try {
             val pm = ctx.packageManager
             val installed = pm.getInstalledPackages(0)

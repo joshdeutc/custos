@@ -233,7 +233,6 @@ object DeviceOwnerHelper {
 
     /** Hide an app entirely (used for Nuclear Mode OS-level enforcement). */
     fun hideApp(ctx: Context, pkg: String, hidden: Boolean): Boolean {
-        if (!BuildConfig.OS_SUSPENSION_ENABLED) return false
         if (!isDeviceOwner(ctx)) return false
         return runCatching {
             dpm(ctx).setApplicationHidden(admin(ctx), pkg, hidden)

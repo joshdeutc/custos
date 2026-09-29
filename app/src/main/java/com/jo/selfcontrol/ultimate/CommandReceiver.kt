@@ -67,6 +67,7 @@ class CommandReceiver : BroadcastReceiver() {
             "com.jo.selfcontrol.ultimate.REQUEST_WHITELIST_APP" -> handleRequestWhitelistApp(context, intent)
             "com.jo.selfcontrol.ultimate.CANCEL_WHITELIST_APP" -> handleCancelWhitelistApp(context, intent)
             "com.jo.selfcontrol.ultimate.CANCEL_DISABLE_WHITELIST" -> handleCancelDisableWhitelist(context)
+            "com.jo.selfcontrol.ultimate.REMOVE_WHITELIST_APP" -> handleRemoveWhitelistApp(context, intent)
             "com.jo.selfcontrol.ultimate.REMOVE_APP_LIMIT" -> handleRemoveAppLimit(context, intent)
             "com.jo.selfcontrol.ultimate.SET_APP_LIMIT" -> handleSetAppLimit(context, intent)
             "com.jo.selfcontrol.ultimate.REMOVE_CURFEW" -> handleRemoveCurfew(context, intent)
