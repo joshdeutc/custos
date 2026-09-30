@@ -836,10 +836,14 @@ object WhitelistManager {
             if (isGuarded(ctx, pkgInfo)) continue
 
             if (pkg !in state.allowedPackages) {
+                val wasAlreadyHidden = pkg in hidden
                 Log.w(TAG, "🚨 UNAUTHORIZED APP DETECTED on device: $pkg -> Blocking access!")
                 EventLog.log(ctx, "WHITELIST", "Unauthorized app $pkg detected -> Blocked access")
                 neutralize(ctx, pkg)
                 hidden.add(pkg)
+                if (!wasAlreadyHidden) {
+                    notifyAppQuarantined(ctx, pkg)
+                }
             }
         }
 
@@ -921,14 +925,27 @@ object WhitelistManager {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
+            val title: String
+            val contentText: String
+            val bigText: String
+            if (BuildConfig.WHITELIST_ADB_ONLY) {
+                title = "🔒 Application bloquée : $appLabel"
+                contentText = "Non autorisée — Déblocage via ADB uniquement"
+                bigText = "L'application \"$appLabel\" ($pkg) a été installée mais ne figure pas dans la Whitelist.\n\n" +
+                    "Elle a été masquée et bloquée.\n" +
+                    "Sur cette version, les applications ne peuvent être autorisées que par l'administrateur via commande ADB."
+            } else {
+                title = "📥 Nouvelle application : $appLabel"
+                contentText = "Toucher pour demander l'ajout à la Whitelist ($delayText)"
+                bigText = "L'application \"$appLabel\" ($pkg) a été installée et immédiatement isolée.\n\n" +
+                    "Touchez ici pour demander son ajout à la Whitelist (délai de quarantaine : $delayText)."
+            }
+
             val notif = NotificationCompat.Builder(ctx, NOTIF_CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentTitle("📥 Nouvelle application : $appLabel")
-                .setContentText("Toucher pour demander l'ajout à la Whitelist ($delayText)")
-                .setStyle(NotificationCompat.BigTextStyle().bigText(
-                    "L'application \"$appLabel\" ($pkg) a été installée et immédiatement isolée.\n\n" +
-                    "Touchez ici pour demander son ajout à la Whitelist (délai de quarantaine : $delayText)."
-                ))
+                .setContentTitle(title)
+                .setContentText(contentText)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(bigText))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
                 .setContentIntent(pi)

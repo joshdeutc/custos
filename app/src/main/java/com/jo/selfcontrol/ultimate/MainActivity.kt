@@ -2434,7 +2434,16 @@ class MainActivity : Activity() {
 
     private fun confirmRequestAddition(pkg: String, label: String) {
         if (BuildConfig.WHITELIST_ADB_ONLY) {
-            Toast.makeText(this, "Ajout restreint : administré via ADB uniquement", Toast.LENGTH_LONG).show()
+            AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+                .setTitle("Application non autorisée")
+                .setMessage(
+                    "L'application \"$label\" ($pkg) est bloquée et masquée.\n\n" +
+                    "Sur cette version, l'ajout d'applications est administré exclusivement via ADB.\n\n" +
+                    "Pour l'autoriser, connectez l'appareil en ADB et exécutez :\n\n" +
+                    "adb shell am broadcast -p com.jo.selfcontrol.ultimate -a com.jo.selfcontrol.ultimate.REQUEST_WHITELIST_APP --es pkg \"$pkg\" --el delaySec 0"
+                )
+                .setPositiveButton("Compris", null)
+                .create().also { styleDialogForDarkTheme(it); it.show() }
             return
         }
 
