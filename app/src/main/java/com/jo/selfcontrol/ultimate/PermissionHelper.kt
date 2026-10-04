@@ -129,8 +129,11 @@ object PermissionHelper {
                 data = android.net.Uri.parse("package:${activity.packageName}")
             }
             activity.startActivity(intent)
+        }.recoverCatching {
+            val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            activity.startActivity(intent)
         }.onFailure {
-            activity.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            openAppDetailsSettings(activity)
         }
     }
 

@@ -24,6 +24,9 @@
     <!-- DND / interruption filter control (Nuclear mode) -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
 
+    <!-- Battery optimization exemption -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"

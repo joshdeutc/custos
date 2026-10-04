@@ -257,33 +257,35 @@ class SetupScreenManager(
         brandInstructionsText.text = when (selectedBrand) {
             PermissionHelper.DeviceBrand.PIXEL ->
                 "📱 Sur Google Pixel / Android Stock :\n\n" +
-                        "1. Cliquez sur le bouton bleu ci-dessous pour ouvrir les infos de Custos.\n" +
-                        "2. En haut à droite de l'écran, appuyez sur les 3 points verticaux (⋮).\n" +
-                        "3. Appuyez sur « Autoriser les paramètres restreints ».\n" +
-                        "4. Confirmez avec votre empreinte ou code PIN.\n" +
-                        "5. Revenez ici : vous pouvez maintenant activer l'Accessibilité !"
+                        "1. Activez d'abord les étapes 1 à 5 ci-dessous (Statistiques, Notifications, Batterie, etc.).\n" +
+                        "2. Pour l'Accessibilité (Étape 6) : tentez de l'activer une fois. Android affichera « Paramètre restreint indisponible ».\n" +
+                        "3. Cliquez sur le bouton bleu ci-dessous « Ouvrir les Paramètres de Custos ».\n" +
+                        "4. En haut à droite, appuyez sur les 3 points (⋮) > « Autoriser les paramètres restreints » (confirmez PIN/empreinte).\n" +
+                        "5. Revenez ici et activez EN DERNIER le Service d'Accessibilité !"
 
             PermissionHelper.DeviceBrand.SAMSUNG ->
                 "📱 Sur Samsung (One UI) :\n\n" +
-                        "1. Ouvrez les Paramètres de Custos via le bouton ci-dessous.\n" +
-                        "2. En haut à droite, appuyez sur les 3 points (⋮) > « Autoriser les paramètres restreints ».\n" +
-                        "3. Validez avec votre schéma ou empreinte.\n" +
-                        "4. Dans la même page, allez dans « Batterie » et cochez « Non restreinte ».\n" +
-                        "5. Revenez ici pour valider vos autorisations."
+                        "1. Activez d'abord les autorisations 1 à 5 (Statistiques, Notifications, Batterie sans restriction).\n" +
+                        "2. Tentez d'activer l'Accessibilité si bloquée par le système.\n" +
+                        "3. Ouvrez les Paramètres de Custos via le bouton ci-dessous.\n" +
+                        "4. En haut à droite, appuyez sur les 3 points (⋮) > « Autoriser les paramètres restreints ».\n" +
+                        "5. Dans la même page, vérifiez que « Batterie » est sur « Non restreinte ».\n" +
+                        "6. Revenez ici et activez l'Accessibilité EN DERNIER."
 
             PermissionHelper.DeviceBrand.XIAOMI ->
                 "📱 Sur Xiaomi / Redmi / POCO (MIUI & HyperOS) :\n\n" +
-                        "1. Ouvrez les Paramètres de Custos ci-dessous.\n" +
-                        "2. Faites défiler vers le bas et appuyez sur « Autoriser les paramètres restreints » (ou via les 3 points ⋮ en haut).\n" +
-                        "3. Activez également l'option « Lancement automatique ».\n" +
-                        "4. Dans « Économiseur de batterie », sélectionnez « Pas de restriction ».\n" +
-                        "5. Revenez ici pour finaliser l'activation."
+                        "1. Accordez d'abord les autorisations de base (Statistiques, Notifications, Batterie).\n" +
+                        "2. Ouvrez les Paramètres de Custos ci-dessous.\n" +
+                        "3. Faites défiler vers le bas et appuyez sur « Autoriser les paramètres restreints » (ou via les 3 points ⋮ en haut).\n" +
+                        "4. Activez l'option « Lancement automatique » et mettez l'économiseur sur « Pas de restriction ».\n" +
+                        "5. Revenez ici et activez le Service d'Accessibilité EN DERNIER."
 
             PermissionHelper.DeviceBrand.OTHER ->
                 "📱 Sur les autres appareils Android :\n\n" +
-                        "1. Ouvrez les Paramètres de Custos via le bouton ci-dessous.\n" +
-                        "2. Cherchez le menu (⋮) ou les autorisations spéciales pour autoriser les paramètres restreints.\n" +
-                        "3. Désactivez toute optimisation de batterie pour maintenir le service permanent."
+                        "1. Accordez d'abord toutes les autorisations (Statistiques, Notifications, Batterie).\n" +
+                        "2. Ouvrez les Paramètres de Custos ci-dessous si les paramètres restreints sont signalés.\n" +
+                        "3. Autorisez les paramètres restreints via le menu (⋮).\n" +
+                        "4. Activez le Service d'Accessibilité EN TOUT DERNIER."
         }
     }
 
@@ -297,22 +299,10 @@ class SetupScreenManager(
         }
         contentContainer.addView(sectionTitle)
 
-        // 1. Accessibility
-        a11yRow = createPermissionRow(
-            icon = "🛡️",
-            title = "Service d'Accessibilité",
-            badge = "OBLIGATOIRE",
-            badgeColor = Color.parseColor("#FF5252"),
-            subtitle = "Bloque l'accès aux applications non-autorisées, applique le couvre-feu et la Whitelist.",
-            actionLabel = "Activer",
-            onAction = { PermissionHelper.requestAccessibilityPermission(activity) }
-        )
-        contentContainer.addView(a11yRow.container)
-
-        // 2. Usage Stats
+        // 1. Usage Stats
         usageRow = createPermissionRow(
             icon = "⏱️",
-            title = "Statistiques d'utilisation",
+            title = "1. Statistiques d'utilisation",
             badge = "OBLIGATOIRE",
             badgeColor = Color.parseColor("#FF5252"),
             subtitle = "Nécessaire pour compter le temps passé sur chaque app et déclencher les limites.",
@@ -321,10 +311,10 @@ class SetupScreenManager(
         )
         contentContainer.addView(usageRow.container)
 
-        // 3. Post Notifications
+        // 2. Post Notifications
         postNotifRow = createPermissionRow(
             icon = "🔔",
-            title = "Notifications de l'application",
+            title = "2. Notifications de l'application",
             badge = "OBLIGATOIRE",
             badgeColor = Color.parseColor("#FF5252"),
             subtitle = "Maintient le service d'arrière-plan permanent actif et affiche les alertes de temps.",
@@ -333,10 +323,22 @@ class SetupScreenManager(
         )
         contentContainer.addView(postNotifRow.container)
 
+        // 3. Battery Exemption
+        batteryRow = createPermissionRow(
+            icon = "⚡",
+            title = "3. Batterie sans restriction",
+            badge = "RECOMMANDÉ",
+            badgeColor = Color.parseColor("#2F3BFF"),
+            subtitle = "Empêche Android de fermer le service de contrôle lorsque le téléphone est en veille prolongée.",
+            actionLabel = "Désactiver",
+            onAction = { PermissionHelper.requestIgnoreBatteryOptimizations(activity) }
+        )
+        contentContainer.addView(batteryRow.container)
+
         // 4. Notification Listener
         notifListenerRow = createPermissionRow(
             icon = "🔕",
-            title = "Accès aux notifications",
+            title = "4. Accès aux notifications",
             badge = "RECOMMANDÉ",
             badgeColor = Color.parseColor("#2F3BFF"),
             subtitle = "Permet de couper et masquer les notifications des applications bloquées en couvre-feu.",
@@ -348,7 +350,7 @@ class SetupScreenManager(
         // 5. DND Policy
         dndRow = createPermissionRow(
             icon = "🌙",
-            title = "Mode Ne Pas Déranger",
+            title = "5. Mode Ne Pas Déranger",
             badge = "OPTIONNEL",
             badgeColor = Color.parseColor("#757575"),
             subtitle = "Active automatiquement le mode Ne Pas Déranger pendant les heures de couvre-feu.",
@@ -357,17 +359,44 @@ class SetupScreenManager(
         )
         contentContainer.addView(dndRow.container)
 
-        // 6. Battery Exemption
-        batteryRow = createPermissionRow(
-            icon = "⚡",
-            title = "Batterie sans restriction",
-            badge = "RECOMMANDÉ",
-            badgeColor = Color.parseColor("#2F3BFF"),
-            subtitle = "Empêche Android de fermer le service de contrôle lorsque le téléphone est en veille prolongée.",
-            actionLabel = "Désactiver",
-            onAction = { PermissionHelper.requestIgnoreBatteryOptimizations(activity) }
+        // Warning card before Accessibility
+        val a11yWarningBox = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = roundedBackground(Color.parseColor("#2A1A05"), 10, Color.parseColor("#E65100"), 1)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, dp(4), 0, dp(8)) }
+            layoutParams = lp
+        }
+        val warnIcon = TextView(activity).apply {
+            text = "⚠️"
+            textSize = 16f
+            setPadding(0, 0, dp(8), 0)
+        }
+        val warnTxt = TextView(activity).apply {
+            text = "À ACTIVER EN DERNIER : L'Accessibilité protège les Paramètres système contre toute modification. Activez d'abord les étapes 1 à 5 ci-dessus !"
+            setTextColor(Color.parseColor("#FFB74D"))
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            setLineSpacing(dp(2).toFloat(), 1f)
+        }
+        a11yWarningBox.addView(warnIcon)
+        a11yWarningBox.addView(warnTxt)
+        contentContainer.addView(a11yWarningBox)
+
+        // 6. Accessibility (MUST BE LAST)
+        a11yRow = createPermissionRow(
+            icon = "🛡️",
+            title = "6. Service d'Accessibilité",
+            badge = "À FAIRE EN DERNIER",
+            badgeColor = Color.parseColor("#FF5252"),
+            subtitle = "Bloque l'accès aux apps non-autorisées, applique le couvre-feu et protège les réglages.",
+            actionLabel = "Activer",
+            onAction = { PermissionHelper.requestAccessibilityPermission(activity) }
         )
-        contentContainer.addView(batteryRow.container)
+        contentContainer.addView(a11yRow.container)
     }
 
     private fun createPermissionRow(
