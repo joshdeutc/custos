@@ -48,30 +48,34 @@ object DeviceOwnerHelper {
             Log.i(TAG, "setUninstallBlocked(true) on $pkg")
         }.onFailure { Log.e(TAG, "setUninstallBlocked failed: ${it.message}") }
 
-        // 2. Auto-grant runtime permissions critical to enforcement
-        runCatching {
-            d.setPermissionGrantState(a, pkg, Manifest.permission.PACKAGE_USAGE_STATS,
-                DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED)
-        }.onFailure { /* PACKAGE_USAGE_STATS is special; AppOps fallback handles it */ }
+        // 2. Auto-grant runtime permissions critical to enforcement (only if silent grant enabled)
+        if (BuildConfig.SILENT_AUTO_GRANT_PERMISSIONS) {
+            runCatching {
+                d.setPermissionGrantState(a, pkg, Manifest.permission.PACKAGE_USAGE_STATS,
+                    DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED)
+            }.onFailure { /* PACKAGE_USAGE_STATS is special; AppOps fallback handles it */ }
 
-        runCatching {
-            d.setPermissionGrantState(a, pkg, Manifest.permission.POST_NOTIFICATIONS,
-                DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED)
+            runCatching {
+                d.setPermissionGrantState(a, pkg, Manifest.permission.POST_NOTIFICATIONS,
+                    DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED)
+            }
+
+            // 3. Auto-grant USAGE_STATS via AppOps (DO privilege escalation route)
+            runCatching {
+                val appOps = ctx.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+                val setMode = appOps.javaClass.getMethod(
+                    "setMode", Int::class.java, Int::class.java, String::class.java, Int::class.java
+                )
+                // OP_GET_USAGE_STATS = 43, MODE_ALLOWED = 0
+                setMode.invoke(appOps, 43, android.os.Process.myUid(), pkg, 0)
+                Log.i(TAG, "AppOp GET_USAGE_STATS granted via reflection")
+            }.onFailure { Log.w(TAG, "AppOps reflection failed: ${it.message}") }
+
+            // 4. Force-enable our AccessibilityService (and ensure A11Y is enabled globally)
+            enforceA11YReEnable(ctx)
+        } else {
+            Log.i(TAG, "Silent auto-grant disabled for this flavor — onboarding checklist handles permissions")
         }
-
-        // 3. Auto-grant USAGE_STATS via AppOps (DO privilege escalation route)
-        runCatching {
-            val appOps = ctx.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
-            val setMode = appOps.javaClass.getMethod(
-                "setMode", Int::class.java, Int::class.java, String::class.java, Int::class.java
-            )
-            // OP_GET_USAGE_STATS = 43, MODE_ALLOWED = 0
-            setMode.invoke(appOps, 43, android.os.Process.myUid(), pkg, 0)
-            Log.i(TAG, "AppOp GET_USAGE_STATS granted via reflection")
-        }.onFailure { Log.w(TAG, "AppOps reflection failed: ${it.message}") }
-
-        // 4. Force-enable our AccessibilityService (and ensure A11Y is enabled globally)
-        enforceA11YReEnable(ctx)
 
         // 5. App installations are allowed — unauthorized apps are quarantined by WhitelistManager
         runCatching {
@@ -136,6 +140,14 @@ object DeviceOwnerHelper {
      */
     fun enforceA11YReEnable(ctx: Context) {
         if (!isDeviceOwner(ctx)) return
+        if (!BuildConfig.SILENT_AUTO_GRANT_PERMISSIONS && !PermissionHelper.isMandatorySetupComplete(ctx)) {
+            Log.d(TAG, "enforceA11YReEnable deferred: setup checklist not complete")
+            return
+        }
+        if (DelayManager.isSettingsUnlocked(ctx)) {
+            Log.d(TAG, "enforceA11YReEnable bypassed: Settings unlocked via delay")
+            return
+        }
         val d = dpm(ctx)
         val a = admin(ctx)
         val pkg = ctx.packageName

@@ -32,6 +32,7 @@ android {
         buildConfigField "boolean", "WHITELIST_ADB_ONLY", "false"
         buildConfigField "boolean", "PERMANENT_APP_LIMITS", "false"
         buildConfigField "boolean", "PERMANENT_CURFEW", "false"
+        buildConfigField "boolean", "SILENT_AUTO_GRANT_PERMISSIONS", "false"
     }
 
     buildFeatures {
@@ -50,6 +51,7 @@ android {
             buildConfigField "boolean", "WHITELIST_ADB_ONLY", "false"
             buildConfigField "boolean", "PERMANENT_APP_LIMITS", "false"
             buildConfigField "boolean", "PERMANENT_CURFEW", "false"
+            buildConfigField "boolean", "SILENT_AUTO_GRANT_PERMISSIONS", "false"
         }
         admin {
             dimension "level"
@@ -61,6 +63,7 @@ android {
             buildConfigField "boolean", "WHITELIST_ADB_ONLY", "false"
             buildConfigField "boolean", "PERMANENT_APP_LIMITS", "false"
             buildConfigField "boolean", "PERMANENT_CURFEW", "false"
+            buildConfigField "boolean", "SILENT_AUTO_GRANT_PERMISSIONS", "false"
         }
         deviceAdmin {
             dimension "level"
@@ -72,6 +75,7 @@ android {
             buildConfigField "boolean", "WHITELIST_ADB_ONLY", "false"
             buildConfigField "boolean", "PERMANENT_APP_LIMITS", "false"
             buildConfigField "boolean", "PERMANENT_CURFEW", "false"
+            buildConfigField "boolean", "SILENT_AUTO_GRANT_PERMISSIONS", "true"
         }
         me {
             dimension "level"
@@ -85,6 +89,7 @@ android {
             buildConfigField "boolean", "WHITELIST_ADB_ONLY", "false"
             buildConfigField "boolean", "PERMANENT_APP_LIMITS", "false"
             buildConfigField "boolean", "PERMANENT_CURFEW", "false"
+            buildConfigField "boolean", "SILENT_AUTO_GRANT_PERMISSIONS", "false"
         }
         brother {
             dimension "level"
@@ -100,6 +105,7 @@ android {
             buildConfigField "boolean", "WHITELIST_ADB_ONLY", "true"
             buildConfigField "boolean", "PERMANENT_APP_LIMITS", "true"
             buildConfigField "boolean", "PERMANENT_CURFEW", "true"
+            buildConfigField "boolean", "SILENT_AUTO_GRANT_PERMISSIONS", "true"
         }
     }
 

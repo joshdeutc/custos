@@ -378,6 +378,12 @@ class AppWatcherService : AccessibilityService() {
             return
         }
 
+        // If mandatory setup is not complete yet, allow user to freely access Settings to grant permissions
+        if (!PermissionHelper.isMandatorySetupComplete(this)) {
+            Log.d(TAG, "🔓 Settings bypassed: Mandatory setup is not complete.")
+            return
+        }
+
         val rootNode = rootInActiveWindow ?: return
 
         try {
