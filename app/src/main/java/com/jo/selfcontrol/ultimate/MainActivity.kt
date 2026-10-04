@@ -4507,9 +4507,15 @@ class MainActivity : Activity() {
                 })
 
                 val pendingMs = ScreenRuleManager.pendingRemovalRemainingMs(this@MainActivity, rule.name)
+                val pendingTimer = ScreenRuleManager.pendingTimerChange(this@MainActivity, rule.name)
+
                 addView(TextView(this@MainActivity).apply {
                     text = if (ScreenRuleManager.PERMANENT_ON_THIS_FLAVOR) {
                         "🔒 Permanent sur ce build (retrait ADB uniquement)"
+                    } else if (pendingTimer != null) {
+                        val targetLabel = protectionTimerLabel(pendingTimer.targetDelaySec)
+                        val remainingSec = kotlin.math.max(0, ((pendingTimer.executeAt - System.currentTimeMillis()) / 1000).toInt())
+                        "🛡️ Protection timer: ${protectionTimerLabel(rule.protectionDelaySec)} (⏳ → $targetLabel dans ${formatLongDuration(remainingSec)})"
                     } else {
                         "🛡️ Protection timer: ${protectionTimerLabel(rule.protectionDelaySec)}"
                     }
@@ -4524,6 +4530,22 @@ class MainActivity : Activity() {
                         textSize = 12f
                         setTextColor(Color.parseColor("#666666"))
                         setPadding(0, dp(2), 0, 0)
+                    })
+                }
+
+                if (pendingTimer != null && !ScreenRuleManager.PERMANENT_ON_THIS_FLAVOR) {
+                    addView(Button(this@MainActivity).apply {
+                        text = "Annuler la modification du timer"
+                        textSize = 12f
+                        setTextColor(Color.WHITE)
+                        background = roundedBackground(Color.parseColor("#444444"))
+                        setOnClickListener {
+                            ScreenRuleManager.cancelTimerChange(this@MainActivity, rule.name)
+                            refreshPartialAccessUI()
+                        }
+                        layoutParams = LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                        ).apply { topMargin = dp(6) }
                     })
                 }
 
@@ -4560,7 +4582,19 @@ class MainActivity : Activity() {
                             background = roundedBackground(Color.parseColor("#333333"))
                             setOnClickListener {
                                 showProtectionTimerDialog(rule.protectionDelaySec) { picked ->
-                                    ScreenRuleManager.updateProtectionDelay(this@MainActivity, rule.name, picked)
+                                    val outcome = ScreenRuleManager.requestUpdateProtectionDelay(this@MainActivity, rule.name, picked)
+                                    when (outcome) {
+                                        is ScreenRuleManager.TimerChangeOutcome.Immediate -> {
+                                            Toast.makeText(this@MainActivity, "Timer mis à jour : ${protectionTimerLabel(picked)}", Toast.LENGTH_SHORT).show()
+                                        }
+                                        is ScreenRuleManager.TimerChangeOutcome.Deferred -> {
+                                            Toast.makeText(this@MainActivity, "Diminution du timer : prendra effet dans ${formatLongDuration(outcome.seconds)}", Toast.LENGTH_LONG).show()
+                                        }
+                                        is ScreenRuleManager.TimerChangeOutcome.AlreadyPending -> {
+                                            Toast.makeText(this@MainActivity, "Une modification est déjà en cours", Toast.LENGTH_SHORT).show()
+                                        }
+                                        else -> {}
+                                    }
                                     refreshPartialAccessUI()
                                 }
                             }
@@ -4686,7 +4720,7 @@ class MainActivity : Activity() {
             })
         }
 
-        var pickedTimer: Int? = if (ScreenRuleManager.PERMANENT_ON_THIS_FLAVOR) null else 360 * 60
+        var pickedTimer: Int? = null
 
         if (!ScreenRuleManager.PERMANENT_ON_THIS_FLAVOR) {
             val timerRow = buildProtectionTimerRow(pickedTimer) { picked ->

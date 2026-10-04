@@ -146,6 +146,21 @@ object ScreenRuleManager {
         object NotFound : RemovalOutcome()
     }
 
+    /** Outcome of a timer change request. */
+    sealed class TimerChangeOutcome {
+        object Permanent : TimerChangeOutcome()
+        object Immediate : TimerChangeOutcome()
+        data class Deferred(val seconds: Int) : TimerChangeOutcome()
+        data class AlreadyPending(val remainingMs: Long) : TimerChangeOutcome()
+        object NotFound : TimerChangeOutcome()
+    }
+
+    data class PendingTimerChange(
+        val name: String,
+        val targetDelaySec: Int?,
+        val executeAt: Long
+    )
+
     // ──────────────────────────────────────
     //  Marker derivation
     // ──────────────────────────────────────
@@ -338,8 +353,8 @@ object ScreenRuleManager {
     }
 
     /**
-     * Apply every queued removal whose timer has elapsed. Called from the service tick, so it is
-     * throttled to a few seconds and is a no-op on the permanent flavor.
+     * Apply every queued removal and timer change whose timer has elapsed. Called from the service
+     * tick, so it is throttled to a few seconds and is a no-op on the permanent flavor.
      */
     fun applyPendingRemovalsIfReady(ctx: Context) {
         if (PERMANENT_ON_THIS_FLAVOR) return
@@ -347,12 +362,38 @@ object ScreenRuleManager {
         if (now - lastRemovalSweep < 5_000L) return
         lastRemovalSweep = now
 
+        // 1. Pending removals
         val pending = loadPending(ctx)
-        if (pending.isEmpty()) return
-        val due = pending.filter { it.second <= now }
-        if (due.isEmpty()) return
-        for ((name, _) in due) removeNow(ctx, name)
-        savePending(ctx, pending.filterNot { p -> due.any { it.first == p.first } })
+        if (pending.isNotEmpty()) {
+            val due = pending.filter { it.second <= now }
+            if (due.isNotEmpty()) {
+                for ((name, _) in due) removeNow(ctx, name)
+                savePending(ctx, pending.filterNot { p -> due.any { it.first == p.first } })
+            }
+        }
+
+        // 2. Pending timer changes
+        val pendingTimers = loadPendingTimerChanges(ctx)
+        if (pendingTimers.isNotEmpty()) {
+            val dueTimers = pendingTimers.filter { it.executeAt <= now }
+            if (dueTimers.isNotEmpty()) {
+                val rules = load(ctx).toMutableList()
+                var changed = false
+                for (timerChange in dueTimers) {
+                    val idx = rules.indexOfFirst { it.name == timerChange.name }
+                    if (idx != -1) {
+                        rules[idx] = rules[idx].copy(protectionDelaySec = timerChange.targetDelaySec)
+                        changed = true
+                        Log.i(TAG, "Applied due timer change for ${timerChange.name} -> ${timerChange.targetDelaySec}")
+                        EventLog.log(ctx, "SCREEN_RULE", "applied due timer '${timerChange.name}' -> ${timerChange.targetDelaySec}")
+                    }
+                }
+                if (changed) {
+                    save(ctx, rules)
+                }
+                savePendingTimerChanges(ctx, pendingTimers.filterNot { t -> dueTimers.any { it.name == t.name } })
+            }
+        }
     }
 
     /**
@@ -367,6 +408,7 @@ object ScreenRuleManager {
     fun removeImmediate(ctx: Context, name: String): Boolean {
         if (load(ctx).none { it.name == name }) return false
         cancelRemoval(ctx, name)
+        cancelTimerChange(ctx, name)
         removeNow(ctx, name)
         return true
     }
@@ -374,6 +416,7 @@ object ScreenRuleManager {
     private fun removeNow(ctx: Context, name: String) {
         val remaining = load(ctx).filterNot { it.name == name }
         save(ctx, remaining)
+        cancelTimerChange(ctx, name)
         Log.w(TAG, "Rule removed: $name")
         EventLog.log(ctx, "SCREEN_RULE", "removed '$name'")
     }
@@ -393,6 +436,97 @@ object ScreenRuleManager {
             arr.put(JSONObject().put("name", n).put("execute_at", at))
         }
         writeRoot(ctx, readRoot(ctx).put("pending_removals", arr))
+    }
+
+    fun loadPendingTimerChanges(ctx: Context): List<PendingTimerChange> {
+        val arr = readRoot(ctx).optJSONArray("pending_timer_changes") ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val n = o.optString("name").ifBlank { return@mapNotNull null }
+            val target = if (o.has("target_delay_sec") && !o.isNull("target_delay_sec")) o.getInt("target_delay_sec") else null
+            val executeAt = o.optLong("execute_at", 0L)
+            PendingTimerChange(n, target, executeAt)
+        }
+    }
+
+    private fun savePendingTimerChanges(ctx: Context, pending: List<PendingTimerChange>) {
+        val arr = JSONArray()
+        for (c in pending) {
+            arr.put(JSONObject().apply {
+                put("name", c.name)
+                if (c.targetDelaySec != null) put("target_delay_sec", c.targetDelaySec)
+                else put("target_delay_sec", JSONObject.NULL)
+                put("execute_at", c.executeAt)
+            })
+        }
+        val root = readRoot(ctx).put("pending_timer_changes", arr)
+        writeRoot(ctx, root)
+    }
+
+    fun pendingTimerChange(ctx: Context, name: String): PendingTimerChange? {
+        val change = loadPendingTimerChanges(ctx).firstOrNull { it.name == name } ?: return null
+        val left = change.executeAt - System.currentTimeMillis()
+        return if (left > 0) change else null
+    }
+
+    fun cancelTimerChange(ctx: Context, name: String): Boolean {
+        val pending = loadPendingTimerChanges(ctx)
+        if (pending.none { it.name == name }) return false
+        savePendingTimerChanges(ctx, pending.filterNot { it.name == name })
+        Log.w(TAG, "Timer change cancelled for $name")
+        EventLog.log(ctx, "SCREEN_RULE", "timer change cancelled '$name'")
+        return true
+    }
+
+    fun requestUpdateProtectionDelay(ctx: Context, name: String, newDelaySec: Int?): TimerChangeOutcome {
+        val rule = load(ctx).firstOrNull { it.name == name } ?: return TimerChangeOutcome.NotFound
+        if (PERMANENT_ON_THIS_FLAVOR) {
+            return TimerChangeOutcome.Permanent
+        }
+
+        val currentSec = rule.protectionDelaySec
+        val globalSec = DelayManager.getCurrentEffectiveDelaySeconds(ctx).toInt()
+
+        val effectiveCurrent = currentSec ?: globalSec
+        val effectiveNew = newDelaySec ?: globalSec
+
+        // If identical, nothing to do
+        if (newDelaySec == currentSec) {
+            cancelTimerChange(ctx, name)
+            return TimerChangeOutcome.Immediate
+        }
+
+        // Hardening or equal: increase or keep same -> applies immediately
+        if (effectiveNew >= effectiveCurrent) {
+            cancelTimerChange(ctx, name)
+            val updated = rule.copy(protectionDelaySec = newDelaySec)
+            save(ctx, load(ctx).map { if (it.name == name) updated else it })
+            Log.w(TAG, "Protection timer hardened immediately for $name: $currentSec -> $newDelaySec")
+            EventLog.log(ctx, "SCREEN_RULE", "timer hardened '$name' -> $newDelaySec")
+            return TimerChangeOutcome.Immediate
+        }
+
+        // Relaxation: new timer is lower than current timer -> must wait!
+        val waitSec = max(effectiveCurrent, globalSec)
+        val unlockApplies = currentSec == null && DelayManager.isSettingsUnlocked(ctx)
+
+        if (waitSec <= 0 || unlockApplies) {
+            cancelTimerChange(ctx, name)
+            val updated = rule.copy(protectionDelaySec = newDelaySec)
+            save(ctx, load(ctx).map { if (it.name == name) updated else it })
+            Log.w(TAG, "Protection timer updated immediately (unlocked/no wait) for $name -> $newDelaySec")
+            EventLog.log(ctx, "SCREEN_RULE", "timer relaxed immediately '$name' -> $newDelaySec")
+            return TimerChangeOutcome.Immediate
+        }
+
+        // Queue pending timer change
+        val executeAt = System.currentTimeMillis() + waitSec * 1000L
+        val pending = loadPendingTimerChanges(ctx).filterNot { it.name == name } +
+                PendingTimerChange(name, newDelaySec, executeAt)
+        savePendingTimerChanges(ctx, pending)
+        Log.w(TAG, "Timer lowering queued for $name in ${waitSec}s: $currentSec -> $newDelaySec")
+        EventLog.log(ctx, "SCREEN_RULE", "timer lowering queued '$name' in ${waitSec}s -> $newDelaySec")
+        return TimerChangeOutcome.Deferred(waitSec)
     }
 
     private fun parseRule(o: JSONObject): ScreenRule? = try {
@@ -429,10 +563,6 @@ object ScreenRuleManager {
      * On `me`, rules are strictly permanent (ADB only).
      */
     fun updateProtectionDelay(ctx: Context, name: String, newDelaySec: Int?): Boolean {
-        if (PERMANENT_ON_THIS_FLAVOR) return false
-        val rules = load(ctx)
-        val rule = rules.firstOrNull { it.name == name } ?: return false
-        val updated = rule.copy(protectionDelaySec = newDelaySec)
-        return save(ctx, rules.map { if (it.name == name) updated else it })
+        return requestUpdateProtectionDelay(ctx, name, newDelaySec) !is TimerChangeOutcome.NotFound
     }
 }

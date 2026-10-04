@@ -516,10 +516,11 @@ class AppWatcherService : AccessibilityService() {
         if (rules.isEmpty()) return false
 
         // Specialized handler for Instagram: if rules exist for Instagram and are active,
-        // use the tuned ViewPager/multi-window aware engine.
+        // use the tuned ViewPager/multi-window aware engine matching the specific rule blockedIds.
         if (pkg == INSTAGRAM_PACKAGE) {
-            if (isInstagramRuleActive()) {
-                return enforceInstagramRestrictions()
+            val activeIgRules = rules.filter { isRuleActiveNow(it) }
+            if (activeIgRules.isNotEmpty()) {
+                return enforceInstagramRestrictions(activeIgRules)
             }
             return false
         }
@@ -538,17 +539,12 @@ class AppWatcherService : AccessibilityService() {
         return false
     }
 
-    private fun isInstagramRuleActive(): Boolean {
-        val igRules = screenRules.filter { it.packageName == INSTAGRAM_PACKAGE }
-        if (igRules.isEmpty()) return false
-        return igRules.any { isRuleActiveNow(it) }
-    }
-
     /**
-     * Keep the official Instagram app on the messages: leaving for the feed, Explore, search or
-     * Reels sends the user straight back to the inbox.
+     * Specialized Instagram restriction handler that respects the specific rules defined
+     * (e.g. blocking ONLY Reels, or blocking feed, etc.), using the tuned Instagram
+     * tab detection and redirect mechanisms.
      */
-    private fun enforceInstagramRestrictions(): Boolean {
+    private fun enforceInstagramRestrictions(rules: List<ScreenRuleManager.ScreenRule>): Boolean {
         val now = System.currentTimeMillis()
         if (now - lastInstagramScanTime < INSTAGRAM_SCAN_INTERVAL_MS) return false
         lastInstagramScanTime = now
@@ -562,22 +558,52 @@ class AppWatcherService : AccessibilityService() {
         val selectedTab = instagramSelectedTab(root)
         if (selectedTab == INSTAGRAM_DIRECT_TAB_VIEW_ID) return false
 
-        val hit = when (selectedTab) {
-            in INSTAGRAM_REDIRECTED_TABS -> selectedTab
-            else -> {
-                val veto = INSTAGRAM_INBOX_IDS.firstOrNull { hasViewId(root, it) }
-                if (veto != null) null else INSTAGRAM_REDIRECT_IDS.firstOrNull { hasViewId(root, it) }
+        // Match against active rules:
+        // A rule matches if:
+        // 1) Current selected tab is in rule.blockedIds
+        // 2) OR any of the rule's blockedIds is visible in root, and none of rule's allowedIds are visible
+        var targetRule: ScreenRuleManager.ScreenRule? = null
+        var hit: String? = null
+
+        for (rule in rules) {
+            // If any allowed id is present, this screen is allowed by this rule
+            if (rule.allowedIds.any { hasViewId(root, it) }) continue
+
+            // Check if selected tab is blocked
+            if (selectedTab != null && (selectedTab in rule.blockedIds || rule.blockedIds.any { selectedTab.endsWith(it) })) {
+                targetRule = rule
+                hit = selectedTab
+                break
+            }
+
+            // Check if any blocked id is visible in active window
+            val viewHit = rule.blockedIds.firstOrNull { hasViewId(root, it) }
+            if (viewHit != null) {
+                targetRule = rule
+                hit = viewHit
+                break
             }
         }
-        if (hit == null) return false
+
+        if (targetRule == null || hit == null) return false
 
         if (now - lastInstagramBackTime < INSTAGRAM_REDIRECT_COOLDOWN_MS) {
             return false
         }
         lastInstagramBackTime = now
         val shortHit = hit.removePrefix("com.instagram.android:id/")
-        Log.w(TAG, "🛡️ Instagram $shortHit → redirect to messages")
-        EventLog.log(this, "IG_REDIRECT", "$shortHit (selectedTab=$selectedTab)")
+        Log.w(TAG, "🛡️ Instagram ${targetRule.name} ($shortHit) → redirect to allowed screen")
+        EventLog.log(this, "IG_REDIRECT", "${targetRule.name} $shortHit (selectedTab=$selectedTab)")
+
+        // Custom escape from rule if specified
+        val escapeTapId = targetRule.escapeTapId
+        if (escapeTapId != null && tapNavItem(INSTAGRAM_PACKAGE, escapeTapId, targetRule.escapeTapIndex)) {
+            return true
+        }
+        val escapeDeeplink = targetRule.escapeDeeplink
+        if (escapeDeeplink != null && openDeeplink(INSTAGRAM_PACKAGE, escapeDeeplink)) {
+            return true
+        }
 
         val preferredDeeplink = hit in INSTAGRAM_PREFER_DEEPLINK_IDS
         if (preferredDeeplink && openInstagramInbox()) {

@@ -79,9 +79,9 @@ android {
             buildConfigField "String", "LEVEL_NAME", "\"me\""
             // Developer/debug flavor only: enable the persistent event log for diagnostics.
             buildConfigField "boolean", "EVENT_LOG_ENABLED", "true"
-            buildConfigField "boolean", "OS_SUSPENSION_ENABLED", "true"
-            buildConfigField "boolean", "HARD_SECURITY_RESTRICTIONS", "true"
-            buildConfigField "boolean", "PERMANENT_SCREEN_RULES", "true"
+            buildConfigField "boolean", "OS_SUSPENSION_ENABLED", "false"
+            buildConfigField "boolean", "HARD_SECURITY_RESTRICTIONS", "false"
+            buildConfigField "boolean", "PERMANENT_SCREEN_RULES", "false"
             buildConfigField "boolean", "WHITELIST_ADB_ONLY", "false"
             buildConfigField "boolean", "PERMANENT_APP_LIMITS", "false"
             buildConfigField "boolean", "PERMANENT_CURFEW", "false"
