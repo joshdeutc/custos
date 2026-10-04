@@ -2,17 +2,37 @@
 # End-to-End automated test for Custos notification blocking & snoozing on Samsung.
 #
 # Usage:
-#   .\tests\test_notifications_adb.ps1 [-DeviceId "RZCT30L9EGJ"]
+#   .\tests\test_notifications_adb.ps1 [-DeviceId "<id>"]
 
 param(
-    [string]$DeviceId = "RZCT30L9EGJ"
+    [string]$DeviceId = ""
 )
 
 $ErrorActionPreference = "Stop"
 
-$adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
-if (-not (Test-Path $adb)) {
-    $adb = "adb"
+$adb = if (Test-Path "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe") { 
+    "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" 
+} elseif (Get-Command adb -ErrorAction SilentlyContinue) { 
+    "adb" 
+} else { 
+    "adb"
+}
+
+# Auto-detect device if not provided
+if (-not $DeviceId) {
+    $devicesOutput = & $adb devices
+    $deviceLines = @($devicesOutput | Where-Object { $_ -match "\tdevice$" })
+    if ($deviceLines.Count -eq 0) {
+        & $adb connect 192.168.1.173:5555 | Out-Null
+        Start-Sleep -Seconds 1
+        $devicesOutput = & $adb devices
+        $deviceLines = @($devicesOutput | Where-Object { $_ -match "\tdevice$" })
+    }
+    if ($deviceLines.Count -gt 0) {
+        $DeviceId = ($deviceLines[0] -split "\t")[0].Trim()
+    } else {
+        $DeviceId = "RZCT30L9EGJ"
+    }
 }
 
 function Invoke-AdbShell([string]$cmd) {
