@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@android:drawable/ic_lock_lock"
+        android:label="@string/app_name"
+        android:supportsRtl="true">
+
+        <!-- Device Admin / Device Owner Receiver -->
+        <receiver
+            android:name=".GuardianAdminReceiver"
+            android:description="@string/admin_description"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            android:exported="true">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin_guardian" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+                <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Package change receiver for instant quarantine on newly installed apps -->
+        <receiver
+            android:name=".GuardianPackageReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_ADDED" />
+                <action android:name="android.intent.action.PACKAGE_REPLACED" />
+                <data android:scheme="package" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="com.jo.custos.guardian.ACTION_CHECK_EXPIRATION" />
+            </intent-filter>
+        </receiver>
+
+        <!-- AIDL IPC Service for Custos UI communication -->
+        <service
+            android:name=".GuardianService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.jo.custos.guardian.ACTION_BIND_GUARDIAN" />
+            </intent-filter>
+        </service>
+
+    </application>
+
+</manifest>

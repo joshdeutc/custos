@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Custos Guardian</string>
+    <string name="admin_description">Gardien autonome de sécurité et d\'immuabilité temporelle pour Custos.</string>
+</resources>

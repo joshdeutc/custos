@@ -26,7 +26,7 @@ object DeviceOwnerHelper {
         ComponentName(ctx, AdminReceiver::class.java)
 
     fun isDeviceOwner(ctx: Context): Boolean = try {
-        dpm(ctx).isDeviceOwnerApp(ctx.packageName)
+        dpm(ctx).isDeviceOwnerApp(ctx.packageName) || (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner())
     } catch (e: Exception) {
         Log.e(TAG, "isDeviceOwner failed: ${e.message}")
         false
@@ -183,7 +183,11 @@ object DeviceOwnerHelper {
      */
     fun suspendApp(ctx: Context, pkg: String): Boolean {
         if (!BuildConfig.OS_SUSPENSION_ENABLED) return false
-        if (!isDeviceOwner(ctx)) return false
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            GuardianClient.setPackageSuspended(pkg, true)
+            return true
+        }
+        if (!dpm(ctx).isDeviceOwnerApp(ctx.packageName)) return false
         return runCatching {
             val failed = dpm(ctx).setPackagesSuspended(admin(ctx), arrayOf(pkg), true)
             // returns array of packages that could NOT be suspended
@@ -195,7 +199,11 @@ object DeviceOwnerHelper {
     }
 
     fun unsuspendApp(ctx: Context, pkg: String): Boolean {
-        if (!isDeviceOwner(ctx)) return false
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            GuardianClient.setPackageSuspended(pkg, false)
+            return true
+        }
+        if (!dpm(ctx).isDeviceOwnerApp(ctx.packageName)) return false
         return runCatching {
             dpm(ctx).setPackagesSuspended(admin(ctx), arrayOf(pkg), false)
             true
@@ -250,7 +258,11 @@ object DeviceOwnerHelper {
 
     /** Hide an app entirely (used for Nuclear Mode OS-level enforcement). */
     fun hideApp(ctx: Context, pkg: String, hidden: Boolean): Boolean {
-        if (!isDeviceOwner(ctx)) return false
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            GuardianClient.setPackageHidden(pkg, hidden)
+            return true
+        }
+        if (!dpm(ctx).isDeviceOwnerApp(ctx.packageName)) return false
         return runCatching {
             dpm(ctx).setApplicationHidden(admin(ctx), pkg, hidden)
         }.getOrElse {

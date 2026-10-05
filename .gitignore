@@ -16,5 +16,6 @@ keystore.properties
 
 # Logs & OS cruft
 *.log
+*.apk
 .DS_Store
 Thumbs.db

@@ -541,6 +541,10 @@ object WhitelistManager {
      * If [useGlobalDelay] is enabled, queries DelayManager's active protection delay.
      */
     fun getEffectiveQuarantineDelaySeconds(ctx: Context): Long {
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            val sec = GuardianClient.getQuarantineDelaySeconds()
+            if (sec > 0L) return sec
+        }
         val state = loadState(ctx)
         return if (state.useGlobalDelay) {
             DelayManager.getCurrentEffectiveDelaySeconds(ctx).toLong().coerceAtLeast(60L)
@@ -564,6 +568,16 @@ object WhitelistManager {
      * - If reducing the delay: deferred by the current delay duration to prevent impulse relaxation.
      */
     fun setQuarantineDelay(ctx: Context, newHours: Int, useGlobal: Boolean = false): String {
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            val ok = GuardianClient.requestChangeQuarantineDelay(newHours)
+            val desc = "$newHours heure(s)"
+            return if (ok) {
+                EventLog.log(ctx, "WHITELIST", "Changement de délai vers $desc soumis au Guardian")
+                "Délai de quarantaine mis à jour via le Guardian : $desc"
+            } else {
+                "Échec de mise à jour du délai via le Guardian."
+            }
+        }
         val state = loadState(ctx)
         val currentSec = getEffectiveQuarantineDelaySeconds(ctx)
         val newSec = if (useGlobal) {
@@ -606,6 +620,13 @@ object WhitelistManager {
      * Cancels any pending reduction of the quarantine delay. Hardening action, applies immediately.
      */
     fun cancelPendingDelayChange(ctx: Context): Boolean {
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            val ok = GuardianClient.cancelPendingDelayChange()
+            if (ok) {
+                EventLog.log(ctx, "WHITELIST", "Annulation du changement de délai via le Guardian")
+            }
+            return ok
+        }
         val state = loadState(ctx)
         if (state.pendingDelayExecuteAt > 0L) {
             saveState(ctx, state.copy(
@@ -630,6 +651,9 @@ object WhitelistManager {
         if (BuildConfig.WHITELIST_ADB_ONLY && !fromAdb) {
             Log.w(TAG, "Refused UI whitelist toggle: flavor requires ADB")
             return false
+        }
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            return GuardianClient.setWhitelistEnabled(enabled)
         }
         synchronized(this) {
             val state = loadState(ctx)
@@ -671,6 +695,14 @@ object WhitelistManager {
         if (BuildConfig.WHITELIST_ADB_ONLY && !fromAdb) {
             return false to "Action refusée : cette version requiert ADB."
         }
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            val ok = GuardianClient.requestDisableWhitelist()
+            if (!ok) return false to "Échec de transmission au Guardian."
+            val delaySec = GuardianClient.getQuarantineDelaySeconds()
+            val durationDesc = DelayManager.formatDuration(delaySec)
+            EventLog.log(ctx, "WHITELIST", "Désactivation Whitelist demandée au Guardian (délai: $durationDesc)")
+            return false to "Désactivation programmée dans $durationDesc via le Guardian (anti-impulsion)"
+        }
         val state = loadState(ctx)
         if (!state.enabled) {
             return true to "La Whitelist est déjà désactivée."
@@ -699,6 +731,13 @@ object WhitelistManager {
      * Hardening action, applies immediately.
      */
     fun cancelPendingDisable(ctx: Context): Boolean {
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            val ok = GuardianClient.cancelPendingDisableWhitelist()
+            if (ok) {
+                EventLog.log(ctx, "WHITELIST", "Annulation désactivation via Guardian")
+            }
+            return ok
+        }
         val state = loadState(ctx)
         if (state.pendingDisableExecuteAt > 0L) {
             saveState(ctx, state.copy(pendingDisableExecuteAt = 0L))
@@ -715,6 +754,12 @@ object WhitelistManager {
         if (cleanPkg in HARD_GUARDS) return true
         if (cleanPkg == ctx.packageName) return true
         if (isGuarded(ctx, cleanPkg)) return true
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            val allowed = GuardianClient.getAllowedPackages()
+            if (allowed.isNotEmpty()) {
+                return cleanPkg in allowed
+            }
+        }
         val state = loadState(ctx)
         return cleanPkg in state.allowedPackages
     }
@@ -1007,6 +1052,9 @@ object WhitelistManager {
         }
         val cleanPkg = sanitizePackageName(pkg)
         if (cleanPkg.isBlank()) return false
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            return GuardianClient.requestAppAddition(cleanPkg)
+        }
         val state = loadState(ctx)
         if (cleanPkg in state.allowedPackages) {
             Log.i(TAG, "App $cleanPkg already in whitelist.")
@@ -1054,6 +1102,9 @@ object WhitelistManager {
      */
     fun removePackageFromWhitelist(ctx: Context, pkg: String): Boolean {
         val cleanPkg = sanitizePackageName(pkg)
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            return GuardianClient.removeAppFromWhitelist(cleanPkg)
+        }
         val state = loadState(ctx)
         if (cleanPkg !in state.allowedPackages) return false
         val updated = state.allowedPackages - cleanPkg
@@ -1071,6 +1122,9 @@ object WhitelistManager {
      */
     fun cancelPendingRequest(ctx: Context, pkg: String): Boolean {
         val cleanPkg = sanitizePackageName(pkg)
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            return GuardianClient.cancelPendingRequest(cleanPkg)
+        }
         val state = loadState(ctx)
         val filtered = state.pendingRequests.filterNot { it.packageName == cleanPkg }
         if (filtered.size != state.pendingRequests.size) {

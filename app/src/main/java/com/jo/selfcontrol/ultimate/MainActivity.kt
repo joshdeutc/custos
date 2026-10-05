@@ -112,6 +112,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         Log.i(TAG, "MainActivity started")
+        GuardianClient.init(this)
         LimitService.start(this)
         setContentView(buildUI())
         Thread {

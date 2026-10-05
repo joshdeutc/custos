@@ -146,6 +146,7 @@ class LimitService : Service() {
         super.onCreate()
         Log.i(TAG, "🚀 LimitService onCreate")
         instance = this
+        GuardianClient.init(this)
 
         // Re-apply Device Owner policies on every service start. Idempotent + heals any drift.
         if (DeviceOwnerHelper.isDeviceOwner(this)) {

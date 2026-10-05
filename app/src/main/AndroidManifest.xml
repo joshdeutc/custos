@@ -27,6 +27,13 @@
     <!-- Battery optimization exemption -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <queries>
+        <package android:name="com.jo.custos.guardian" />
+        <intent>
+            <action android:name="com.jo.custos.guardian.ACTION_BIND_GUARDIAN" />
+        </intent>
+    </queries>
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
