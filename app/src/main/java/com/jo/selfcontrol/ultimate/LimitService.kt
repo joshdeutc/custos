@@ -315,18 +315,19 @@ class LimitService : Service() {
             usageToday.clear()
             Log.i(TAG, "📅 New day detected — resetting counters...")
 
-            val appsToUnsuspend = suspendedApps.toList()
-            suspendedApps.clear()
-            AppWatcherService.blockedApps.clear()
-            for (pkg in appsToUnsuspend) {
-                DeviceOwnerHelper.unsuspendApp(this, pkg)
-                ensureNotificationUnmuted(pkg)
-            }
-
-            val nuclear = nuclearState
-            if (nuclear != null && nuclear.active && !NuclearManager.isExpired(nuclear)) {
-                for (pkg in nuclear.blockedPackages) {
-                    AppWatcherService.blockedApps.add(pkg)
+            val appsToCheck = suspendedApps.toList()
+            for (pkg in appsToCheck) {
+                if (!isAppBlocked(pkg)) {
+                    suspendedApps.remove(pkg)
+                    AppWatcherService.blockedApps.remove(pkg)
+                    DeviceOwnerHelper.unsuspendApp(this, pkg)
+                    ensureNotificationUnmuted(pkg)
+                    curfewMutedApps.remove(pkg)
+                    nuclearMutedApps.remove(pkg)
+                    onAppFullyUnblocked(pkg)
+                    Log.i(TAG, "🔓 Midnight unblock: $pkg (no other restrictions)")
+                } else {
+                    Log.i(TAG, "🌙 Midnight rollover: $pkg remains blocked (curfew/session/nuclear active)")
                 }
             }
 
@@ -556,6 +557,20 @@ class LimitService : Service() {
         return false
     }
 
+    private fun isAppBlocked(packageName: String): Boolean {
+        if (packageName in InstallWindowManager.INSTALLER_PACKAGES && InstallWindowManager.isOpen(this)) {
+            return false
+        }
+        if (isCurrentlyPeriodBlocked(packageName)) return true
+        return shouldStayBlockedForNonCurfewReasons(packageName)
+    }
+
+    private fun onAppFullyUnblocked(packageName: String) {
+        BlockedNotificationManager.clearPreference(this, packageName)
+        promptedBlockedNotificationChoice.remove(packageName)
+        Log.i(TAG, "🔄 Notification preference reset for $packageName (app completely unblocked)")
+    }
+
     /**
      * For each active curfew (period block rule), evaluate notification muting per app:
      * - If the user chose "mute" for this app (BlockedNotificationManager): mute it.
@@ -605,35 +620,32 @@ class LimitService : Service() {
         // Unmute apps whose curfew ended
         for (pkg in curfewMutedApps.toList()) {
             if (pkg !in shouldBeMuted) {
-                ensureNotificationUnmuted(pkg)
                 curfewMutedApps.remove(pkg)
                 Log.i(TAG, "Curfew ended: unmuted notifications for $pkg")
+                if (!isAppBlocked(pkg)) {
+                    ensureNotificationUnmuted(pkg)
+                    onAppFullyUnblocked(pkg)
+                }
             }
         }
     }
 
     /**
      * Check all currently suspended apps and unblock any that no longer need blocking.
-     * This handles: curfew ended, allowed hours started, day-of-week changed, etc.
+     * This handles: curfew ended, allowed hours started, day-of-week changed, quota reset, session cooldown ended.
      */
     private fun checkAndUnblockApps() {
         for (pkg in suspendedApps.toList()) {
-            // Skip nuclear-blocked apps
-            val nuclear = nuclearState
-            if (nuclear != null && nuclear.active && !NuclearManager.isExpired(nuclear)
-                && pkg in nuclear.blockedPackages) continue
+            if (isAppBlocked(pkg)) continue
 
-            // Still curfew-blocked?
-            if (isCurrentlyPeriodBlocked(pkg)) continue
-
-            // Still blocked by non-curfew reasons?
-            if (shouldStayBlockedForNonCurfewReasons(pkg)) continue
-
-            // No reason to keep blocking
+            // No reason to keep blocking — app is completely unblocked
             suspendedApps.remove(pkg)
             AppWatcherService.blockedApps.remove(pkg)
             DeviceOwnerHelper.unsuspendApp(this, pkg)
             ensureNotificationUnmuted(pkg)
+            curfewMutedApps.remove(pkg)
+            nuclearMutedApps.remove(pkg)
+            onAppFullyUnblocked(pkg)
             Log.i(TAG, "🔓 Unblocked $pkg (no longer restricted)")
             EventLog.log(this, "UNBLOCK", "$pkg (no longer restricted)")
             persistState()
@@ -740,8 +752,11 @@ class LimitService : Service() {
         val state = nuclearState
         if (state == null || !state.active || NuclearManager.isExpired(state)) {
             for (pkg in nuclearMutedApps.toList()) {
-                ensureNotificationUnmuted(pkg)
                 nuclearMutedApps.remove(pkg)
+                if (!isAppBlocked(pkg)) {
+                    ensureNotificationUnmuted(pkg)
+                    onAppFullyUnblocked(pkg)
+                }
             }
             return
         }
@@ -766,9 +781,12 @@ class LimitService : Service() {
 
         for (pkg in nuclearMutedApps.toList()) {
             if (pkg !in shouldBeMuted) {
-                ensureNotificationUnmuted(pkg)
                 nuclearMutedApps.remove(pkg)
                 Log.i(TAG, "☢️ Nuclear: unmuted notifications for $pkg")
+                if (!isAppBlocked(pkg)) {
+                    ensureNotificationUnmuted(pkg)
+                    onAppFullyUnblocked(pkg)
+                }
             }
         }
     }

@@ -27,6 +27,12 @@ object BlockedNotificationManager {
             .apply()
     }
 
+    fun clearPreference(context: Context, packageName: String) {
+        prefs(context).edit()
+            .remove(KEY_PREFIX_PREF + packageName)
+            .apply()
+    }
+
     fun getCurrentlyMutedBySelfControl(context: Context): MutableSet<String> {
         return prefs(context).getStringSet(KEY_MUTED_SET, emptySet())?.toMutableSet() ?: mutableSetOf()
     }
