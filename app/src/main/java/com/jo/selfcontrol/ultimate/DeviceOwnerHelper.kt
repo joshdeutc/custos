@@ -101,6 +101,12 @@ object DeviceOwnerHelper {
                 Log.i(TAG, "Hard security restrictions cleared (flavor with standard OS behavior)")
             }
         }
+
+        // 7. If OS suspension is disabled on this flavor, clear all stuck suspensions immediately
+        if (!BuildConfig.OS_SUSPENSION_ENABLED) {
+            clearAllStuckSuspensions(ctx, keep = emptySet())
+            Log.i(TAG, "OS suspension disabled for this flavor — cleared all stuck OS suspensions")
+        }
     }
 
     /**
@@ -189,7 +195,6 @@ object DeviceOwnerHelper {
     }
 
     fun unsuspendApp(ctx: Context, pkg: String): Boolean {
-        if (!BuildConfig.OS_SUSPENSION_ENABLED) return false
         if (!isDeviceOwner(ctx)) return false
         return runCatching {
             dpm(ctx).setPackagesSuspended(admin(ctx), arrayOf(pkg), false)
