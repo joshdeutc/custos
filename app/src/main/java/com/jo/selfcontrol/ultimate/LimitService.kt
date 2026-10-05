@@ -125,8 +125,7 @@ class LimitService : Service() {
     /** Kept so onDestroy can unregister it — see [registerPackageAddedReceiver]. */
     private var packageAddedReceiver: android.content.BroadcastReceiver? = null
 
-    @Volatile
-    private var nuclearDndApplied: Boolean = false
+    private val nuclearMutedApps = mutableSetOf<String>()
 
     private val checkLimitsAndDelayHandler = Handler(Looper.getMainLooper())
     private val enforceRunnable = object : Runnable {
@@ -305,7 +304,7 @@ class LimitService : Service() {
 
         checkNuclearExpiration()
         checkNuclearCancelReady()
-        enforceNuclearDnd()
+        enforceNuclearNotificationMuting()
 
         val calReset = Calendar.getInstance()
         calReset.add(Calendar.HOUR_OF_DAY, -2)
@@ -558,12 +557,14 @@ class LimitService : Service() {
     }
 
     /**
-     * For each period block rule with muteNotifications=true, mute notifications
-     * for all packages while the curfew is active, and unmute when it ends.
+     * For each active curfew (period block rule), evaluate notification muting per app:
+     * - If the user chose "mute" for this app (BlockedNotificationManager): mute it.
+     * - If the user chose "keep": keep notifications visible.
+     * - If the user hasn't chosen yet: prompt them via an interactive notification.
+     * When curfew ends, unmute packages that are no longer restricted.
      */
     private fun enforceCurfewNotificationMuting() {
         if (periodBlockRules.isEmpty()) {
-            // No curfew rules — unmute any lingering curfew-muted apps
             for (pkg in curfewMutedApps.toList()) {
                 ensureNotificationUnmuted(pkg)
                 curfewMutedApps.remove(pkg)
@@ -575,13 +576,21 @@ class LimitService : Service() {
         val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK) - 1
         val nowMin = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
 
-        // Collect all packages that should be muted right now by curfew
-        val shouldBeMuted = mutableSetOf<String>()
+        val activeCurfewPackages = mutableSetOf<String>()
         for (rule in periodBlockRules) {
-            if (!rule.muteNotifications) continue
             if (dayOfWeek !in rule.allowedDays) continue
             if (!ConfigManager.isInBlockedWindow(nowMin, rule.blockedStartMinutes, rule.blockedEndMinutes)) continue
-            shouldBeMuted.addAll(rule.packages)
+            activeCurfewPackages.addAll(rule.packages)
+        }
+
+        val shouldBeMuted = mutableSetOf<String>()
+        for (pkg in activeCurfewPackages) {
+            val pref = BlockedNotificationManager.getMuteWhenBlockedPreference(this, pkg)
+            if (pref == null) {
+                maybePromptBlockedNotificationChoice(pkg, "curfew")
+            } else if (pref) {
+                shouldBeMuted.add(pkg)
+            }
         }
 
         // Mute newly curfew-blocked apps
@@ -662,8 +671,8 @@ class LimitService : Service() {
             for (pkg in state.blockedPackages) {
                 AppWatcherService.blockedApps.add(pkg)
             }
-            applyNuclearDndIfPossible()
-            Log.i(TAG, "☢️ Nuclear mode restored: ${state.blockedPackages.size} apps blocked (DND active)")
+            enforceNuclearNotificationMuting()
+            Log.i(TAG, "☢️ Nuclear mode restored: ${state.blockedPackages.size} apps blocked")
         } else if (state.active) {
             NuclearManager.clearState(this)
         }
@@ -679,7 +688,7 @@ class LimitService : Service() {
             }
             nuclearState = null
             NuclearManager.clearState(this)
-            restoreDndAfterNuclear()
+            enforceNuclearNotificationMuting()
             updateNotification("Nuclear mode finished")
         }
     }
@@ -695,7 +704,7 @@ class LimitService : Service() {
         }
         nuclearState = null
         NuclearManager.clearState(this)
-        restoreDndAfterNuclear()
+        enforceNuclearNotificationMuting()
         updateNotification("Nuclear mode cancelled (delay complete)")
     }
 
@@ -715,72 +724,52 @@ class LimitService : Service() {
         for (pkg in packages) {
             AppWatcherService.blockedApps.add(pkg)
         }
-        // DND handles all notification suppression during Nuclear Mode
-        applyNuclearDndIfPossible()
+        enforceNuclearNotificationMuting()
         val minutes = durationMs / 60_000
         updateNotification("☢️ Nuclear: ${packages.size} apps blocked (${minutes}min)")
     }
 
     /**
-     * During Nuclear mode we enable Android "priority-only" interruptions.
-     * Calls and alarms are always allowed.
+     * For Nuclear Mode, evaluate notification muting per app (no system-wide DND):
+     * - If preference is "mute": mute it.
+     * - If preference is "keep": keep notifications visible.
+     * - If preference is null: prompt user to choose via notification.
+     * When Nuclear ends, unmute packages.
      */
-    private fun applyNuclearDndIfPossible() {
-        if (nuclearDndApplied) return
-        forceApplyNuclearDnd()
-    }
-
-    /**
-     * Actually sets DND to priority mode. Called both on first apply and
-     * when we detect the user toggled DND off via quick settings.
-     */
-    private fun forceApplyNuclearDnd() {
-        try {
-            if (!PermissionHelper.hasNotificationPolicyPermission(this)) {
-                Log.w(TAG, "☢️ Nuclear: DND permission missing, cannot enable priority mode")
-                return
+    private fun enforceNuclearNotificationMuting() {
+        val state = nuclearState
+        if (state == null || !state.active || NuclearManager.isExpired(state)) {
+            for (pkg in nuclearMutedApps.toList()) {
+                ensureNotificationUnmuted(pkg)
+                nuclearMutedApps.remove(pkg)
             }
-            val nm = getSystemService(NotificationManager::class.java)
-            nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
-            nuclearDndApplied = true
-            Log.i(TAG, "☢️ Nuclear: DND priority enabled (using user's own exceptions)")
-        } catch (e: Exception) {
-            Log.e(TAG, "☢️ Nuclear: Failed to enable DND priority: ${e.message}")
+            return
         }
-    }
 
-    /**
-     * Checks if DND was manually disabled (via quick settings tile, etc.)
-     * and re-enables it if Nuclear mode is still active.
-     */
-    private fun enforceNuclearDnd() {
-        val state = nuclearState ?: return
-        if (!state.active || NuclearManager.isExpired(state)) return
-        if (!nuclearDndApplied) return // wasn't applied in the first place (no permission)
-
-        try {
-            val nm = getSystemService(NotificationManager::class.java)
-            val currentFilter = nm.currentInterruptionFilter
-            if (currentFilter != NotificationManager.INTERRUPTION_FILTER_PRIORITY) {
-                Log.w(TAG, "☢️ Nuclear: DND was disabled externally (filter=$currentFilter), re-applying")
-                forceApplyNuclearDnd()
+        val shouldBeMuted = mutableSetOf<String>()
+        for (pkg in state.blockedPackages) {
+            val pref = BlockedNotificationManager.getMuteWhenBlockedPreference(this, pkg)
+            if (pref == null) {
+                maybePromptBlockedNotificationChoice(pkg, "nuclear")
+            } else if (pref) {
+                shouldBeMuted.add(pkg)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "☢️ Nuclear: Error checking DND state: ${e.message}")
         }
-    }
 
-    private fun restoreDndAfterNuclear() {
-        if (!nuclearDndApplied) return
-        try {
-            val nm = getSystemService(NotificationManager::class.java)
-            // Best-effort restore: go back to "all interruptions"
-            nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
-            Log.i(TAG, "☢️ Nuclear: DND restored")
-        } catch (e: Exception) {
-            Log.e(TAG, "☢️ Nuclear: Failed to restore DND: ${e.message}")
-        } finally {
-            nuclearDndApplied = false
+        for (pkg in shouldBeMuted) {
+            if (pkg !in nuclearMutedApps) {
+                ensureNotificationMuted(pkg)
+                nuclearMutedApps.add(pkg)
+                Log.i(TAG, "☢️ Nuclear: muted notifications for $pkg")
+            }
+        }
+
+        for (pkg in nuclearMutedApps.toList()) {
+            if (pkg !in shouldBeMuted) {
+                ensureNotificationUnmuted(pkg)
+                nuclearMutedApps.remove(pkg)
+                Log.i(TAG, "☢️ Nuclear: unmuted notifications for $pkg")
+            }
         }
     }
 
@@ -1033,12 +1022,20 @@ class LimitService : Service() {
         val nm = getSystemService(NotificationManager::class.java)
         nm.cancel(100000 + packageName.hashCode())
 
-        if (packageName !in suspendedApps) return
+        val isCurfew = isCurrentlyPeriodBlocked(packageName)
+        val isNuclear = nuclearState?.active == true && !NuclearManager.isExpired(nuclearState!!) && packageName in (nuclearState?.blockedPackages ?: emptyList())
+        val isBlocked = packageName in suspendedApps || isCurfew || isNuclear
+
+        if (!isBlocked) return
         if (mute) {
             ensureNotificationMuted(packageName)
+            if (isCurfew) curfewMutedApps.add(packageName)
+            if (isNuclear) nuclearMutedApps.add(packageName)
             updateNotification("$packageName blocked + notifications muted")
         } else {
             ensureNotificationUnmuted(packageName)
+            curfewMutedApps.remove(packageName)
+            nuclearMutedApps.remove(packageName)
             updateNotification("$packageName blocked (notifications kept)")
         }
     }

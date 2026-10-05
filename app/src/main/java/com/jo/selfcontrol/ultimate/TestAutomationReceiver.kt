@@ -42,6 +42,7 @@ class TestAutomationReceiver : BroadcastReceiver() {
     }
 
     private fun setCurfewMuteRule(context: Context, pkg: String) {
+        BlockedNotificationManager.setMuteWhenBlockedPreference(context, pkg, true)
         val cur = ConfigManager.loadConfig(context)
         val cleaned = cur.periodBlocks.filterNot { pkg in it.packages }
 

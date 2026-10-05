@@ -1638,9 +1638,8 @@ class MainActivity : Activity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { bottomMargin = dp(8) }
-            val muteLabel = if (rule.muteNotifications) "Notifications: muted" else "Notifications: on"
             addView(TextView(this@MainActivity).apply {
-                text = "$days\n$start -> $end\n$names\n$muteLabel"
+                text = "$days\n$start -> $end\n$names"
                 textSize = 14f
                 setTextColor(Color.BLACK)
             })
@@ -1885,21 +1884,6 @@ class MainActivity : Activity() {
         val (startH, startM) = addRow("Block from (24h)", existingStartH, existingStartM)
         val (endH, endM) = addRow("Until (next day if earlier, e.g. 07:00)", existingEndH, existingEndM)
 
-        var muteNotifications = existingMute
-        val muteRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(12), 0, dp(4))
-        }
-        val muteSwitch = Switch(this).apply {
-            text = "Mute notifications during curfew"
-            setTextColor(Color.WHITE)
-            isChecked = existingMute
-            setOnCheckedChangeListener { _, checked -> muteNotifications = checked }
-        }
-        muteRow.addView(muteSwitch)
-        wrap.addView(muteRow)
-
         var protectionDelaySec = existingProtectionDelaySec
         wrap.addView(buildProtectionTimerRow(protectionDelaySec) { protectionDelaySec = it })
         wrap.addView(TextView(this).apply {
@@ -1934,7 +1918,7 @@ class MainActivity : Activity() {
                     blockedStartMinutes = startMin,
                     blockedEndMinutes = endMin,
                     allowedDays = selectedDays.sorted(),
-                    muteNotifications = muteNotifications,
+                    muteNotifications = true,
                     protectionDelaySec = protectionDelaySec
                 )
                 val newList = if (editIndex >= 0) {
