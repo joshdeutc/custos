@@ -454,13 +454,21 @@ object DelayManager {
             val screenRules = ScreenRuleManager.load(context)
             for (r in screenRules) {
                 val sec = r.protectionDelaySec
+                val pendingTimer = ScreenRuleManager.pendingTimerChange(context, r.name)
+                val pendingSec = pendingTimer?.targetDelaySec
                 if (sec != null && sec > 0) {
+                    val desc = if (pendingTimer != null) {
+                        val targetLabel = if (pendingSec != null) formatDuration(pendingSec.toLong()) else "Global"
+                        "${formatDuration(sec.toLong())} (⏳ → $targetLabel)"
+                    } else {
+                        formatDuration(sec.toLong())
+                    }
                     list.add(
                         ConfiguredDelayItem(
                             title = "🔒 Écran : ${r.name}",
                             delaySeconds = sec.toLong(),
                             isGlobal = false,
-                            description = formatDuration(sec.toLong())
+                            description = desc
                         )
                     )
                 }
@@ -531,6 +539,10 @@ object DelayManager {
             if (customScreenRules.isNotEmpty()) {
                 val names = customScreenRules.joinToString(", ") { it.name }
                 return false to "Des règles d'écran ont un délai dédié ($names). Remettez-les sur le délai général."
+            }
+            val pendingTimers = ScreenRuleManager.loadPendingTimerChanges(context).filter { it.executeAt > now }
+            if (pendingTimers.isNotEmpty()) {
+                return false to "Des modifications de délais sur les règles d'écran sont encore en attente."
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error checking ScreenRuleManager eligibility: ${e.message}")

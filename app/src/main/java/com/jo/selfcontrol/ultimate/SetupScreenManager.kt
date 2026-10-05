@@ -257,11 +257,11 @@ class SetupScreenManager(
         brandInstructionsText.text = when (selectedBrand) {
             PermissionHelper.DeviceBrand.PIXEL ->
                 "📱 Sur Google Pixel / Android Stock :\n\n" +
-                        "1. Activez d'abord les étapes 1 à 5 ci-dessous (Statistiques, Notifications, Batterie, etc.).\n" +
-                        "2. Pour l'Accessibilité (Étape 6) : tentez de l'activer une fois. Android affichera « Paramètre restreint indisponible ».\n" +
-                        "3. Cliquez sur le bouton bleu ci-dessous « Ouvrir les Paramètres de Custos ».\n" +
-                        "4. En haut à droite, appuyez sur les 3 points (⋮) > « Autoriser les paramètres restreints » (confirmez PIN/empreinte).\n" +
-                        "5. Revenez ici et activez EN DERNIER le Service d'Accessibilité !"
+                        "1. ⚠️ AVANT TOUT : Appuyez sur le bouton bleu ci-dessous « Ouvrir les Paramètres de Custos ».\n" +
+                        "2. En haut à droite, appuyez sur les 3 points (⋮) > « Autoriser les paramètres restreints » (confirmez avec votre code PIN ou empreinte).\n" +
+                        "   (Indispensable : sinon Android bloque l'accès aux notifications, à la batterie et à l'accessibilité).\n" +
+                        "3. Revenez dans Custos et accordez les autorisations 1 à 5 (Statistiques, Notifications, Batterie sans restriction).\n" +
+                        "4. Activez EN DERNIER le Service d'Accessibilité (Étape 6) !"
 
             PermissionHelper.DeviceBrand.SAMSUNG ->
                 "📱 Sur Samsung (One UI) :\n\n" +

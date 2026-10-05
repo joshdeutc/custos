@@ -196,13 +196,18 @@ class LimitService : Service() {
         }
 
         if (DeviceOwnerHelper.isDeviceOwner(this)) {
-            // Sweep stale OS-level suspensions, EXCEPT for apps the persisted state says
-            // must remain blocked. Re-apply suspendApp for those to heal any OS drift
-            // (e.g. if a manual unsuspend happened while the service was dead).
-            val keep = suspendedApps + InstallBlockManager.blockedInstalledPackages(this, config)
+            // Sweep stale OS-level suspensions. On flavors where OS suspension is disabled (me, basic, admin),
+            // NO apps should ever remain suspended (no icon graying out — only Accessibility HOME return).
+            val keep = if (BuildConfig.OS_SUSPENSION_ENABLED) {
+                suspendedApps + InstallBlockManager.blockedInstalledPackages(this, config)
+            } else {
+                emptySet()
+            }
             DeviceOwnerHelper.clearAllStuckSuspensions(this, keep = keep)
-            for (pkg in suspendedApps) {
-                DeviceOwnerHelper.suspendApp(this, pkg)
+            if (BuildConfig.OS_SUSPENSION_ENABLED) {
+                for (pkg in suspendedApps) {
+                    DeviceOwnerHelper.suspendApp(this, pkg)
+                }
             }
         }
 
