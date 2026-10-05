@@ -33,6 +33,7 @@ android {
         buildConfigField "boolean", "PERMANENT_APP_LIMITS", "false"
         buildConfigField "boolean", "PERMANENT_CURFEW", "false"
         buildConfigField "boolean", "SILENT_AUTO_GRANT_PERMISSIONS", "false"
+        buildConfigField "boolean", "ALLOW_ADB_WHITELIST_BYPASS", "false"
     }
 
     buildFeatures {
@@ -52,6 +53,7 @@ android {
             buildConfigField "boolean", "PERMANENT_APP_LIMITS", "false"
             buildConfigField "boolean", "PERMANENT_CURFEW", "false"
             buildConfigField "boolean", "SILENT_AUTO_GRANT_PERMISSIONS", "false"
+            buildConfigField "boolean", "ALLOW_ADB_WHITELIST_BYPASS", "false"
         }
         admin {
             dimension "level"
@@ -64,6 +66,7 @@ android {
             buildConfigField "boolean", "PERMANENT_APP_LIMITS", "false"
             buildConfigField "boolean", "PERMANENT_CURFEW", "false"
             buildConfigField "boolean", "SILENT_AUTO_GRANT_PERMISSIONS", "false"
+            buildConfigField "boolean", "ALLOW_ADB_WHITELIST_BYPASS", "false"
         }
         deviceAdmin {
             dimension "level"
@@ -76,6 +79,7 @@ android {
             buildConfigField "boolean", "PERMANENT_APP_LIMITS", "false"
             buildConfigField "boolean", "PERMANENT_CURFEW", "false"
             buildConfigField "boolean", "SILENT_AUTO_GRANT_PERMISSIONS", "true"
+            buildConfigField "boolean", "ALLOW_ADB_WHITELIST_BYPASS", "false"
         }
         me {
             dimension "level"
@@ -90,6 +94,7 @@ android {
             buildConfigField "boolean", "PERMANENT_APP_LIMITS", "false"
             buildConfigField "boolean", "PERMANENT_CURFEW", "false"
             buildConfigField "boolean", "SILENT_AUTO_GRANT_PERMISSIONS", "false"
+            buildConfigField "boolean", "ALLOW_ADB_WHITELIST_BYPASS", "false"
         }
         brother {
             dimension "level"
@@ -106,6 +111,7 @@ android {
             buildConfigField "boolean", "PERMANENT_APP_LIMITS", "true"
             buildConfigField "boolean", "PERMANENT_CURFEW", "true"
             buildConfigField "boolean", "SILENT_AUTO_GRANT_PERMISSIONS", "true"
+            buildConfigField "boolean", "ALLOW_ADB_WHITELIST_BYPASS", "true"
         }
     }
 

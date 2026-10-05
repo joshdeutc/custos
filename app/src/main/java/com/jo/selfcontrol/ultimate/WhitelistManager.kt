@@ -641,7 +641,8 @@ object WhitelistManager {
             } else {
                 if (!state.enabled) return true
                 val delaySec = getEffectiveQuarantineDelaySeconds(ctx)
-                if (fromAdb || DelayManager.isSettingsUnlocked(ctx) || delaySec <= 0L) {
+                val canBypass = (fromAdb && BuildConfig.ALLOW_ADB_WHITELIST_BYPASS) || DelayManager.isSettingsUnlocked(ctx) || delaySec <= 0L
+                if (canBypass) {
                     saveState(ctx, state.copy(enabled = false, pendingDisableExecuteAt = 0L))
                     val hidden = loadHiddenState(ctx)
                     for (pkg in hidden) {
@@ -652,7 +653,7 @@ object WhitelistManager {
                     EventLog.log(ctx, "WHITELIST", "Whitelist DISABLED immediately (fromAdb=$fromAdb)")
                     return true
                 } else {
-                    requestDisableWhitelist(ctx, fromAdb = false)
+                    requestDisableWhitelist(ctx, fromAdb = fromAdb)
                     return false
                 }
             }
@@ -661,7 +662,7 @@ object WhitelistManager {
 
     /**
      * Requests deactivation of the whitelist.
-     * - Immediate if fromAdb, settings unlocked, or delay <= 0.
+     * - Immediate if (fromAdb and ALLOW_ADB_WHITELIST_BYPASS), settings unlocked, or delay <= 0.
      * - Otherwise deferred by the effective quarantine delay.
      */
     fun requestDisableWhitelist(ctx: Context, fromAdb: Boolean = false): Pair<Boolean, String> {
@@ -674,9 +675,10 @@ object WhitelistManager {
         }
         val delaySec = getEffectiveQuarantineDelaySeconds(ctx)
         val now = System.currentTimeMillis()
+        val canBypass = (fromAdb && BuildConfig.ALLOW_ADB_WHITELIST_BYPASS) || DelayManager.isSettingsUnlocked(ctx) || delaySec <= 0L
 
-        if (fromAdb || DelayManager.isSettingsUnlocked(ctx) || delaySec <= 0L) {
-            setWhitelistEnabled(ctx, false, fromAdb = true)
+        if (canBypass) {
+            setWhitelistEnabled(ctx, false, fromAdb = fromAdb)
             return true to "Whitelist désactivée immédiatement."
         }
 
@@ -1009,7 +1011,11 @@ object WhitelistManager {
             return false
         }
         val now = System.currentTimeMillis()
-        if (delaySeconds <= 0L) {
+        val canBypass = (BuildConfig.ALLOW_ADB_WHITELIST_BYPASS && fromAdb) || DelayManager.isSettingsUnlocked(ctx)
+        val minDelay = getEffectiveQuarantineDelaySeconds(ctx)
+        val effectiveDelay = if (canBypass) delaySeconds else maxOf(delaySeconds, minDelay)
+
+        if (effectiveDelay <= 0L) {
             val updated = state.allowedPackages + cleanPkg
             val filteredPending = state.pendingRequests.filterNot { it.packageName == cleanPkg }
             saveState(ctx, state.copy(allowedPackages = updated, pendingRequests = filteredPending))
@@ -1026,13 +1032,13 @@ object WhitelistManager {
             Log.i(TAG, "App $cleanPkg already pending until ${java.util.Date(existing.availableAt)}")
             return false
         }
-        val availableAt = now + delaySeconds * 1000L
+        val availableAt = now + effectiveDelay * 1000L
         val newPending = state.pendingRequests + PendingRequest(cleanPkg, now, availableAt)
         saveState(ctx, state.copy(pendingRequests = newPending))
         scheduleNextUnlockAlarm(ctx)
-        val hours = delaySeconds / 3600L
-        Log.w(TAG, "Added $cleanPkg to quarantine. Available in ${delaySeconds}s / ${hours}h (at ${java.util.Date(availableAt)})")
-        EventLog.log(ctx, "WHITELIST", "Requested $cleanPkg addition with ${delaySeconds}s delay (fromAdb=$fromAdb)")
+        val hours = effectiveDelay / 3600L
+        Log.w(TAG, "Added $cleanPkg to quarantine. Available in ${effectiveDelay}s / ${hours}h (at ${java.util.Date(availableAt)})")
+        EventLog.log(ctx, "WHITELIST", "Requested $cleanPkg addition with ${effectiveDelay}s delay (fromAdb=$fromAdb)")
         return true
     }
 
