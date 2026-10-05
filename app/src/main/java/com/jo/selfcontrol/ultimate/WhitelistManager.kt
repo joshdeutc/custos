@@ -64,7 +64,8 @@ object WhitelistManager {
         "com.google.android.contacts",
         "com.google.android.gm",
         "com.google.android.deskclock",
-        "com.google.android.calculator"
+        "com.google.android.calculator",
+        "com.tailscale.ipn"
     )
 
     /**
@@ -161,7 +162,8 @@ object WhitelistManager {
         "com.android.soundrecorder",
         "com.opera.preinstall",
         "com.mi.global.shop",
-        "com.mi.global.bbs"
+        "com.mi.global.bbs",
+        "com.tailscale.ipn"
     )
 
     /**

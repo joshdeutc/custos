@@ -156,6 +156,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        cachedLaunchableApps = null
         refreshPermissions()
         if (::zoomCanvas.isInitialized) {
             zoomCanvas.startFloatingAnimation()
@@ -1254,7 +1255,7 @@ class MainActivity : Activity() {
     // ──────────────────────────────────────
 
     private fun showAddAppDialog() {
-        val apps = getInstalledLaunchableApps()
+        val apps = getInstalledLaunchableApps(forceRefresh = true)
         if (apps.isEmpty()) {
             Toast.makeText(this, "Aucune application détectée.", Toast.LENGTH_SHORT).show()
             return
@@ -1757,7 +1758,7 @@ class MainActivity : Activity() {
     }
 
     private fun showAddCurfewRuleDialog() {
-        val apps = getInstalledLaunchableApps()
+        val apps = getInstalledLaunchableApps(forceRefresh = true)
         val selected = mutableSetOf<String>()
 
         val listView = buildAppCheckListView(apps, selected)
@@ -1779,7 +1780,7 @@ class MainActivity : Activity() {
     }
 
     private fun showEditCurfewRuleDialog(index: Int, existingRule: ConfigManager.PeriodBlockRule) {
-        val apps = getInstalledLaunchableApps()
+        val apps = getInstalledLaunchableApps(forceRefresh = true)
         val selected = mutableSetOf<String>()
 
         val listView = buildAppCheckListView(apps, selected, preChecked = existingRule.packages.toSet())
@@ -3242,7 +3243,7 @@ class MainActivity : Activity() {
     private fun showNuclearSetupDialog() {
         selectedNuclearApps.clear()
 
-        val apps = getInstalledLaunchableApps()
+        val apps = getInstalledLaunchableApps(forceRefresh = true)
         val monitoredApps = loadEditableConfig().limits.map { it.packageName }.toSet()
 
         val listView = buildAppCheckListView(apps, selectedNuclearApps, preChecked = monitoredApps)
@@ -3390,7 +3391,7 @@ class MainActivity : Activity() {
     }
 
     private fun applyPresetAndConfirm(preset: NuclearPresetsManager.Preset) {
-        val installed = getInstalledLaunchableApps().map { it.packageName }.toSet()
+        val installed = getInstalledLaunchableApps(forceRefresh = true).map { it.packageName }.toSet()
         val available = preset.packages.filter { it in installed }
         val missing = preset.packages.size - available.size
 
@@ -4231,8 +4232,10 @@ class MainActivity : Activity() {
 
     @Volatile private var cachedLaunchableApps: List<AppInfo>? = null
 
-    private fun getInstalledLaunchableApps(): List<AppInfo> {
-        cachedLaunchableApps?.let { return it }
+    private fun getInstalledLaunchableApps(forceRefresh: Boolean = false): List<AppInfo> {
+        if (!forceRefresh) {
+            cachedLaunchableApps?.let { return it }
+        }
         val pm = packageManager
         val intent = Intent(Intent.ACTION_MAIN, null).apply {
             addCategory(Intent.CATEGORY_LAUNCHER)
@@ -4645,7 +4648,7 @@ class MainActivity : Activity() {
             ).show()
             return
         }
-        val apps = getInstalledLaunchableApps()
+        val apps = getInstalledLaunchableApps(forceRefresh = true)
         val selected = mutableSetOf<String>()
         val listView = buildAppCheckListView(apps, selected)
         val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
