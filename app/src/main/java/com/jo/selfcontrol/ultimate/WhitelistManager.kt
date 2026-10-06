@@ -65,7 +65,8 @@ object WhitelistManager {
         "com.google.android.gm",
         "com.google.android.deskclock",
         "com.google.android.calculator",
-        "com.tailscale.ipn"
+        "com.tailscale.ipn",
+        "com.jo.custos.guardian"
     )
 
     /**

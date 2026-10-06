@@ -37,7 +37,7 @@ object GuardianClient {
         if (isBound && service != null) return
         try {
             val intent = Intent(GUARDIAN_ACTION).apply {
-                setPackage(GUARDIAN_PACKAGE)
+                component = ComponentName(GUARDIAN_PACKAGE, "com.jo.custos.guardian.GuardianService")
             }
             val ok = context.applicationContext.bindService(intent, connection, Context.BIND_AUTO_CREATE)
             Log.i(TAG, "Binding to GuardianService: bindResult=$ok")
