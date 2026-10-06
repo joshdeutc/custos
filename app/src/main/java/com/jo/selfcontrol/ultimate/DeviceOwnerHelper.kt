@@ -84,19 +84,19 @@ object DeviceOwnerHelper {
             Log.i(TAG, "Install restrictions cleared (delegated to WhitelistManager)")
         }
 
-        // 6. Security restrictions: Factory reset and Safe mode (only if hard restrictions enabled)
+        // 6. Security restrictions: Factory reset is ALWAYS permitted so the user can rescue the device
+        runCatching {
+            d.clearUserRestriction(a, UserManager.DISALLOW_FACTORY_RESET)
+            Log.i(TAG, "Factory reset restriction cleared — factory reset is always permitted")
+        }
+
         if (BuildConfig.HARD_SECURITY_RESTRICTIONS) {
-            runCatching {
-                d.addUserRestriction(a, UserManager.DISALLOW_FACTORY_RESET)
-                Log.i(TAG, "Restriction added: DISALLOW_FACTORY_RESET")
-            }
             runCatching {
                 d.addUserRestriction(a, UserManager.DISALLOW_SAFE_BOOT)
                 Log.i(TAG, "Restriction added: DISALLOW_SAFE_BOOT")
             }
         } else {
             runCatching {
-                d.clearUserRestriction(a, UserManager.DISALLOW_FACTORY_RESET)
                 d.clearUserRestriction(a, UserManager.DISALLOW_SAFE_BOOT)
                 Log.i(TAG, "Hard security restrictions cleared (flavor with standard OS behavior)")
             }
