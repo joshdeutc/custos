@@ -42,7 +42,10 @@ class AppWatcherService : AccessibilityService() {
             "com.samsung.android.settings",
             "com.samsung.android.app.routines",
             "com.samsung.android.sm",
-            "com.samsung.accessibility"
+            "com.samsung.accessibility",
+            "com.miui.securitycenter",
+            "com.miui.securitycore",
+            "com.xiaomi.misettings"
         )
 
         // Packages that could trigger an uninstallation
@@ -60,7 +63,7 @@ class AppWatcherService : AccessibilityService() {
         private val TARGET_APP_NAMES = mutableSetOf("Custos", "custos", "SelfControl", "selfcontrol", "Self control", "Self Control")
 
         // Cancel buttons to click
-        private val CANCEL_KEYWORDS = setOf("Cancel", "No", "Cancel", "Non")
+        private val CANCEL_KEYWORDS = setOf("Cancel", "Annuler", "No", "Non")
 
         // Danger keywords that trigger protection
         private val DANGER_KEYWORDS = setOf(
@@ -283,7 +286,7 @@ class AppWatcherService : AccessibilityService() {
         val isDialog = className.contains("Dialog", ignoreCase = true)
             || className.contains("Popup", ignoreCase = true)
         
-        if (isDialog) {
+        if (isDialog && (packageName in SETTINGS_PACKAGES || packageName in UNINSTALL_PACKAGES || packageName == "android")) {
             checkSettingsForSelfControl(requireDangerKeyword = true)
         }
 
@@ -371,6 +374,10 @@ class AppWatcherService : AccessibilityService() {
     }
 
     private fun checkSettingsForSelfControl(requireDangerKeyword: Boolean = false) {
+        val fg = currentForegroundApp
+        val inTargetScope = fg in SETTINGS_PACKAGES || fg in UNINSTALL_PACKAGES || fg == "android"
+        if (!inTargetScope) return
+
         // If DelayManager says we requested settings unlock, bypass protection entirely
         if (DelayManager.isSettingsUnlocked(this)) {
             Log.d(TAG, "🔓 Settings bypassed: Delay unlock active.")
@@ -390,9 +397,20 @@ class AppWatcherService : AccessibilityService() {
             for (appName in TARGET_APP_NAMES) {
                 val appNodes = rootNode.findAccessibilityNodeInfosByText(appName)
                 if (appNodes != null && appNodes.isNotEmpty()) {
-                    isOurAppOnScreen = true
+                    for (node in appNodes) {
+                        val text = node.text?.toString()?.trim() ?: ""
+                        val desc = node.contentDescription?.toString()?.trim() ?: ""
+                        val isMatch = text.equals(appName, ignoreCase = true) ||
+                                      desc.equals(appName, ignoreCase = true) ||
+                                      Regex("\\b${Regex.escape(appName)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) ||
+                                      Regex("\\b${Regex.escape(appName)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(desc)
+                        if (isMatch) {
+                            isOurAppOnScreen = true
+                            break
+                        }
+                    }
                     appNodes.forEach { it.recycle() }
-                    break
+                    if (isOurAppOnScreen) break
                 }
             }
             if (!isOurAppOnScreen) return
@@ -402,9 +420,20 @@ class AppWatcherService : AccessibilityService() {
                 for (danger in DANGER_KEYWORDS) {
                     val dangerNodes = rootNode.findAccessibilityNodeInfosByText(danger)
                     if (dangerNodes != null && dangerNodes.isNotEmpty()) {
-                        dangerFound = true
+                        for (node in dangerNodes) {
+                            val text = node.text?.toString()?.trim() ?: ""
+                            val desc = node.contentDescription?.toString()?.trim() ?: ""
+                            val isMatch = text.equals(danger, ignoreCase = true) ||
+                                          desc.equals(danger, ignoreCase = true) ||
+                                          Regex("\\b${Regex.escape(danger)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) ||
+                                          Regex("\\b${Regex.escape(danger)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(desc)
+                            if (isMatch) {
+                                dangerFound = true
+                                break
+                            }
+                        }
                         dangerNodes.forEach { it.recycle() }
-                        break
+                        if (dangerFound) break
                     }
                 }
                 if (!dangerFound) return
@@ -417,7 +446,10 @@ class AppWatcherService : AccessibilityService() {
                 val cancelNodes = rootNode.findAccessibilityNodeInfosByText(cancel)
                 if (cancelNodes != null && cancelNodes.isNotEmpty()) {
                     for (node in cancelNodes) {
-                        if (node.isClickable) {
+                        val text = node.text?.toString()?.trim() ?: ""
+                        val desc = node.contentDescription?.toString()?.trim() ?: ""
+                        val isExact = text.equals(cancel, ignoreCase = true) || desc.equals(cancel, ignoreCase = true)
+                        if (isExact && node.isClickable) {
                             node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                             Log.w(TAG, "🛡️ Clicked on '$cancel'")
                             clickedCancel = true
