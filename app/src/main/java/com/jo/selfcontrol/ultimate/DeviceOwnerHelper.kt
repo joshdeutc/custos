@@ -140,12 +140,20 @@ object DeviceOwnerHelper {
         }
     }
 
+    @Volatile private var a11ySecureSettingSupported = true
+
     /**
      * Re-write the secure setting that lists enabled accessibility services so ours stays bound.
      * Called periodically from LimitService to undo any manual disable.
      */
     fun enforceA11YReEnable(ctx: Context) {
+        if (!a11ySecureSettingSupported) return
         if (!isDeviceOwner(ctx)) return
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            // Android 13+ denies Device Owner from modifying enabled_accessibility_services via secure setting
+            a11ySecureSettingSupported = false
+            return
+        }
         if (!BuildConfig.SILENT_AUTO_GRANT_PERMISSIONS && !PermissionHelper.isMandatorySetupComplete(ctx)) {
             Log.d(TAG, "enforceA11YReEnable deferred: setup checklist not complete")
             return

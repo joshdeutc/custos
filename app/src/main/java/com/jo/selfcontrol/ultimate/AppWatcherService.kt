@@ -212,12 +212,11 @@ class AppWatcherService : AccessibilityService() {
         }
         try {
             val info = serviceInfo ?: android.accessibilityservice.AccessibilityServiceInfo()
-            info.flags = info.flags or
+            info.flags = (info.flags and android.accessibilityservice.AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS.inv()) or
                 android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
-                android.accessibilityservice.AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or
                 android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
             serviceInfo = info
-            Log.i(TAG, "Configured serviceInfo flags with FLAG_REPORT_VIEW_IDS")
+            Log.i(TAG, "Configured serviceInfo flags with FLAG_REPORT_VIEW_IDS (lightweight tree)")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to update serviceInfo flags: ${e.message}")
         }
@@ -366,7 +365,7 @@ class AppWatcherService : AccessibilityService() {
             return
         }
 
-        if (packageName in SETTINGS_PACKAGES || packageName == "android") {
+        if (packageName in SETTINGS_PACKAGES || (packageName == "android" && (currentForegroundApp in SETTINGS_PACKAGES || currentForegroundApp in UNINSTALL_PACKAGES))) {
             checkSettingsForSelfControl(requireDangerKeyword = true)
         }
     }
@@ -753,33 +752,62 @@ class AppWatcherService : AccessibilityService() {
 
     /** Whether [viewId] (or text marker `text:...`, or desc marker `desc:...`) is on screen right now, in one of [pkg]'s windows. */
     private fun visibleIdPresent(pkg: String, viewId: String): Boolean {
+        // Fast-path: check rootInActiveWindow first to avoid expensive windows iteration
         try {
-            for (window in windows) {
-                val root = window.root ?: continue
-                if (root.packageName != pkg) continue
-                val match = when {
-                    viewId.startsWith("text:") -> {
-                        val txt = viewId.removePrefix("text:")
-                        root.findAccessibilityNodeInfosByText(txt).any {
-                            it.isVisibleToUser && it.text?.toString().equals(txt, ignoreCase = true)
-                        }
+            val activeRoot = rootInActiveWindow
+            if (activeRoot != null) {
+                try {
+                    if (activeRoot.packageName == pkg && checkNodeMatch(activeRoot, viewId)) {
+                        return true
                     }
-                    viewId.startsWith("desc:") -> {
-                        val desc = viewId.removePrefix("desc:")
-                        root.findAccessibilityNodeInfosByText(desc).any {
-                            it.isVisibleToUser && it.contentDescription?.toString().equals(desc, ignoreCase = true)
-                        }
-                    }
-                    else -> {
-                        root.findAccessibilityNodeInfosByViewId(viewId).any { it.isVisibleToUser }
-                    }
+                } finally {
+                    activeRoot.recycle()
                 }
-                if (match) return true
+            }
+        } catch (_: Exception) {}
+
+        // Fallback: iterate windows safely with proper node recycling
+        try {
+            val currentWindows = windows ?: return false
+            for (window in currentWindows) {
+                val root = window.root ?: continue
+                try {
+                    if (root.packageName == pkg && checkNodeMatch(root, viewId)) {
+                        return true
+                    }
+                } finally {
+                    root.recycle()
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "visibleIdPresent($viewId) failed: ${e.message}")
         }
         return false
+    }
+
+    private fun checkNodeMatch(root: AccessibilityNodeInfo, viewId: String): Boolean {
+        return when {
+            viewId.startsWith("text:") -> {
+                val txt = viewId.removePrefix("text:")
+                val nodes = root.findAccessibilityNodeInfosByText(txt) ?: return false
+                val match = nodes.any { it.isVisibleToUser && it.text?.toString().equals(txt, ignoreCase = true) }
+                nodes.forEach { it.recycle() }
+                match
+            }
+            viewId.startsWith("desc:") -> {
+                val desc = viewId.removePrefix("desc:")
+                val nodes = root.findAccessibilityNodeInfosByText(desc) ?: return false
+                val match = nodes.any { it.isVisibleToUser && it.contentDescription?.toString().equals(desc, ignoreCase = true) }
+                nodes.forEach { it.recycle() }
+                match
+            }
+            else -> {
+                val nodes = root.findAccessibilityNodeInfosByViewId(viewId) ?: return false
+                val match = nodes.any { it.isVisibleToUser }
+                nodes.forEach { it.recycle() }
+                match
+            }
+        }
     }
 
     /**

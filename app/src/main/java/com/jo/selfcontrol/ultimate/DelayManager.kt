@@ -39,14 +39,26 @@ object DelayManager {
         val payloadJson: String = ""
     )
 
+    @Volatile private var cachedState: DelayState? = null
+    @Volatile private var lastStateModified: Long = 0L
+
+    @Synchronized
     fun loadState(context: Context): DelayState {
         val file = File(context.filesDir, FILE_NAME)
         if (!file.exists()) {
-            return DelayState(
+            val default = DelayState(
                 globalDelaySeconds = 0,
                 unlockSettingsUnlockTime = 0,
                 requestedConfigUpdates = emptyList()
             )
+            cachedState = default
+            lastStateModified = 0L
+            return default
+        }
+        val lastMod = file.lastModified()
+        val mem = cachedState
+        if (mem != null && lastMod == lastStateModified && lastMod > 0L) {
+            return mem
         }
         return try {
             val json = JSONObject(file.readText())
@@ -109,13 +121,17 @@ object DelayManager {
                 }
             }
 
-            DelayState(delay, unlockTime, pendingList, schedule, pendingSec, execAt)
+            val result = DelayState(delay, unlockTime, pendingList, schedule, pendingSec, execAt)
+            cachedState = result
+            lastStateModified = lastMod
+            result
         } catch (e: Exception) {
             Log.e(TAG, "Error reading delay_config.json: ${e.message}")
             DelayState(globalDelaySeconds = 0, unlockSettingsUnlockTime = 0, requestedConfigUpdates = emptyList())
         }
     }
 
+    @Synchronized
     private fun saveState(context: Context, state: DelayState) {
         val file = File(context.filesDir, FILE_NAME)
         try {
@@ -162,6 +178,8 @@ object DelayManager {
                 }
             }
             file.writeText(json.toString(2))
+            cachedState = state
+            lastStateModified = file.lastModified()
         } catch (e: Exception) {
             Log.e(TAG, "Error writing delay_config.json: ${e.message}")
         }

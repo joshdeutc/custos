@@ -9,10 +9,28 @@ object BlockedNotificationManager {
     private const val KEY_PREFIX_PREF = "pref_"
     private const val KEY_MUTED_SET = "muted_now"
 
-    private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private fun safeContext(context: Context): Context {
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+            val um = context.getSystemService(android.os.UserManager::class.java)
+            if (um != null && !um.isUserUnlocked) {
+                context.createDeviceProtectedStorageContext()
+            } else {
+                context
+            }
+        } else {
+            context
+        }
+    }
+
+    private fun prefs(context: Context) = try {
+        safeContext(context).getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    } catch (e: Exception) {
+        Log.e(TAG, "Failed to get SharedPreferences: ${e.message}")
+        null
+    }
 
     fun getMuteWhenBlockedPreference(context: Context, packageName: String): Boolean? {
-        val p = prefs(context)
+        val p = prefs(context) ?: return null
         val raw = p.getString(KEY_PREFIX_PREF + packageName, null) ?: return null
         return when (raw) {
             "mute" -> true
@@ -22,25 +40,25 @@ object BlockedNotificationManager {
     }
 
     fun setMuteWhenBlockedPreference(context: Context, packageName: String, muteWhenBlocked: Boolean) {
-        prefs(context).edit()
-            .putString(KEY_PREFIX_PREF + packageName, if (muteWhenBlocked) "mute" else "keep")
-            .apply()
+        prefs(context)?.edit()
+            ?.putString(KEY_PREFIX_PREF + packageName, if (muteWhenBlocked) "mute" else "keep")
+            ?.apply()
     }
 
     fun clearPreference(context: Context, packageName: String) {
-        prefs(context).edit()
-            .remove(KEY_PREFIX_PREF + packageName)
-            .apply()
+        prefs(context)?.edit()
+            ?.remove(KEY_PREFIX_PREF + packageName)
+            ?.apply()
     }
 
     fun getCurrentlyMutedBySelfControl(context: Context): MutableSet<String> {
-        return prefs(context).getStringSet(KEY_MUTED_SET, emptySet())?.toMutableSet() ?: mutableSetOf()
+        return prefs(context)?.getStringSet(KEY_MUTED_SET, emptySet())?.toMutableSet() ?: mutableSetOf()
     }
 
     fun markCurrentlyMutedBySelfControl(context: Context, packageName: String, muted: Boolean) {
         val set = getCurrentlyMutedBySelfControl(context)
         if (muted) set.add(packageName) else set.remove(packageName)
-        prefs(context).edit().putStringSet(KEY_MUTED_SET, set).apply()
+        prefs(context)?.edit()?.putStringSet(KEY_MUTED_SET, set)?.apply()
     }
 
     /**

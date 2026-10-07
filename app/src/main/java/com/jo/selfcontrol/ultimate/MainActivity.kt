@@ -120,7 +120,6 @@ class MainActivity : Activity() {
                 getInstalledLaunchableApps()
             } catch (_: Exception) {}
         }.start()
-        handler.postDelayed(refreshRunnable, 500)
         handleIncomingIntent(intent)
     }
 
@@ -162,10 +161,13 @@ class MainActivity : Activity() {
         if (::zoomCanvas.isInitialized) {
             zoomCanvas.startFloatingAnimation()
         }
+        handler.removeCallbacks(refreshRunnable)
+        handler.post(refreshRunnable)
     }
 
     override fun onPause() {
         super.onPause()
+        handler.removeCallbacks(refreshRunnable)
         if (::zoomCanvas.isInitialized) {
             zoomCanvas.stopFloatingAnimation(animateToZero = false)
         }
