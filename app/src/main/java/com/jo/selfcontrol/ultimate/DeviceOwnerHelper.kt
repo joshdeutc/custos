@@ -107,6 +107,12 @@ object DeviceOwnerHelper {
             clearAllStuckSuspensions(ctx, keep = emptySet())
             Log.i(TAG, "OS suspension disabled for this flavor — cleared all stuck OS suspensions")
         }
+
+        // 8. Enforce Global Private DNS (DNS-over-TLS) and lockdown
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val configuredHost = getPrivateDnsHost(ctx) ?: DEFAULT_PRIVATE_DNS
+            applyPrivateDnsInternal(ctx, configuredHost)
+        }
     }
 
     /**
@@ -344,5 +350,52 @@ object DeviceOwnerHelper {
         isDeviceOwner(ctx) -> "✅ Device Owner actif — uninstall bloqué"
         PermissionHelper.isDeviceAdminActive(ctx) -> "⚠️ Device Admin seul — utilise A11Y comme fallback"
         else -> "❌ Aucune protection système — A11Y uniquement"
+    }
+
+    const val DEFAULT_PRIVATE_DNS = "b91912.dns.nextdns.io"
+    private const val PREFS_DO = "device_owner_prefs"
+    private const val KEY_PRIVATE_DNS = "configured_private_dns_host"
+
+    fun getPrivateDnsHost(ctx: Context): String? {
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            return GuardianClient.getPrivateDnsHost()
+        }
+        val prefs = ctx.getSharedPreferences(PREFS_DO, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_PRIVATE_DNS, DEFAULT_PRIVATE_DNS)
+    }
+
+    fun setPrivateDns(ctx: Context, hostname: String?): Boolean {
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            return GuardianClient.setPrivateDnsHost(hostname)
+        }
+        if (!isDeviceOwner(ctx) || android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return false
+        val cleanHost = hostname?.trim()?.takeIf { it.isNotEmpty() }
+        ctx.getSharedPreferences(PREFS_DO, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_PRIVATE_DNS, cleanHost)
+            .apply()
+        return applyPrivateDnsInternal(ctx, cleanHost)
+    }
+
+    fun applyPrivateDnsInternal(ctx: Context, host: String?): Boolean {
+        if (!isDeviceOwner(ctx) || android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return false
+        val d = dpm(ctx)
+        val a = admin(ctx)
+        return runCatching {
+            if (!host.isNullOrBlank()) {
+                val res = d.setGlobalPrivateDnsModeSpecifiedHost(a, host)
+                d.addUserRestriction(a, UserManager.DISALLOW_CONFIG_PRIVATE_DNS)
+                Log.i(TAG, "Enforced Global Private DNS: $host (res=$res)")
+                res == DevicePolicyManager.PRIVATE_DNS_SET_NO_ERROR
+            } else {
+                d.setGlobalPrivateDnsModeOpportunistic(a)
+                d.clearUserRestriction(a, UserManager.DISALLOW_CONFIG_PRIVATE_DNS)
+                Log.i(TAG, "Cleared Global Private DNS (opportunistic mode)")
+                true
+            }
+        }.getOrElse {
+            Log.e(TAG, "applyPrivateDnsInternal failed: ${it.message}", it)
+            false
+        }
     }
 }

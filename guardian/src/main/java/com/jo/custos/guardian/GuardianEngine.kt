@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.UserManager
 import android.util.Log
 import android.view.inputmethod.InputMethodManager
 import org.json.JSONArray
@@ -20,6 +21,7 @@ object GuardianEngine {
     private const val TAG = "Custos.Guardian.Engine"
     private const val STATE_FILE = "guardian_state.json"
     private const val DEFAULT_DELAY_HOURS = 24
+    const val DEFAULT_PRIVATE_DNS = "b91912.dns.nextdns.io"
     const val ACTION_CHECK_EXPIRATION = "com.jo.custos.guardian.ACTION_CHECK_EXPIRATION"
 
     private val HARD_GUARDS = setOf(
@@ -59,7 +61,8 @@ object GuardianEngine {
         val pendingRequests: List<PendingRequest> = emptyList(),
         val pendingDelayHours: Int? = null,
         val pendingDelayExecuteAt: Long = 0L,
-        val pendingDisableExecuteAt: Long = 0L
+        val pendingDisableExecuteAt: Long = 0L,
+        val privateDnsHost: String? = DEFAULT_PRIVATE_DNS
     )
 
     private var currentState: GuardianState? = null
@@ -167,6 +170,9 @@ object GuardianEngine {
             } else null
             val pendingDelayExec = json.optLong("pending_delay_execute_at", 0L)
             val pendingDisableExec = json.optLong("pending_disable_execute_at", 0L)
+            val dnsHost = if (json.has("private_dns_host")) {
+                if (json.isNull("private_dns_host")) null else json.getString("private_dns_host")
+            } else DEFAULT_PRIVATE_DNS
 
             GuardianState(
                 enabled = enabled,
@@ -175,11 +181,12 @@ object GuardianEngine {
                 pendingRequests = reqs,
                 pendingDelayHours = pendingDelayHours,
                 pendingDelayExecuteAt = pendingDelayExec,
-                pendingDisableExecuteAt = pendingDisableExec
+                pendingDisableExecuteAt = pendingDisableExec,
+                privateDnsHost = dnsHost
             )
         } catch (e: Exception) {
             Log.e(TAG, "Error loading state, restoring defaults", e)
-            GuardianState(enabled = true, quarantineDelayHours = DEFAULT_DELAY_HOURS, allowedPackages = HARD_GUARDS)
+            GuardianState(enabled = true, quarantineDelayHours = DEFAULT_DELAY_HOURS, allowedPackages = HARD_GUARDS, privateDnsHost = DEFAULT_PRIVATE_DNS)
         }
     }
 
@@ -190,6 +197,7 @@ object GuardianEngine {
                 put("enabled", state.enabled)
                 put("quarantine_delay_hours", state.quarantineDelayHours)
                 put("allowed_packages", JSONArray(state.allowedPackages.toList()))
+                put("private_dns_host", state.privateDnsHost ?: JSONObject.NULL)
                 put("pending_requests", JSONArray().apply {
                     for (req in state.pendingRequests) {
                         put(JSONObject().apply {
@@ -427,6 +435,9 @@ object GuardianEngine {
     fun enforceLockdown(ctx: Context) {
         checkAndPromotePendingRequests(ctx)
         val state = getState(ctx)
+        // Always enforce configured Private DNS (DNS-over-TLS) and lockdown
+        applyPrivateDnsInternal(ctx, state.privateDnsHost)
+
         if (!state.enabled) return
 
         val pm = ctx.packageManager
@@ -526,6 +537,45 @@ object GuardianEngine {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set package hidden: $packageName", e)
+        }
+    }
+
+    fun setPrivateDnsHost(ctx: Context, host: String?): Boolean {
+        synchronized(lock) {
+            val cleanHost = host?.trim()?.takeIf { it.isNotEmpty() }
+            val state = getState(ctx)
+            saveStateInternal(ctx, state.copy(privateDnsHost = cleanHost))
+            return applyPrivateDnsInternal(ctx, cleanHost)
+        }
+    }
+
+    fun getPrivateDnsHost(ctx: Context): String? {
+        return getState(ctx).privateDnsHost
+    }
+
+    fun applyPrivateDnsInternal(ctx: Context, host: String?): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return false
+        val admin = getAdminComponent(ctx)
+        if (!dpm.isDeviceOwnerApp(ctx.packageName)) {
+            Log.w(TAG, "Cannot apply private DNS: Guardian is not Device Owner")
+            return false
+        }
+        return runCatching {
+            if (!host.isNullOrBlank()) {
+                val res = dpm.setGlobalPrivateDnsModeSpecifiedHost(admin, host)
+                dpm.addUserRestriction(admin, UserManager.DISALLOW_CONFIG_PRIVATE_DNS)
+                Log.i(TAG, "Guardian enforced Global Private DNS: $host (res=$res)")
+                res == DevicePolicyManager.PRIVATE_DNS_SET_NO_ERROR
+            } else {
+                dpm.setGlobalPrivateDnsModeOpportunistic(admin)
+                dpm.clearUserRestriction(admin, UserManager.DISALLOW_CONFIG_PRIVATE_DNS)
+                Log.i(TAG, "Guardian cleared Global Private DNS (opportunistic mode)")
+                true
+            }
+        }.getOrElse {
+            Log.e(TAG, "applyPrivateDnsInternal failed: ${it.message}", it)
+            false
         }
     }
 }

@@ -214,4 +214,24 @@ object GuardianClient {
             Log.e(TAG, "IPC error setPackageHidden $pkg", e)
         }
     }
+
+    fun setPrivateDnsHost(hostname: String?): Boolean {
+        val s = service ?: return false
+        return try {
+            s.setPrivateDnsHost(hostname)
+        } catch (e: Exception) {
+            Log.e(TAG, "IPC error setPrivateDnsHost $hostname", e)
+            false
+        }
+    }
+
+    fun getPrivateDnsHost(): String? {
+        val s = service ?: return null
+        return try {
+            s.privateDnsHost
+        } catch (e: Exception) {
+            Log.e(TAG, "IPC error getPrivateDnsHost", e)
+            null
+        }
+    }
 }

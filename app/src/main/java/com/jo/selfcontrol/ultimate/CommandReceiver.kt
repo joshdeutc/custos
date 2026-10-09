@@ -74,6 +74,8 @@ class CommandReceiver : BroadcastReceiver() {
             "com.jo.selfcontrol.ultimate.SET_CURFEW" -> handleSetCurfew(context, intent)
             "com.jo.selfcontrol.ultimate.CHECK_WHITELIST_EXPIRATION" ->
                 WhitelistManager.checkAndPromotePendingRequests(context)
+            "com.jo.selfcontrol.ultimate.SET_PRIVATE_DNS" -> handleSetPrivateDns(context, intent)
+            "com.jo.selfcontrol.ultimate.GET_PRIVATE_DNS" -> handleGetPrivateDns(context)
         }
     }
 
@@ -497,5 +499,18 @@ class CommandReceiver : BroadcastReceiver() {
         ConfigManager.saveConfig(context, cur.copy(periodBlocks = updated))
         Log.w("SelfControl.Cmd", "=== SET_CURFEW: added curfew for $pkgs ($startMin -> $endMin) ===")
         EventLog.log(context, "CURFEW", "Curfew rule added via ADB: $pkgs")
+    }
+
+    private fun handleSetPrivateDns(context: Context, intent: Intent) {
+        val host = intent.getStringExtra("host") ?: DeviceOwnerHelper.DEFAULT_PRIVATE_DNS
+        val ok = DeviceOwnerHelper.setPrivateDns(context, host)
+        Log.w("SelfControl.Cmd", "=== SET_PRIVATE_DNS host=$host -> success=$ok ===")
+        EventLog.log(context, "DNS", "SET_PRIVATE_DNS host=$host ok=$ok")
+    }
+
+    private fun handleGetPrivateDns(context: Context) {
+        val host = DeviceOwnerHelper.getPrivateDnsHost(context)
+        Log.w("SelfControl.Cmd", "=== GET_PRIVATE_DNS host=$host ===")
+        EventLog.log(context, "DNS", "GET_PRIVATE_DNS host=$host")
     }
 }

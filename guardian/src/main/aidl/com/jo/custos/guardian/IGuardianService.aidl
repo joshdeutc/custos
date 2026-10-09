@@ -22,4 +22,7 @@ interface IGuardianService {
     void enforceLockdown();
     void setPackageSuspended(String packageName, boolean suspended);
     void setPackageHidden(String packageName, boolean hidden);
+
+    boolean setPrivateDnsHost(String hostname);
+    String getPrivateDnsHost();
 }

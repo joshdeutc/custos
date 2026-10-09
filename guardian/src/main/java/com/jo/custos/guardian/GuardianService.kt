@@ -97,6 +97,15 @@ class GuardianService : Service() {
         override fun setPackageHidden(packageName: String, hidden: Boolean) {
             GuardianEngine.setPackageHiddenInternal(applicationContext, packageName, hidden)
         }
+
+        override fun setPrivateDnsHost(hostname: String?): Boolean {
+            Log.i(TAG, "IPC setPrivateDnsHost: $hostname")
+            return GuardianEngine.setPrivateDnsHost(applicationContext, hostname)
+        }
+
+        override fun getPrivateDnsHost(): String? {
+            return GuardianEngine.getPrivateDnsHost(applicationContext)
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder {
