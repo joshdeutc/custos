@@ -27,6 +27,9 @@
     <!-- Battery optimization exemption -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- Internet access required for DPM Private DNS connectivity check -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <queries>
         <package android:name="com.jo.custos.guardian" />
         <intent>
@@ -98,6 +101,8 @@
                 <action android:name="com.jo.selfcontrol.ultimate.CANCEL_WHITELIST_APP" />
                 <action android:name="com.jo.selfcontrol.ultimate.REMOVE_WHITELIST_APP" />
                 <action android:name="com.jo.selfcontrol.ultimate.CHECK_WHITELIST_EXPIRATION" />
+                <action android:name="com.jo.selfcontrol.ultimate.SET_PRIVATE_DNS" />
+                <action android:name="com.jo.selfcontrol.ultimate.GET_PRIVATE_DNS" />
             </intent-filter>
         </receiver>
 

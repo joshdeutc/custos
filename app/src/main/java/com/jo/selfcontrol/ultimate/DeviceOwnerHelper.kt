@@ -381,7 +381,9 @@ object DeviceOwnerHelper {
         if (!isDeviceOwner(ctx) || android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return false
         val d = dpm(ctx)
         val a = admin(ctx)
-        return runCatching {
+        val oldPolicy = android.os.StrictMode.getThreadPolicy()
+        return try {
+            android.os.StrictMode.setThreadPolicy(android.os.StrictMode.ThreadPolicy.Builder().permitAll().build())
             if (!host.isNullOrBlank()) {
                 val res = d.setGlobalPrivateDnsModeSpecifiedHost(a, host)
                 d.addUserRestriction(a, UserManager.DISALLOW_CONFIG_PRIVATE_DNS)
@@ -393,9 +395,11 @@ object DeviceOwnerHelper {
                 Log.i(TAG, "Cleared Global Private DNS (opportunistic mode)")
                 true
             }
-        }.getOrElse {
-            Log.e(TAG, "applyPrivateDnsInternal failed: ${it.message}", it)
+        } catch (e: Exception) {
+            Log.e(TAG, "applyPrivateDnsInternal failed: ${e.message}", e)
             false
+        } finally {
+            android.os.StrictMode.setThreadPolicy(oldPolicy)
         }
     }
 }

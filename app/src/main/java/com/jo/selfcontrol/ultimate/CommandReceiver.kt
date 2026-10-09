@@ -503,9 +503,16 @@ class CommandReceiver : BroadcastReceiver() {
 
     private fun handleSetPrivateDns(context: Context, intent: Intent) {
         val host = intent.getStringExtra("host") ?: DeviceOwnerHelper.DEFAULT_PRIVATE_DNS
-        val ok = DeviceOwnerHelper.setPrivateDns(context, host)
-        Log.w("SelfControl.Cmd", "=== SET_PRIVATE_DNS host=$host -> success=$ok ===")
-        EventLog.log(context, "DNS", "SET_PRIVATE_DNS host=$host ok=$ok")
+        val pendingResult = goAsync()
+        Thread {
+            try {
+                val ok = DeviceOwnerHelper.setPrivateDns(context, host)
+                Log.w("SelfControl.Cmd", "=== SET_PRIVATE_DNS host=$host -> success=$ok ===")
+                EventLog.log(context, "DNS", "SET_PRIVATE_DNS host=$host ok=$ok")
+            } finally {
+                pendingResult.finish()
+            }
+        }.start()
     }
 
     private fun handleGetPrivateDns(context: Context) {

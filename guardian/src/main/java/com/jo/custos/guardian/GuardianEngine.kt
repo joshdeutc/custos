@@ -561,7 +561,9 @@ object GuardianEngine {
             Log.w(TAG, "Cannot apply private DNS: Guardian is not Device Owner")
             return false
         }
-        return runCatching {
+        val oldPolicy = android.os.StrictMode.getThreadPolicy()
+        return try {
+            android.os.StrictMode.setThreadPolicy(android.os.StrictMode.ThreadPolicy.Builder().permitAll().build())
             if (!host.isNullOrBlank()) {
                 val res = dpm.setGlobalPrivateDnsModeSpecifiedHost(admin, host)
                 dpm.addUserRestriction(admin, UserManager.DISALLOW_CONFIG_PRIVATE_DNS)
@@ -573,9 +575,11 @@ object GuardianEngine {
                 Log.i(TAG, "Guardian cleared Global Private DNS (opportunistic mode)")
                 true
             }
-        }.getOrElse {
-            Log.e(TAG, "applyPrivateDnsInternal failed: ${it.message}", it)
+        } catch (e: Exception) {
+            Log.e(TAG, "applyPrivateDnsInternal failed: ${e.message}", e)
             false
+        } finally {
+            android.os.StrictMode.setThreadPolicy(oldPolicy)
         }
     }
 }
