@@ -29,6 +29,16 @@ class GuardianPackageReceiver : BroadcastReceiver() {
                     Log.w(TAG, "Guardian locked down newly installed unauthorized app: $pkg")
                 }
             }
+            Intent.ACTION_PACKAGE_REMOVED, Intent.ACTION_PACKAGE_FULLY_REMOVED -> {
+                val pkg = intent.data?.schemeSpecificPart ?: return
+                if (intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) {
+                    // App is being updated/replaced, not uninstalled
+                    return
+                }
+                Log.i(TAG, "Package uninstalled from device: $pkg")
+                GuardianEngine.init(context)
+                GuardianEngine.onPackageRemoved(context, pkg)
+            }
             Intent.ACTION_BOOT_COMPLETED -> {
                 Log.i(TAG, "Boot completed -> Guardian enforcing lockdown")
                 GuardianEngine.init(context)

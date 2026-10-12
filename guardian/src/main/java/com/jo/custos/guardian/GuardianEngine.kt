@@ -341,6 +341,22 @@ object GuardianEngine {
         }
     }
 
+    fun onPackageRemoved(ctx: Context, packageName: String) {
+        if (isGuarded(ctx, packageName) || packageName == ctx.packageName) return
+        synchronized(lock) {
+            val state = getState(ctx)
+            val cleanPkg = packageName.trim()
+            val wasAllowed = cleanPkg in state.allowedPackages
+            val wasPending = state.pendingRequests.any { it.packageName == cleanPkg }
+            if (!wasAllowed && !wasPending) return
+
+            val updatedAllowed = state.allowedPackages - cleanPkg
+            val updatedPending = state.pendingRequests.filterNot { it.packageName == cleanPkg }
+            saveStateInternal(ctx, state.copy(allowedPackages = updatedAllowed, pendingRequests = updatedPending))
+            Log.w(TAG, "Guardian removed uninstalled package $cleanPkg from whitelist")
+        }
+    }
+
     fun requestChangeQuarantineDelay(ctx: Context, newHours: Int): Boolean {
         if (newHours <= 0) return false
         synchronized(lock) {
@@ -434,7 +450,7 @@ object GuardianEngine {
 
     fun enforceLockdown(ctx: Context) {
         checkAndPromotePendingRequests(ctx)
-        val state = getState(ctx)
+        var state = getState(ctx)
         // Always enforce configured Private DNS (DNS-over-TLS) and lockdown
         applyPrivateDnsInternal(ctx, state.privateDnsHost)
 
@@ -445,6 +461,17 @@ object GuardianEngine {
             pm.getInstalledPackages(PackageManager.MATCH_UNINSTALLED_PACKAGES)
         } catch (e: Exception) {
             emptyList()
+        }
+
+        val installedSet = installed.map { it.packageName }.toSet()
+        val ghostAllowed = state.allowedPackages.filter {
+            it !in installedSet && !isGuarded(ctx, it) && it != ctx.packageName && it !in HARD_GUARDS
+        }.toSet()
+        if (ghostAllowed.isNotEmpty()) {
+            val prunedAllowed = state.allowedPackages - ghostAllowed
+            state = state.copy(allowedPackages = prunedAllowed)
+            saveStateInternal(ctx, state)
+            Log.w(TAG, "Guardian pruned ${ghostAllowed.size} ghost app(s) from whitelist: $ghostAllowed")
         }
 
         for (pkgInfo in installed) {

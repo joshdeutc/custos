@@ -881,21 +881,34 @@ class LimitService : Service() {
         val receiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 val pkg = intent.data?.schemeSpecificPart ?: return
-                InstallBlockManager.onPackageAdded(ctx, pkg)
-                WhitelistManager.onPackageAdded(ctx, pkg)
+                val action = intent.action ?: return
+                val isReplacing = intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)
+                when (action) {
+                    Intent.ACTION_PACKAGE_ADDED, Intent.ACTION_PACKAGE_REPLACED -> {
+                        InstallBlockManager.onPackageAdded(ctx, pkg)
+                        WhitelistManager.onPackageAdded(ctx, pkg)
+                    }
+                    Intent.ACTION_PACKAGE_REMOVED, Intent.ACTION_PACKAGE_FULLY_REMOVED -> {
+                        if (!isReplacing) {
+                            WhitelistManager.onPackageRemoved(ctx, pkg)
+                        }
+                    }
+                }
             }
         }
         val filter = android.content.IntentFilter().apply {
             addAction(Intent.ACTION_PACKAGE_ADDED)
             addAction(Intent.ACTION_PACKAGE_REPLACED)
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_FULLY_REMOVED)
             addDataScheme("package")
         }
         try {
             registerReceiver(receiver, filter)
             packageAddedReceiver = receiver
-            Log.i(TAG, "📦 PACKAGE_ADDED receiver registered (install blocklist)")
+            Log.i(TAG, "📦 Package change receiver registered (install/uninstall)")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to register PACKAGE_ADDED receiver: ${e.message}")
+            Log.e(TAG, "Failed to register package change receiver: ${e.message}")
         }
     }
 

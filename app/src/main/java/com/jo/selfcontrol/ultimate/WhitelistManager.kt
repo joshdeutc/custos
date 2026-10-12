@@ -858,7 +858,7 @@ object WhitelistManager {
      * Promotes expired pending requests, unhides newly allowed apps, and locks unauthorized apps.
      */
     fun enforce(ctx: Context) {
-        val state = checkAndPromotePendingRequests(ctx)
+        var state = checkAndPromotePendingRequests(ctx)
         if (!state.enabled) return
 
         // 1. Un-hide / release any packages that are now allowed OR are system/guarded apps
@@ -879,6 +879,25 @@ object WhitelistManager {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get installed packages: ${e.message}")
             return
+        }
+
+        val installedSet = installed.map { it.packageName }.toSet()
+
+        // 2b. Reconcile ghost packages: prune any 3rd-party allowed package that is no longer installed on the device
+        val ghostAllowed = state.allowedPackages.filter {
+            it !in installedSet && !isGuarded(ctx, it) && it != ctx.packageName && it !in HARD_GUARDS
+        }.toSet()
+        if (ghostAllowed.isNotEmpty()) {
+            val prunedAllowed = state.allowedPackages - ghostAllowed
+            state = state.copy(allowedPackages = prunedAllowed)
+            saveState(ctx, state)
+            Log.w(TAG, "Pruned ${ghostAllowed.size} uninstalled ghost app(s) from whitelist: $ghostAllowed")
+            EventLog.log(ctx, "WHITELIST", "Pruned uninstalled ghost app(s): $ghostAllowed")
+            if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+                for (ghost in ghostAllowed) {
+                    GuardianClient.removeAppFromWhitelist(ghost)
+                }
+            }
         }
 
         for (pkgInfo in installed) {
@@ -923,6 +942,39 @@ object WhitelistManager {
         val hidden = loadHiddenState(ctx) + pkg
         saveHiddenState(ctx, hidden)
         notifyAppQuarantined(ctx, pkg)
+    }
+
+    /**
+     * Fast-path hook invoked from ACTION_PACKAGE_REMOVED / ACTION_PACKAGE_FULLY_REMOVED receiver.
+     * When an app is uninstalled, it is purged from the whitelist so that any future
+     * reinstallation will strictly require passing through the quarantine delay again.
+     */
+    fun onPackageRemoved(ctx: Context, pkg: String) {
+        if (pkg == ctx.packageName) return
+        if (pkg in HARD_GUARDS || isGuarded(ctx, pkg)) return
+
+        synchronized(this) {
+            val state = loadState(ctx)
+            val wasAllowed = pkg in state.allowedPackages
+            val wasPending = state.pendingRequests.any { it.packageName == pkg }
+
+            if (!wasAllowed && !wasPending) return
+
+            val updatedAllowed = state.allowedPackages - pkg
+            val updatedPending = state.pendingRequests.filterNot { it.packageName == pkg }
+
+            saveState(ctx, state.copy(allowedPackages = updatedAllowed, pendingRequests = updatedPending))
+
+            val hidden = loadHiddenState(ctx) - pkg
+            saveHiddenState(ctx, hidden)
+
+            Log.w(TAG, "🗑️ App uninstalled from device: $pkg -> Purged from whitelist (re-install will require quarantine)")
+            EventLog.log(ctx, "WHITELIST", "App uninstalled: $pkg -> Purged from whitelist")
+
+            if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+                GuardianClient.removeAppFromWhitelist(pkg)
+            }
+        }
     }
 
     private const val NOTIF_CHANNEL_ID = "whitelist_quarantine_alerts"

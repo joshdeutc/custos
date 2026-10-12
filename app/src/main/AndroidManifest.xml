@@ -88,6 +88,17 @@
             android:name=".BlockedNotificationChoiceReceiver"
             android:exported="false" />
 
+        <!-- Package removal receiver for instant whitelist cleanup -->
+        <receiver
+            android:name=".PackageChangeReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_REMOVED" />
+                <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED" />
+                <data android:scheme="package" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name=".CommandReceiver"
             android:exported="true">
