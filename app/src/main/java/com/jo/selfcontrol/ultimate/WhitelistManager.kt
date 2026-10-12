@@ -88,6 +88,7 @@ object WhitelistManager {
         "com.jo.notubeplayer",
         "air.com.unit9.bkFrApp",
         "com.jo.selfcontrol.ultimate",
+        "com.guardian",
         "com.vsct.vsc.mobile.horaireetresa.android",
         "cc.dreamspark.intervaltimer",
         "com.lexilize.fc",
