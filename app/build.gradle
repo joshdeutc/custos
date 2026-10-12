@@ -12,6 +12,13 @@ if (keystorePropsFile.exists()) {
     keystoreProps.load(new FileInputStream(keystorePropsFile))
 }
 
+def envKeystoreFile = System.getenv("RELEASE_KEYSTORE_FILE") ?: (project.findProperty("RELEASE_KEYSTORE_FILE") as String)
+def releaseKeystoreFile = envKeystoreFile != null ? file(envKeystoreFile) : (keystorePropsFile.exists() && keystoreProps['storeFile'] ? rootProject.file(keystoreProps['storeFile']) : null)
+def releaseStorePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD") ?: (project.findProperty("RELEASE_KEYSTORE_PASSWORD") as String) ?: (keystorePropsFile.exists() ? keystoreProps['storePassword'] : null)
+def releaseKeyAlias = System.getenv("RELEASE_KEY_ALIAS") ?: (project.findProperty("RELEASE_KEY_ALIAS") as String) ?: (keystorePropsFile.exists() ? keystoreProps['keyAlias'] : null)
+def releaseKeyPassword = System.getenv("RELEASE_KEY_PASSWORD") ?: (project.findProperty("RELEASE_KEY_PASSWORD") as String) ?: (keystorePropsFile.exists() ? keystoreProps['keyPassword'] : null)
+def hasReleaseSigning = releaseKeystoreFile != null && releaseKeystoreFile.exists()
+
 android {
     namespace 'com.jo.selfcontrol.ultimate'
     compileSdk 34
@@ -130,11 +137,11 @@ android {
 
     signingConfigs {
         release {
-            if (keystorePropsFile.exists()) {
-                storeFile rootProject.file(keystoreProps['storeFile'])
-                storePassword keystoreProps['storePassword']
-                keyAlias keystoreProps['keyAlias']
-                keyPassword keystoreProps['keyPassword']
+            if (hasReleaseSigning) {
+                storeFile releaseKeystoreFile
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
             }
         }
     }
@@ -143,7 +150,7 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            if (keystorePropsFile.exists()) {
+            if (hasReleaseSigning) {
                 signingConfig signingConfigs.release
             } else {
                 signingConfig signingConfigs.debug

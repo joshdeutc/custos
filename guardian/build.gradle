@@ -3,6 +3,19 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+def keystorePropsFile = rootProject.file("keystore.properties")
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystoreProps.load(new FileInputStream(keystorePropsFile))
+}
+
+def envKeystoreFile = System.getenv("RELEASE_KEYSTORE_FILE") ?: (project.findProperty("RELEASE_KEYSTORE_FILE") as String)
+def releaseKeystoreFile = envKeystoreFile != null ? file(envKeystoreFile) : (keystorePropsFile.exists() && keystoreProps['storeFile'] ? rootProject.file(keystoreProps['storeFile']) : null)
+def releaseStorePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD") ?: (project.findProperty("RELEASE_KEYSTORE_PASSWORD") as String) ?: (keystorePropsFile.exists() ? keystoreProps['storePassword'] : null)
+def releaseKeyAlias = System.getenv("RELEASE_KEY_ALIAS") ?: (project.findProperty("RELEASE_KEY_ALIAS") as String) ?: (keystorePropsFile.exists() ? keystoreProps['keyAlias'] : null)
+def releaseKeyPassword = System.getenv("RELEASE_KEY_PASSWORD") ?: (project.findProperty("RELEASE_KEY_PASSWORD") as String) ?: (keystorePropsFile.exists() ? keystoreProps['keyPassword'] : null)
+def hasReleaseSigning = releaseKeystoreFile != null && releaseKeystoreFile.exists()
+
 android {
     namespace 'com.jo.custos.guardian'
     compileSdk 34
@@ -20,10 +33,25 @@ android {
         aidl true
     }
 
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile releaseKeystoreFile
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
-            signingConfig signingConfigs.debug
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            } else {
+                signingConfig signingConfigs.debug
+            }
         }
         debug {
             signingConfig signingConfigs.debug

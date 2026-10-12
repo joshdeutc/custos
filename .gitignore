@@ -13,6 +13,7 @@ local.properties
 *.keystore
 *.jks
 keystore.properties
+keystore_base64.txt
 
 # Logs & OS cruft
 *.log
