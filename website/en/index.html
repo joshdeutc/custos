@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Custos: take back control of your screen time on Android</title>
+  <meta name="description" content="Custos limits the apps you choose: daily quotas, curfews, short sessions and a nuclear mode. Free, open source, no root and no data collection at all.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e0b16" media="(prefers-color-scheme: dark)">
+
+  <!-- TODO(domain): once the final domain is known, add absolute URLs here, e.g.
+  <link rel="canonical" href="https://YOUR-DOMAIN/en/index.html">
+  <link rel="alternate" hreflang="fr" href="https://YOUR-DOMAIN/">
+  <link rel="alternate" hreflang="en" href="https://YOUR-DOMAIN/en/index.html">
+  <link rel="alternate" hreflang="x-default" href="https://YOUR-DOMAIN/">
+  <meta property="og:url" content="https://YOUR-DOMAIN/en/index.html">
+  and make og:image / twitter:image absolute (https://YOUR-DOMAIN/assets/og-en.png). -->
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Custos">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:locale:alternate" content="fr_FR">
+  <meta property="og:title" content="Custos: take back control of your screen time">
+  <meta property="og:description" content="Daily quotas, curfews, short sessions and a nuclear mode for the apps you choose. Free, open source, 100% on-device.">
+  <meta property="og:image" content="../assets/og-en.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Custos logo and the tagline: take back control of your screen time.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Custos: take back control of your screen time">
+  <meta name="twitter:description" content="Quotas, curfews, short sessions and a nuclear mode. Free, open source, 100% on-device.">
+  <meta name="twitter:image" content="../assets/og-en.png">
+
+  <link rel="icon" href="../assets/logo.svg" type="image/svg+xml">
+  <link rel="icon" href="../assets/icon-180.png" type="image/png" sizes="180x180">
+  <link rel="apple-touch-icon" href="../assets/icon-180.png">
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M5 21h14"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 2h6"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a7 7 0 0 0 10.7 10.7z"/></symbol>
+    <symbol id="i-repeat" viewBox="0 0 24 24"><path d="m17 2 3 3-3 3"/><path d="M4 11V9a4 4 0 0 1 4-4h12"/><path d="m7 22-3-3 3-3"/><path d="M20 13v2a4 4 0 0 1-4 4H4"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></symbol>
+    <symbol id="i-nuclear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1.8"/><path d="M10.5 9.4 7.5 4.2A9 9 0 0 1 16.5 4.2L13.5 9.4A3 3 0 0 0 10.5 9.4Z"/><path transform="rotate(120 12 12)" d="M10.5 9.4 7.5 4.2A9 9 0 0 1 16.5 4.2L13.5 9.4A3 3 0 0 0 10.5 9.4Z"/><path transform="rotate(240 12 12)" d="M10.5 9.4 7.5 4.2A9 9 0 0 1 16.5 4.2L13.5 9.4A3 3 0 0 0 10.5 9.4Z"/></symbol>
+    <symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="m2 2 20 20"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M2 8.8a15 15 0 0 1 4.2-2.7"/><path d="M10.7 5.1A15 15 0 0 1 22 8.8"/><path d="M5 12.9a10 10 0 0 1 5.2-2.8"/><path d="M16.8 11.3a10 10 0 0 1 2.2 1.6"/><path d="M12 20h.01"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></symbol>
+    <symbol id="i-hourglass" viewBox="0 0 24 24"><path d="M6 2h12M6 22h12"/><path d="M7 2v3.5c0 2 1.2 3.4 2.6 4.6L12 12l2.4-1.9C15.8 8.9 17 7.5 17 5.5V2"/><path d="M7 22v-3.5c0-2 1.2-3.4 2.6-4.6L12 12l2.4 1.9c1.4 1.2 2.6 2.6 2.6 4.6V22"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 2v9"/><path d="M6.3 5.7a8 8 0 1 0 11.4 0"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></symbol>
+    <symbol id="i-soon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24"><path d="M12 .5C5.73.5.5 5.74.5 12.02c0 5.1 3.29 9.42 7.86 10.95.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.2 1.77 1.2 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.47.11-3.06 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.77.11 3.06.74.81 1.19 1.84 1.19 3.1 0 4.43-2.7 5.4-5.27 5.69.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.53 11.53 0 0 0 23.5 12.02C23.5 5.74 18.27.5 12 .5z"/></symbol>
+  </svg>
+
+  <a class="skip-link" href="#content">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="Custos, home">
+        <img src="../assets/logo.svg" alt="" width="34" height="34">
+        <span>Custos</span>
+      </a>
+      <nav class="main-nav" aria-label="Main navigation">
+        <ul>
+          <li><a href="#features">Features</a></li>
+          <li><a href="#how-it-works">How it works</a></li>
+          <li><a href="#privacy">Privacy</a></li>
+          <li><a href="#faq">FAQ</a></li>
+        </ul>
+      </nav>
+      <a class="lang-switch" href="../index.html" hreflang="fr" lang="fr">FR<span class="visually-hidden"> Version française</span></a>
+      <a class="btn btn-primary btn-sm" href="https://github.com/joshdeutc/custos/releases/latest">Download</a>
+    </div>
+  </header>
+
+  <main id="content">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">Free and open source Android app</p>
+          <h1 id="hero-title">Take back control of your <span class="grad">screen time</span>.</h1>
+          <p class="lead">Custos limits the apps you choose and sends you back to the home screen when you hit your limit. Just enough friction to break the autopilot scrolling habit.</p>
+
+          <div class="cta-row">
+            <a class="btn btn-primary btn-lg" href="https://github.com/joshdeutc/custos/releases/latest">
+              <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>
+              <span>Download the APK</span>
+            </a>
+            <span class="store-soon" aria-disabled="true" title="Google&nbsp;Play release in preparation">
+              <svg class="icon" aria-hidden="true"><use href="#i-soon"/></svg>
+              <span class="store-soon-text"><small>Coming soon to</small><strong>Google&nbsp;Play</strong></span>
+            </span>
+          </div>
+          <p class="cta-meta">Free, no ads, no account. Android 8.0 and up.</p>
+          <p class="install-note"><strong>Installing the APK:</strong> open the downloaded file on your phone, then allow your browser to install apps when Android asks. <a href="#install">Is it safe?</a></p>
+
+          <ul class="chips" aria-label="At a glance">
+            <li><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>No root</li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-wifi-off"/></svg>100% on-device</li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg>Open source (MIT)</li>
+          </ul>
+        </div>
+
+        <div class="hero-visual">
+          <div class="phone" role="img" aria-label="Illustration: a phone showing the Custos logo">
+            <div class="phone-screen">
+              <span class="phone-camera"></span>
+              <img src="../assets/logo.svg" alt="" width="96" height="96">
+              <p class="phone-name">Custos</p>
+              <p class="phone-tag">Your apps, your rules.</p>
+            </div>
+          </div>
+          <span class="float-tag t1" aria-hidden="true"><svg class="icon"><use href="#i-clock"/></svg>Daily quota</span>
+          <span class="float-tag t2" aria-hidden="true"><svg class="icon"><use href="#i-moon"/></svg>Curfew</span>
+          <span class="float-tag t3" aria-hidden="true"><svg class="icon"><use href="#i-repeat"/></svg>Short sessions</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="features" aria-labelledby="features-title">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Features</p>
+          <h2 id="features-title">Simple rules that actually stick.</h2>
+          <p>Pick the apps that eat your time and the rule that suits you. Custos takes care of the rest, in the background.</p>
+        </div>
+
+        <ul class="features">
+          <li class="feature">
+            <span class="feature-icon"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg></span>
+            <h3>A quota per app</h3>
+            <p>Set a maximum time per day for each app. Once the quota is used up, the app stays blocked until the next day. You can also choose the days and hours when it is allowed.</p>
+            <p class="example">Example: 30 minutes of Instagram a day.</p>
+          </li>
+          <li class="feature">
+            <span class="feature-icon"><svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg></span>
+            <h3>Curfews</h3>
+            <p>Block apps during a time window, on the days you pick. Their notifications can be paused at the same time.</p>
+            <p class="example">Example: social media blocked from 10 pm to 7 am on weekdays.</p>
+          </li>
+          <li class="feature">
+            <span class="feature-icon"><svg class="icon" aria-hidden="true"><use href="#i-repeat"/></svg></span>
+            <h3>Short sessions</h3>
+            <p>Limit how long each opening lasts, enforce a break before the next one and cap the number of openings per day.</p>
+            <p class="example">Example: 5 minutes per opening, 3 times a day.</p>
+          </li>
+          <li class="feature">
+            <span class="feature-icon"><svg class="icon" aria-hidden="true"><use href="#i-target"/></svg></span>
+            <h3>Block just part of an app</h3>
+            <p>With partial access, close only the section that sucks you in and keep the rest of the app. Show Custos the screen to block and the one to send you back to, and it remembers.</p>
+            <p class="example">Example: YouTube Shorts, without blocking YouTube.</p>
+          </li>
+          <li class="feature">
+            <span class="feature-icon"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-nuclear"/></svg></span>
+            <h3>Nuclear Mode</h3>
+            <p>For exam prep or deep work: block a set of apps for a fixed time, with Do Not Disturb switched on. No way to cancel it early.</p>
+            <p class="example">Example: 2 hours without social media before an exam.</p>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section section-alt" id="how-it-works" aria-labelledby="how-title">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">How it works</p>
+          <h2 id="how-title">Ready in three steps.</h2>
+          <p>No account to create, no complicated setup. The app walks you through each step.</p>
+        </div>
+
+        <ol class="steps">
+          <li class="step">
+            <span class="step-num" aria-hidden="true">1</span>
+            <h3>Download and install</h3>
+            <p>Get the APK from the official releases page on GitHub and open it on your phone. Android asks you to allow the install: that is normal for an app installed outside the Play Store.</p>
+          </li>
+          <li class="step">
+            <span class="step-num" aria-hidden="true">2</span>
+            <h3>Grant the permissions</h3>
+            <p>Turn on accessibility, so Custos knows which app is open, and usage access, to measure your screen time. The app explains each one.</p>
+          </li>
+          <li class="step">
+            <span class="step-num" aria-hidden="true">3</span>
+            <h3>Set your rules</h3>
+            <p>Add your apps and pick a quota, a curfew or a session limit. When a limit is reached, Custos sends you back to the home screen.</p>
+          </li>
+        </ol>
+
+        <div class="steps-cta">
+          <a class="btn btn-primary btn-lg" href="https://github.com/joshdeutc/custos/releases/latest">
+            <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>
+            <span>Download the APK</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section trust" id="privacy" aria-labelledby="trust-title">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">Privacy and trust</p>
+          <h2 id="trust-title">Custos collects nothing. At all.</h2>
+          <p>Custos does not even ask for internet access. So it cannot send anything: no account, no ads, no analytics. Your rules and your screen time are stored on your phone, and Custos never sends them anywhere.</p>
+        </div>
+
+        <ul class="trust-grid">
+          <li class="trust-item">
+            <svg class="icon" aria-hidden="true"><use href="#i-wifi-off"/></svg>
+            <div>
+              <h3>No internet permission</h3>
+              <p>No server, no tracker, no data collected. You can check it in the app's code.</p>
+            </div>
+          </li>
+          <li class="trust-item">
+            <svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>
+            <div>
+              <h3>No root, no special privileges</h3>
+              <p>No root, no device admin mode. Custos installs and uninstalls like any other app.</p>
+            </div>
+          </li>
+          <li class="trust-item">
+            <svg class="icon" aria-hidden="true"><use href="#i-code"/></svg>
+            <div>
+              <h3>Open source, MIT licence</h3>
+              <p>All the code is public on GitHub. Read it, build it yourself or suggest improvements.</p>
+            </div>
+          </li>
+          <li class="trust-item">
+            <svg class="icon" aria-hidden="true"><use href="#i-hourglass"/></svg>
+            <div>
+              <h3>Anti-cheat delay</h3>
+              <p>Loosening a rule only takes effect after a delay you choose. Tightening it is instant. By the time the delay is over, so is the urge.</p>
+            </div>
+          </li>
+          <li class="trust-item">
+            <svg class="icon" aria-hidden="true"><use href="#i-power"/></svg>
+            <div>
+              <h3>Always on</h3>
+              <p>Custos restarts with your phone and relaunches itself if it gets stopped. Your progress for the day is kept.</p>
+            </div>
+          </li>
+          <li class="trust-item">
+            <svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>
+            <div>
+              <h3>Free, no ads</h3>
+              <p>No subscription, no in-app purchase, no advertising. Just the app.</p>
+            </div>
+          </li>
+        </ul>
+
+        <div class="trust-links">
+          <a href="privacy.html">Read the privacy policy</a>
+          <a href="https://github.com/joshdeutc/custos">See the code on GitHub</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="faq" aria-labelledby="faq-title">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">FAQ</p>
+          <h2 id="faq-title">Frequently asked questions</h2>
+        </div>
+
+        <div class="faq">
+          <details>
+            <summary>Is Custos really free?</summary>
+            <div class="answer">
+              <p>Yes. Custos is free and open source, under the MIT licence. There are no ads, no subscription and no in-app purchases.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Does Custos collect my data?</summary>
+            <div class="answer">
+              <p>No. The app has no account and does not request the internet permission: it cannot send anything. Your rules and usage time are stored only on your phone, and the history of the apps you open is not recorded. Details in the <a href="privacy.html">privacy policy</a>.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Which phones does Custos run on?</summary>
+            <div class="answer">
+              <p>Android 8.0 and every newer version. Custos is not available on iPhone: iOS does not let an app watch other apps this way.</p>
+            </div>
+          </details>
+          <details id="install">
+            <summary>Is it safe to install an APK?</summary>
+            <div class="answer">
+              <p>Yes, as long as you get it from the source: the <a href="https://github.com/joshdeutc/custos/releases/latest">official releases page on GitHub</a>. The code is public, and every release is signed with the same key, so an update installs over the previous version without losing your settings.</p>
+              <p>On the first install, Android asks you to allow your browser or file manager to install apps. You can turn that permission off again right after, in Settings.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Do I need to root my phone?</summary>
+            <div class="answer">
+              <p>No. Custos needs no root, no device admin mode and no computer. It relies on the Android accessibility service and installs like a regular app.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Why does Custos need accessibility access?</summary>
+            <div class="answer">
+              <p>That is how it knows which app is in the foreground and sends you back to the home screen when a rule applies. It also uses it to protect its own settings. Nothing it sees is sent anywhere, since the app has no internet access.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Can Custos be bypassed?</summary>
+            <div class="answer">
+              <p>Custos is a self-discipline tool, not tamper-proof parental control. A determined person can turn the service off in Settings or uninstall the app. Custos guards the sensitive settings pages and puts a delay on every loosening: enough friction to break the habit, and that is the whole point.</p>
+            </div>
+          </details>
+          <details>
+            <summary>When will Custos be on Google&nbsp;Play?</summary>
+            <div class="answer">
+              <p>The Google&nbsp;Play release is in preparation. In the meantime, the APK on GitHub is the official version.</p>
+            </div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section class="final-cta" id="download" aria-labelledby="final-title">
+      <div class="container">
+        <div class="final-card">
+          <img src="../assets/logo.svg" alt="" width="64" height="64">
+          <h2 id="final-title">Ready to take your phone back?</h2>
+          <p>Free, no account and no ads. Your first rule is set up in a few minutes.</p>
+          <div class="cta-row">
+            <a class="btn btn-light btn-lg" href="https://github.com/joshdeutc/custos/releases/latest">
+              <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>
+              <span>Download the APK</span>
+            </a>
+            <a class="btn btn-outline-light btn-lg" href="https://github.com/joshdeutc/custos">
+              <svg class="icon icon-fill" aria-hidden="true" style="fill:currentColor;stroke:none"><use href="#i-github"/></svg>
+              <span>View on GitHub</span>
+            </a>
+          </div>
+          <p class="cta-meta">Android 8.0 and up. Coming soon to Google&nbsp;Play.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="index.html">
+          <img src="../assets/logo.svg" alt="" width="34" height="34">
+          <span>Custos</span>
+        </a>
+        <p>The open source Android app to limit your screen time, app by app.</p>
+      </div>
+      <nav aria-label="Footer links">
+        <ul class="footer-links">
+          <li><a href="https://github.com/joshdeutc/custos/releases/latest">Download</a></li>
+          <li><a href="https://github.com/joshdeutc/custos">GitHub</a></li>
+          <li><a href="https://github.com/joshdeutc/custos/blob/master/LICENSE">MIT licence</a></li>
+          <li><a href="privacy.html">Privacy</a></li>
+          <li><a href="https://github.com/joshdeutc/custos/issues">Report an issue</a></li>
+          <li><a href="../index.html" hreflang="fr" lang="fr">Français</a></li>
+        </ul>
+      </nav>
+      <div class="footer-legal">
+        <p>This site uses no cookies and no trackers.</p>
+        <p>© 2026 joshdeutc. Custos is released under the MIT licence. Android and Google&nbsp;Play are trademarks of Google LLC.</p>
+      </div>
+    </div>
+  </footer>
+  <script>
+    // Open the FAQ item targeted by an in-page link (for example the "is it safe?" link of the hero).
+    (function () {
+      function openDetails(id) {
+        var el = id && document.getElementById(id);
+        if (el && el.tagName === "DETAILS") el.open = true;
+      }
+      document.addEventListener("click", function (event) {
+        var link = event.target.closest('a[href^="#"]');
+        if (link) openDetails(link.getAttribute("href").slice(1));
+      });
+      openDetails(location.hash.slice(1));
+    })();
+  </script>
+</body>
+</html>

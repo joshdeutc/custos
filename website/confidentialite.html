@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Politique de confidentialité | Custos</title>
+  <meta name="description" content="Politique de confidentialité de l’appli Android Custos : aucune donnée collectée, aucune permission Internet, tout reste sur ton téléphone.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e0b16" media="(prefers-color-scheme: dark)">
+  <!-- TODO(domain): <link rel="canonical" href="https://YOUR-DOMAIN/confidentialite.html">
+  <link rel="alternate" hreflang="en" href="https://YOUR-DOMAIN/en/privacy.html"> -->
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/icon-180.png" type="image/png" sizes="180x180">
+  <link rel="apple-touch-icon" href="assets/icon-180.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#contenu">Aller au contenu</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="Custos, accueil">
+        <img src="assets/logo.svg" alt="" width="34" height="34">
+        <span>Custos</span>
+      </a>
+      <a class="lang-switch" href="en/privacy.html" hreflang="en" lang="en">EN<span class="visually-hidden"> English version</span></a>
+      <a class="btn btn-primary btn-sm" href="https://github.com/joshdeutc/custos/releases/latest">Télécharger</a>
+    </div>
+  </header>
+
+  <main id="contenu">
+    <article class="legal">
+      <a class="back-link" href="index.html">Retour à l’accueil</a>
+      <h1>Politique de confidentialité</h1>
+      <!-- TODO(Joshua): update this date whenever the policy changes. -->
+      <p class="updated">Application Android Custos. Dernière mise à jour&nbsp;: 1<sup>er</sup>&nbsp;octobre 2026.</p>
+
+      <div class="summary-box">
+        <p><strong>En bref</strong></p>
+        <ul>
+          <li>Custos ne collecte, ne transmet et ne vend aucune donnée personnelle.</li>
+          <li>L’application ne demande pas la permission Internet&nbsp;: elle ne peut envoyer aucune donnée hors de ton téléphone.</li>
+          <li>Pas de compte, pas de publicité, pas de mesure d’audience, pas de SDK tiers.</li>
+          <li>Ce que Custos enregistre reste dans l’espace privé de l’application, sur ton téléphone, et disparaît quand tu la désinstalles.</li>
+        </ul>
+      </div>
+
+      <h2>1. Qui publie Custos</h2>
+      <p>Custos est une application open source publiée par <span class="todo">[nom de l’éditeur à compléter]</span>, sous licence MIT. Son code source est public&nbsp;: <a href="https://github.com/joshdeutc/custos">github.com/joshdeutc/custos</a>.</p>
+      <p>Contact&nbsp;: <span class="todo">[adresse e-mail de contact à compléter]</span>. Tu peux aussi <a href="https://github.com/joshdeutc/custos/issues">ouvrir un ticket sur GitHub</a>.</p>
+
+      <h2>2. Aucune donnée collectée</h2>
+      <p>Custos fonctionne entièrement sur ton téléphone. Il n’a ni serveur, ni compte utilisateur, ni outil d’analyse, ni publicité. Le manifeste de l’application ne déclare pas la permission <code>android.permission.INTERNET</code>&nbsp;: Android ne lui permet donc pas d’envoyer des données sur le réseau. Tu peux le vérifier dans le <a href="https://github.com/joshdeutc/custos/blob/master/app/src/main/AndroidManifest.xml">fichier AndroidManifest.xml</a>.</p>
+      <p>L’éditeur de Custos ne reçoit et ne détient donc aucune donnée te concernant.</p>
+
+      <h2>3. Ce qui est enregistré sur ton téléphone</h2>
+      <p>Pour faire respecter tes règles, Custos enregistre localement, dans l’espace de stockage privé de l’application&nbsp;:</p>
+      <ul>
+        <li><strong>tes règles</strong>&nbsp;: applis limitées, quotas, couvre-feux, jours et heures autorisés, limites de session, réglages et presets du mode nucléaire, délais de protection&nbsp;;</li>
+        <li><strong>tes règles d’accès partiel</strong>&nbsp;: l’appli concernée et des identifiants techniques d’éléments d’écran, qui servent à reconnaître la section à bloquer (pas le contenu affiché)&nbsp;;</li>
+        <li><strong>l’état de la journée</strong>&nbsp;: temps d’utilisation des applis limitées, sessions utilisées, applis actuellement bloquées&nbsp;;</li>
+        <li><strong>tes préférences</strong>, par exemple la mise en pause des notifications d’une appli bloquée.</li>
+      </ul>
+      <p>Custos n’enregistre pas l’historique des applis que tu ouvres. Pour tout effacer, désinstalle l’application ou supprime ses données dans les paramètres d’Android (Applications, Custos, Stockage).</p>
+      <!-- TODO(Joshua): the manifest does not set android:allowBackup, so Android Auto Backup is on by
+      default. Either keep the paragraph below, or set android:allowBackup="false" and delete it. -->
+      <p>Custos ne désactive pas la sauvegarde automatique d’Android. Si elle est activée sur ton téléphone, Android peut inclure les réglages de Custos dans la sauvegarde de ton compte Google, comme pour les autres applications. Cette sauvegarde est gérée par Android et Google, pas par Custos.</p>
+
+      <h2>4. Autorisations demandées et pourquoi</h2>
+      <table class="perm-table">
+        <thead>
+          <tr><th scope="col">Autorisation</th><th scope="col">Utilisation</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Service d’accessibilité</td>
+            <td>Savoir quelle appli est au premier plan, te renvoyer à l’écran d’accueil quand une règle s’applique, protéger les pages de réglages sensibles et reconnaître les écrans visés par une règle d’accès partiel. Ce qui est à l’écran est analysé sur le moment, n’est pas enregistré et n’est jamais transmis.</td>
+          </tr>
+          <tr>
+            <td>Accès aux données d’utilisation</td>
+            <td>Mesurer le temps passé sur chaque appli limitée.</td>
+          </tr>
+          <tr>
+            <td>Liste des applications installées</td>
+            <td>Te proposer tes applis quand tu choisis celles à limiter.</td>
+          </tr>
+          <tr>
+            <td>Notifications</td>
+            <td>Afficher la notification du service de surveillance (Android 13 et plus).</td>
+          </tr>
+          <tr>
+            <td>Accès aux notifications (facultatif)</td>
+            <td>Mettre en pause les notifications des applis bloquées, puis les rétablir. Leur contenu n’est pas enregistré.</td>
+          </tr>
+          <tr>
+            <td>Ne pas déranger (facultatif)</td>
+            <td>Activer le mode Ne pas déranger pendant le mode nucléaire.</td>
+          </tr>
+          <tr>
+            <td>Démarrage, alarmes exactes, service au premier plan</td>
+            <td>Relancer la protection au démarrage du téléphone ou si le service est arrêté.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>Tu peux retirer chacune de ces autorisations à tout moment dans les paramètres d’Android. Certaines fonctions de Custos cessent alors de marcher.</p>
+
+      <h2>5. Partage avec des tiers</h2>
+      <p>Aucun. Custos n’intègre aucun SDK de publicité, d’analyse ou de rapport de plantage, et ne partage aucune donnée avec qui que ce soit.</p>
+
+      <h2>6. Téléchargement et site web</h2>
+      <p>L’APK se télécharge sur GitHub&nbsp;: ce téléchargement est soumis à la <a href="https://docs.github.com/fr/site-policy/privacy-policies/github-general-privacy-statement">déclaration de confidentialité de GitHub</a>.</p>
+      <!-- TODO(Joshua): name the host once chosen (GitHub Pages, Cloudflare Pages, Netlify, Railway...). -->
+      <p>Ce site ne dépose aucun cookie et n’utilise ni mesure d’audience ni traceur. Comme pour tout site, l’hébergeur (<span class="todo">[hébergeur à préciser]</span>) peut conserver des journaux techniques, comme l’adresse IP et la date de visite, pour assurer le service et sa sécurité.</p>
+
+      <h2>7. Enfants</h2>
+      <p>Custos ne collecte aucune donnée, y compris celles des enfants.</p>
+
+      <h2>8. Modifications</h2>
+      <p>Cette politique peut évoluer avec l’application, par exemple si une fonction en ligne était ajoutée un jour. La date en haut de cette page indique la dernière mise à jour, et l’historique complet est visible dans le dépôt GitHub.</p>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="index.html">
+          <img src="assets/logo.svg" alt="" width="34" height="34">
+          <span>Custos</span>
+        </a>
+        <p>L’appli Android open source pour limiter ton temps d’écran, appli par appli.</p>
+      </div>
+      <nav aria-label="Liens du pied de page">
+        <ul class="footer-links">
+          <li><a href="https://github.com/joshdeutc/custos/releases/latest">Télécharger</a></li>
+          <li><a href="https://github.com/joshdeutc/custos">GitHub</a></li>
+          <li><a href="https://github.com/joshdeutc/custos/blob/master/LICENSE">Licence MIT</a></li>
+          <li><a href="confidentialite.html" aria-current="page">Confidentialité</a></li>
+          <li><a href="https://github.com/joshdeutc/custos/issues">Signaler un problème</a></li>
+          <li><a href="en/privacy.html" hreflang="en" lang="en">English</a></li>
+        </ul>
+      </nav>
+      <div class="footer-legal">
+        <p>Ce site n’utilise ni cookies ni traceurs.</p>
+        <p>© 2026 joshdeutc. Custos est distribué sous licence MIT. Android et Google&nbsp;Play sont des marques de Google LLC.</p>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
