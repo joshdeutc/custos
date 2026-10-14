@@ -3966,9 +3966,8 @@ class MainActivity : Activity() {
             appendLine("• ENABLED_ACCESSIBILITY_SERVICES forcé toutes les 30s")
             appendLine("• Installation depuis sources inconnues bloquée")
             appendLine()
-            appendLine("Pour désactiver (urgence) :")
-            appendLine("adb shell am broadcast \\")
-            appendLine("  -a $pkg.REMOVE_OWNER")
+            appendLine("Suppression :")
+            appendLine("Device Owner permanent — seule une réinitialisation aux paramètres d'usine (Factory Reset) peut supprimer la protection.")
         } else buildString {
             appendLine("L'app n'est PAS Device Owner. Mode actuel : AccessibilityService.")
             appendLine()

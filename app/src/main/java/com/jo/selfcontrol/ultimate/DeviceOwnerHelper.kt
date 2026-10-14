@@ -47,6 +47,10 @@ object DeviceOwnerHelper {
             d.setUninstallBlocked(a, pkg, true)
             Log.i(TAG, "setUninstallBlocked(true) on $pkg")
         }.onFailure { Log.e(TAG, "setUninstallBlocked failed: ${it.message}") }
+        runCatching {
+            d.setUninstallBlocked(a, "com.jo.custos.guardian", true)
+            Log.i(TAG, "setUninstallBlocked(true) on com.jo.custos.guardian")
+        }.onFailure { /* guardian may not be installed on standalone flavors */ }
 
         // 2. Auto-grant runtime permissions critical to enforcement (only if silent grant enabled)
         if (BuildConfig.SILENT_AUTO_GRANT_PERMISSIONS) {
@@ -315,32 +319,6 @@ object DeviceOwnerHelper {
             Log.e(TAG, "uninstallAppSilently($pkg) failed: ${it.message}", it)
             false
         }
-    }
-
-    /**
-     * Emergency backdoor: lift uninstall protection then relinquish Device Owner status,
-     * leaving the app installable/uninstallable as a normal app.
-     */
-    fun clearDeviceOwner(ctx: Context) {
-        if (!isDeviceOwner(ctx)) return
-        val d = dpm(ctx)
-        val a = admin(ctx)
-        val pkg = ctx.packageName
-
-        runCatching {
-            d.setUninstallBlocked(a, pkg, false)
-            Log.w(TAG, "setUninstallBlocked(false) — uninstall now permitted")
-        }
-        runCatching {
-            d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
-            d.clearUserRestriction(a, UserManager.DISALLOW_FACTORY_RESET)
-            d.clearUserRestriction(a, UserManager.DISALLOW_SAFE_BOOT)
-        }
-        runCatching {
-            @Suppress("DEPRECATION")
-            d.clearDeviceOwnerApp(pkg)
-            Log.w(TAG, "Device Owner status cleared")
-        }.onFailure { Log.e(TAG, "clearDeviceOwnerApp failed: ${it.message}") }
     }
 
     /**

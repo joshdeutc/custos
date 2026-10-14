@@ -454,6 +454,19 @@ object GuardianEngine {
         // Always enforce configured Private DNS (DNS-over-TLS) and lockdown
         applyPrivateDnsInternal(ctx, state.privateDnsHost)
 
+        // Enforce anti-uninstall on Guardian and Client UI when Guardian is Device Owner
+        if (isDeviceOwner(ctx)) {
+            val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+            val admin = getAdminComponent(ctx)
+            if (dpm != null) {
+                runCatching {
+                    dpm.setUninstallBlocked(admin, ctx.packageName, true)
+                    dpm.setUninstallBlocked(admin, "com.jo.selfcontrol.ultimate", true)
+                    dpm.clearUserRestriction(admin, UserManager.DISALLOW_FACTORY_RESET)
+                }.onFailure { Log.e(TAG, "Failed to apply DO uninstall protection: ${it.message}") }
+            }
+        }
+
         if (!state.enabled) return
 
         val pm = ctx.packageManager

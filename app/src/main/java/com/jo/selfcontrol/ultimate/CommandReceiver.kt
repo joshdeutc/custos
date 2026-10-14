@@ -12,9 +12,6 @@ import android.util.Log
  * Status:
  *   adb shell am broadcast -a com.jo.selfcontrol.ultimate.STATUS
  *
- * Emergency backdoor:
- *   adb shell am broadcast -a com.jo.selfcontrol.ultimate.REMOVE_OWNER
- *
  * Open a time-boxed install window. Defaults to InstallWindowManager.DEFAULT_MINUTES; the window
  * closes itself on the device's own clock, so adb dying in the meantime is a non-event:
  *   adb shell am broadcast -p com.jo.selfcontrol.ultimate \
@@ -45,7 +42,6 @@ class CommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             "com.jo.selfcontrol.ultimate.STATUS" -> handleStatus(context)
-            "com.jo.selfcontrol.ultimate.REMOVE_OWNER" -> handleRemoveOwner(context)
             "com.jo.selfcontrol.ultimate.ALLOW_INSTALL" -> handleAllowInstall(context, intent)
             "com.jo.selfcontrol.ultimate.BLOCK_INSTALL" -> handleBlockInstall(context)
             "com.jo.selfcontrol.ultimate.UNSUSPEND_ALL" -> handleUnsuspendAll(context)
@@ -183,41 +179,6 @@ class CommandReceiver : BroadcastReceiver() {
     private fun handleBlockInstall(context: Context) {
         Log.w("SelfControl.Cmd", "=== BLOCK_INSTALL ===")
         InstallWindowManager.close(context, "BLOCK_INSTALL")
-    }
-
-    private fun handleRemoveOwner(context: Context) {
-        Log.w("SelfControl.Cmd", "=== EMERGENCY BACKDOOR TRIGGERED ===")
-        // 1. Force unlock the settings immediately (bypasses any delay)
-        val state = DelayManager.loadState(context)
-        // Setting unlock time to 1 forces it to be unlocked immediately, preventing UI loops
-        val file = java.io.File(context.filesDir, "delay_config.json")
-        try {
-            val json = org.json.JSONObject().apply {
-                put("global_delay_seconds", state.globalDelaySeconds)
-                put("unlock_time", 1L) // Instant unlock
-                put("pending_configs", org.json.JSONArray())
-                put("pending_delay_execute_at", 0L)
-            }
-            file.writeText(json.toString(2))
-        } catch(e: Exception) {}
-
-        Log.w("SelfControl.Cmd", "Settings protection unlocked.")
-
-        // 2. Clear Device Owner / Device Admin so uninstall can proceed
-        try {
-            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
-            val adminComponent = ComponentName(context, AdminReceiver::class.java)
-            if (DeviceOwnerHelper.isDeviceOwner(context)) {
-                DeviceOwnerHelper.clearDeviceOwner(context)
-            } else if (dpm.isAdminActive(adminComponent)) {
-                dpm.removeActiveAdmin(adminComponent)
-                Log.w("SelfControl.Cmd", "Device Admin disabled.")
-            } else {
-                Log.w("SelfControl.Cmd", "No device admin / owner active for this app.")
-            }
-        } catch (e: Exception) {
-            Log.e("SelfControl.Cmd", "Failed to clear policy: ${e.message}", e)
-        }
     }
 
     private fun handleStatus(context: Context) {
