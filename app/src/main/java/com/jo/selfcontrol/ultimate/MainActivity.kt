@@ -1751,7 +1751,9 @@ class MainActivity : Activity() {
                     }
                     setOnClickListener {
                         val cur = loadEditableConfig()
-                        val newList = cur.periodBlocks.toMutableList().also { it.removeAt(index) }
+                        val newList = cur.periodBlocks.toMutableList().also {
+                            if (index in it.indices) it.removeAt(index)
+                        }
                         saveConfigWithDelay(ConfigManager.Config(cur.limits, newList, cur.installBlocks))
                     }
                 })
@@ -1925,7 +1927,7 @@ class MainActivity : Activity() {
                     muteNotifications = true,
                     protectionDelaySec = protectionDelaySec
                 )
-                val newList = if (editIndex >= 0) {
+                val newList = if (editIndex in cur.periodBlocks.indices) {
                     cur.periodBlocks.toMutableList().also { it[editIndex] = newRule }
                 } else {
                     cur.periodBlocks + newRule
