@@ -1,20 +1,31 @@
-# Directives de Sécurité pour les Agents IA (Antigravity & Assistants)
+# Directives d'Action pour les Agents IA (Antigravity & Assistants)
 
-## 1. Séparation des Privilèges : Custos UI (:app) vs Custos Guardian (:guardian)
-- **Custos UI (`:app`)** :
-  Interface utilisateur, accessibilité, règles d'écran, logs.
-  Peut être modifiée et déployée en local à chaud pour itérer rapidement sur l'ergonomie.
-- **Custos Guardian (`:guardian`)** :
-  Gardien de sécurité autonome détenant le statut **Device Owner**.
-  Gère les restrictions OS inviolables, les suspensions matérielles et la Constitution de Quarantaine.
+Ce document constitue la charte opérationnelle que tout agent IA doit lire et appliquer immédiatement dès l'ouverture du dépôt **Custos**.
 
-## 2. Verrouillage Temporel des Mises à Jour (Time-Lock Release)
-- **Friction psychologique par conception** :
-  Toute modification du module Guardian doit être signée avec la clé de release sécurisée sous le **Wait Timer** GitHub Actions (voir [docs/TIME_LOCK_RELEASE.md](docs/TIME_LOCK_RELEASE.md)).
-- **Interdiction stricte de contournement local** :
-  L'agent IA ne doit **JAMAIS** :
-  1. Générer de clé locale pour signer un build release de contournement.
-  2. Bypasser les délais de quarantaine imposés par Guardian.
-  3. Proposer des mécanismes affaiblissant la sécurité sans respecter le délai de temporisation (24h/48h).
-- **Cycle de développement légitime** :
-  Les améliorations ou correctifs sur Guardian doivent être commités, poussés sur GitHub, et validés via le workflow temporisé de GitHub Actions.
+---
+
+## 1. Vue d'Ensemble & Passation Immédiate
+Pour le contexte technique complet, la liste des téléphones connectés et l'historique des patchs, consulte :
+👉 **[README_POUR_NOUVEL_AGENT.md](README_POUR_NOUVEL_AGENT.md)**
+👉 **[docs/TIME_LOCK_RELEASE.md](docs/TIME_LOCK_RELEASE.md)**
+
+---
+
+## 2. Règles Cardinales Inviolables
+1. **FAIL-SAFE SACRÉ** : Ne **JAMAIS** activer `DISALLOW_FACTORY_RESET`. L'accès au mode Recovery et à la réinitialisation matérielle aux paramètres d'usine doit rester intact à 100%.
+2. **AUCUNE PORTE DÉROBÉE** : Le code de révocation du Device Owner (`REMOVE_OWNER`, `clearDeviceOwnerApp`) a été définitivement éradiqué. Ne jamais réintroduire de broadcast ou de mécanisme permettant d'annuler le statut Device Owner sans un Factory Reset.
+3. **TIME-LOCK 24H RESPETÉ** : Tout build de release officiel doit obligatoirement passer par `.github/workflows/release.yml` sous le Wait Timer de 24h de l'environnement GitHub `production`.
+4. **PÉRIMÈTRE PRIVÉ** : Ne jamais toucher aux WebViews personnalisées (`notubeplayer`), chats privés, applications de rencontre ou réseaux sociaux.
+
+---
+
+## 3. Cartographie & Exploration du Code (Graphify)
+* Ce dépôt intègre un graphe de connaissances persistant généré par Graphify dans `graphify-out/`.
+* Avant de faire des modifications lourdes ou transversales, consulte `.agents/rules/graphify.md` ou inspecte `graphify-out/graph.html`.
+
+---
+
+## 4. Outils d'Administration & Déploiement
+* Compilation et mise à jour USB : `update_app.ps1`
+* Commandes de diagnostic ADB : [docs/COMMANDES_ADB.md](docs/COMMANDES_ADB.md)
+* Guide de provisioning Device Owner : [docs/DEVICE_OWNER_PROVISIONING.md](docs/DEVICE_OWNER_PROVISIONING.md)
