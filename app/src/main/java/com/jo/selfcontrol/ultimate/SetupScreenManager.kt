@@ -564,14 +564,28 @@ class SetupScreenManager(
      * Called on start, onResume, and during the periodic poll loop.
      */
     fun refresh() {
-        val hasA11y = PermissionHelper.hasAccessibilityPermission(activity)
+        val a11yWorking = PermissionHelper.isAccessibilityServiceFullyWorking(activity)
+        val a11yCrashed = PermissionHelper.isAccessibilityCrashedOrInactive(activity)
         val hasUsage = PermissionHelper.hasUsageStatsPermission(activity)
         val hasPostNotif = PermissionHelper.hasPostNotificationsPermission(activity)
         val hasNotifListener = PermissionHelper.hasNotificationListenerPermission(activity)
         val hasDnd = PermissionHelper.hasNotificationPolicyPermission(activity)
         val hasBattery = PermissionHelper.isIgnoringBatteryOptimizations(activity)
 
-        updateRowState(a11yRow, hasA11y)
+        if (a11yCrashed) {
+            a11yRow.statusText.visibility = View.GONE
+            a11yRow.actionButton.visibility = View.VISIBLE
+            a11yRow.actionButton.text = "Réactiver"
+            a11yRow.subtitleText.text = "⚠️ Le service a été arrêté ou a planté par le système. Touchez 'Réactiver' pour ouvrir les Paramètres, le désactiver puis le réactiver."
+            a11yRow.subtitleText.setTextColor(Color.parseColor("#FF8A80"))
+            a11yRow.container.background = roundedBackground(Color.parseColor("#2D1115"), 14, Color.parseColor("#E53935"), 1)
+        } else {
+            a11yRow.subtitleText.text = "Bloque l'accès aux apps non-autorisées, applique le couvre-feu et protège les réglages."
+            a11yRow.subtitleText.setTextColor(Color.parseColor("#A0A5B5"))
+            a11yRow.actionButton.text = "Activer"
+            updateRowState(a11yRow, a11yWorking)
+        }
+
         updateRowState(usageRow, hasUsage)
         updateRowState(postNotifRow, hasPostNotif)
         updateRowState(notifListenerRow, hasNotifListener)
@@ -579,7 +593,9 @@ class SetupScreenManager(
         updateRowState(batteryRow, hasBattery)
 
         val mandatoryMissing = mutableListOf<String>()
-        if (!hasA11y) mandatoryMissing.add("Accessibilité")
+        if (!a11yWorking) {
+            mandatoryMissing.add(if (a11yCrashed) "Accessibilité (Arrêté/Planté)" else "Accessibilité")
+        }
         if (!hasUsage) mandatoryMissing.add("Statistiques d'utilisation")
         if (!hasPostNotif) mandatoryMissing.add("Notifications")
 

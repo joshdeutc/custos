@@ -61,6 +61,37 @@ object PermissionHelper {
         return false
     }
 
+    fun isAccessibilityServiceBound(): Boolean = AppWatcherService.isBound
+
+    /**
+     * Checks if the Accessibility Service is not only listed in Settings.Secure,
+     * but also actively bound and running. Accounts for a startup grace period (6s).
+     */
+    fun isAccessibilityServiceFullyWorking(context: Context): Boolean {
+        if (AppWatcherService.isBound) return true
+        val uptime = System.currentTimeMillis() - CustosApplication.appStartTime
+        if (CustosApplication.appStartTime > 0 && uptime in 0..6000L) {
+            return hasAccessibilityPermission(context)
+        }
+        return false
+    }
+
+    /**
+     * Returns true if accessibility was configured in Settings, but is currently NOT bound
+     * (indicating a crash, unbind, or system kill, e.g. Samsung 'crashed services').
+     */
+    fun isAccessibilityCrashedOrInactive(context: Context): Boolean {
+        val configured = hasAccessibilityPermission(context)
+        if (!configured) return false
+        if (AppWatcherService.isBound) return false
+
+        val uptime = System.currentTimeMillis() - CustosApplication.appStartTime
+        if (CustosApplication.appStartTime > 0 && uptime in 0..6000L) {
+            return false
+        }
+        return true
+    }
+
     fun requestAccessibilityPermission(activity: Activity) {
         val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
         activity.startActivity(intent)
@@ -176,7 +207,7 @@ object PermissionHelper {
      */
     fun isMandatorySetupComplete(context: Context): Boolean {
         val hasUsage = hasUsageStatsPermission(context)
-        val hasA11y = hasAccessibilityPermission(context)
+        val hasA11y = isAccessibilityServiceFullyWorking(context)
         val hasPostNotif = hasPostNotificationsPermission(context)
         return hasUsage && hasA11y && hasPostNotif
     }

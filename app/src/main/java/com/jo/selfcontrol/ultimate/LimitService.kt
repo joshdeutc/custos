@@ -12,6 +12,7 @@ import android.content.pm.ApplicationInfo
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import java.util.Calendar
@@ -87,6 +88,15 @@ class LimitService : Service() {
                 start(context)
             }
         }
+
+        const val NOTIF_A11Y_CRASHED_ID = 9991
+
+        fun dismissA11yAlert(context: Context) {
+            try {
+                val nm = context.getSystemService(NotificationManager::class.java)
+                nm?.cancel(NOTIF_A11Y_CRASHED_ID)
+            } catch (_: Exception) {}
+        }
     }
 
     private lateinit var config: ConfigManager.Config
@@ -117,6 +127,11 @@ class LimitService : Service() {
     private val SYSTEM_SYNC_INTERVAL_MS = 3_000L
     private val A11Y_REENABLE_INTERVAL_MS = 30_000L
 
+    private var serviceStartTimeMs: Long = 0L
+    private var lastA11yHealthCheckTime: Long = 0L
+    private val A11Y_HEALTH_CHECK_INTERVAL_MS = 5_000L
+    private val A11Y_STARTUP_GRACE_PERIOD_MS = 6_000L
+
     @Volatile
     private var startupComplete = false
 
@@ -136,6 +151,7 @@ class LimitService : Service() {
             WhitelistManager.checkAndPromotePendingRequests(this@LimitService)
             checkConfigReload()
             checkA11YReEnable()
+            checkA11yHealth()
 
             enforceLimit()
             checkLimitsAndDelayHandler.postDelayed(this, ENFORCE_INTERVAL_MS)
@@ -145,6 +161,7 @@ class LimitService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "🚀 LimitService onCreate")
+        serviceStartTimeMs = System.currentTimeMillis()
         instance = this
         GuardianClient.init(this)
 
@@ -806,6 +823,67 @@ class LimitService : Service() {
         }
     }
 
+    private fun checkA11yHealth() {
+        val now = System.currentTimeMillis()
+        if (now - lastA11yHealthCheckTime < A11Y_HEALTH_CHECK_INTERVAL_MS) return
+        lastA11yHealthCheckTime = now
+
+        // Wait startup grace period before verifying to let system bind AppWatcherService
+        if (now - serviceStartTimeMs < A11Y_STARTUP_GRACE_PERIOD_MS) return
+
+        val isConfigured = PermissionHelper.hasAccessibilityPermission(this)
+        if (!isConfigured) {
+            // Not configured yet, onboarding flow takes care of requesting
+            dismissA11yAlert(this)
+            return
+        }
+
+        if (!AppWatcherService.isBound) {
+            postA11yCrashedNotification()
+        } else {
+            dismissA11yAlert(this)
+        }
+    }
+
+    private fun postA11yCrashedNotification() {
+        val nm = getSystemService(NotificationManager::class.java) ?: return
+        val wasCrashed = CustosApplication.wasLastRunCrashed(this)
+
+        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        val pi = PendingIntent.getActivity(
+            this,
+            NOTIF_A11Y_CRASHED_ID,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val title = if (wasCrashed) "⚠️ Crash Accessibilité détecté" else "⚠️ Protection Custos interrompue"
+        val text = "Le service d'accessibilité a été arrêté. Appuyez ici pour le réactiver."
+        val bigText = if (wasCrashed) {
+            "Le service d'accessibilité Custos s'est arrêté suite à un plantage. Touchez cette notification pour ouvrir les Paramètres, puis désactivez et réactivez l'interrupteur Custos."
+        } else {
+            "Le service d'accessibilité Custos ne répond plus ou a été désactivé par le système. Touchez cette notification pour ouvrir les Paramètres et réactiver la protection."
+        }
+
+        val notif = NotificationCompat.Builder(this, CHOICE_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(bigText))
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ERROR)
+            .setColor(0xFFFF5252.toInt())
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .setContentIntent(pi)
+            .addAction(0, "Réactiver", pi)
+            .build()
+
+        nm.notify(NOTIF_A11Y_CRASHED_ID, notif)
+    }
+
     fun checkConfigReload(force: Boolean = false) {
         try {
             val newModified = ConfigManager.getConfigLastModified(this)
@@ -915,6 +993,7 @@ class LimitService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
+        dismissA11yAlert(this)
         checkLimitsAndDelayHandler.removeCallbacks(enforceRunnable)
         packageAddedReceiver?.let {
             runCatching { unregisterReceiver(it) }

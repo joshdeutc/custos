@@ -201,6 +201,8 @@ class AppWatcherService : AccessibilityService() {
         instance = this
         isBound = true
         lastBoundTimestamp = System.currentTimeMillis()
+        CustosApplication.clearCrashFlag(this)
+        LimitService.dismissA11yAlert(this)
         try {
             val appInfo = packageManager.getApplicationInfo(packageName, 0)
             appLabel = packageManager.getApplicationLabel(appInfo).toString()
@@ -229,6 +231,9 @@ class AppWatcherService : AccessibilityService() {
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         isBound = false
+        if (instance === this) {
+            instance = null
+        }
         Log.w(TAG, "⚠️ AccessibilityService UNBIND — protection inactive")
         return super.onUnbind(intent)
     }
@@ -236,30 +241,34 @@ class AppWatcherService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
 
-        val packageName = event.packageName?.toString() ?: return
+        try {
+            val packageName = event.packageName?.toString() ?: return
 
-        when (event.eventType) {
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                handleWindowChanged(packageName, event)
-            }
-            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
-                handleContentChanged(packageName)
-            }
-            AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED -> {
-                // Dismiss heads-up popup from muted apps.
-                // GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE only collapses the shade,
-                // it does NOT dismiss heads-up popups. We need both actions:
-                // 1. Dismiss shade (in case it's open)
-                // 2. Collapse the heads-up popup by sending it away
-                if (packageName in SelfControlNotificationListener.mutedPackages
-                    && packageName != "com.jo.selfcontrol.ultimate") {
-                    // This collapses any heads-up popup that's currently showing
-                    performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
-                    // Also try to find and dismiss the heads-up notification node
-                    dismissHeadsUpNotification(packageName)
-                    Log.d(TAG, "Dismissed heads-up notification from muted app: $packageName")
+            when (event.eventType) {
+                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
+                    handleWindowChanged(packageName, event)
+                }
+                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
+                    handleContentChanged(packageName)
+                }
+                AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED -> {
+                    // Dismiss heads-up popup from muted apps.
+                    // GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE only collapses the shade,
+                    // it does NOT dismiss heads-up popups. We need both actions:
+                    // 1. Dismiss shade (in case it's open)
+                    // 2. Collapse the heads-up popup by sending it away
+                    if (packageName in SelfControlNotificationListener.mutedPackages
+                        && packageName != "com.jo.selfcontrol.ultimate") {
+                        // This collapses any heads-up popup that's currently showing
+                        performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+                        // Also try to find and dismiss the heads-up notification node
+                        dismissHeadsUpNotification(packageName)
+                        Log.d(TAG, "Dismissed heads-up notification from muted app: $packageName")
+                    }
                 }
             }
+        } catch (t: Throwable) {
+            Log.e(TAG, "Caught unexpected error in onAccessibilityEvent to prevent service kill", t)
         }
     }
 
@@ -515,6 +524,7 @@ class AppWatcherService : AccessibilityService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        isBound = false
         instance = null
         applySessionOverlay(null)
         Log.w(TAG, "💀 AccessibilityService destroyed")
