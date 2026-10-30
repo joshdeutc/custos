@@ -28,6 +28,12 @@ class TestAutomationReceiver : BroadcastReceiver() {
             return
         }
 
+        val allowedTestPackages = setOf("com.custos.testnotif", "com.mand.notitest")
+        if (pkg !in allowedTestPackages) {
+            Log.w(TAG, "Refusing test command for non-test package: $pkg")
+            return
+        }
+
         when (intent.action) {
             ACTION_SET_CURFEW_MUTE -> setCurfewMuteRule(context, pkg)
             ACTION_CLEAR_CURFEW -> clearCurfewRulesForPackage(context, pkg)

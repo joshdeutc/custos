@@ -6,6 +6,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   build-release:
     runs-on: ubuntu-latest
@@ -47,4 +50,26 @@ jobs:
         with:
           name: custos-guardian-release-apks
           path: '**/build/outputs/apk/**/*.apk'
-          retention-days: 14
+          retention-days: 1
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: '**/build/outputs/apk/**/*.apk'
+          name: Custos Release ${{ github.ref_name }}
+          generate_release_notes: true
+
+      - name: Prune older GitHub Releases (Single-Release Security Policy)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          current_tag="${{ github.ref_name }}"
+          echo "Preserving active release tag: $current_tag"
+          gh release list --limit 50 --json tagName --jq '.[].tagName' | while read -r tag; do
+            if [ -n "$tag" ] && [ "$tag" != "$current_tag" ]; then
+              echo "Pruning older release: $tag"
+              gh release delete "$tag" --yes --cleanup-tag || true
+            fi
+          done

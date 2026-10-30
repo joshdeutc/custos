@@ -39,6 +39,8 @@ import android.util.Log
  */
 class CommandReceiver : BroadcastReceiver() {
 
+    private fun isMeFlavor(): Boolean = BuildConfig.LEVEL_NAME == "me"
+
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             "com.jo.selfcontrol.ultimate.STATUS" -> handleStatus(context)
@@ -137,6 +139,10 @@ class CommandReceiver : BroadcastReceiver() {
      *     -a com.jo.selfcontrol.ultimate.REMOVE_SCREEN_RULE --es name "WhatsApp_Actus"
      */
     private fun handleRemoveScreenRule(context: Context, name: String?) {
+        if (isMeFlavor()) {
+            Log.e("SelfControl.Cmd", "🛡️ REMOVE_SCREEN_RULE REJECTED: Screen rules cannot be removed via ADB on 'me' flavor.")
+            return
+        }
         if (name.isNullOrBlank()) {
             Log.e("SelfControl.Cmd", "REMOVE_SCREEN_RULE: missing --es name")
             return
@@ -159,6 +165,10 @@ class CommandReceiver : BroadcastReceiver() {
     }
 
     private fun handleUnsuspendAll(context: Context) {
+        if (isMeFlavor()) {
+            Log.e("SelfControl.Cmd", "🛡️ UNSUSPEND_ALL REJECTED: Package unsuspend is forbidden via ADB on 'me' flavor.")
+            return
+        }
         Log.w("SelfControl.Cmd", "=== UNSUSPEND_ALL (manual) ===")
         DeviceOwnerHelper.clearAllStuckSuspensions(context)
         val hidden = WhitelistManager.loadHiddenState(context)
@@ -171,6 +181,10 @@ class CommandReceiver : BroadcastReceiver() {
     }
 
     private fun handleAllowInstall(context: Context, intent: Intent) {
+        if (isMeFlavor()) {
+            Log.e("SelfControl.Cmd", "🛡️ ALLOW_INSTALL REJECTED: Install window cannot be opened via ADB on 'me' flavor.")
+            return
+        }
         val minutes = intent.getIntExtra("minutes", InstallWindowManager.DEFAULT_MINUTES)
         Log.w("SelfControl.Cmd", "=== ALLOW_INSTALL ($minutes min requested) ===")
         InstallWindowManager.open(context, minutes)
@@ -245,11 +259,19 @@ class CommandReceiver : BroadcastReceiver() {
 
     private fun handleSetWhitelistEnabled(context: Context, intent: Intent) {
         val enabled = intent.getBooleanExtra("enabled", false)
+        if (isMeFlavor() && !enabled) {
+            Log.e("SelfControl.Cmd", "🛡️ SET_WHITELIST_ENABLED(false) REJECTED on 'me' flavor.")
+            return
+        }
         val res = WhitelistManager.setWhitelistEnabled(context, enabled, fromAdb = true)
         Log.w("SelfControl.Cmd", "=== SET_WHITELIST_ENABLED ($enabled): $res ===")
     }
 
     private fun handleSetWhitelistDelay(context: Context, intent: Intent) {
+        if (isMeFlavor()) {
+            Log.e("SelfControl.Cmd", "🛡️ SET_WHITELIST_DELAY REJECTED: Quarantine delay cannot be modified via ADB on 'me' flavor.")
+            return
+        }
         val hours = intent.getIntExtra("hours", -1)
         val global = intent.getBooleanExtra("global", false)
         if (!global && hours <= 0) {
@@ -312,6 +334,10 @@ class CommandReceiver : BroadcastReceiver() {
      *     -a com.jo.selfcontrol.ultimate.REMOVE_APP_LIMIT --es pkg "com.instagram.android"
      */
     private fun handleRemoveAppLimit(context: Context, intent: Intent) {
+        if (isMeFlavor()) {
+            Log.e("SelfControl.Cmd", "🛡️ REMOVE_APP_LIMIT REJECTED: App limits cannot be removed via ADB on 'me' flavor.")
+            return
+        }
         val pkg = intent.getStringExtra("pkg")
         if (pkg.isNullOrBlank()) {
             Log.e("SelfControl.Cmd", "REMOVE_APP_LIMIT: missing --es pkg")
@@ -336,6 +362,10 @@ class CommandReceiver : BroadcastReceiver() {
      *     -a com.jo.selfcontrol.ultimate.SET_APP_LIMIT --es pkg "com.instagram.android" --ei minutes 45
      */
     private fun handleSetAppLimit(context: Context, intent: Intent) {
+        if (isMeFlavor()) {
+            Log.e("SelfControl.Cmd", "🛡️ SET_APP_LIMIT REJECTED: App limits cannot be modified via ADB on 'me' flavor.")
+            return
+        }
         val pkg = intent.getStringExtra("pkg")
         if (pkg.isNullOrBlank()) {
             Log.e("SelfControl.Cmd", "SET_APP_LIMIT: missing --es pkg")
@@ -389,6 +419,10 @@ class CommandReceiver : BroadcastReceiver() {
      *     -a com.jo.selfcontrol.ultimate.REMOVE_CURFEW --ei index 0
      */
     private fun handleRemoveCurfew(context: Context, intent: Intent) {
+        if (isMeFlavor()) {
+            Log.e("SelfControl.Cmd", "🛡️ REMOVE_CURFEW REJECTED: Curfew rules cannot be removed via ADB on 'me' flavor.")
+            return
+        }
         val cur = ConfigManager.loadConfig(context)
         if (cur.periodBlocks.isEmpty()) {
             Log.w("SelfControl.Cmd", "=== REMOVE_CURFEW: no curfew rules active ===")
@@ -429,6 +463,10 @@ class CommandReceiver : BroadcastReceiver() {
      *     -a com.jo.selfcontrol.ultimate.SET_CURFEW --es pkgs "com.instagram.android" --ei startHour 22 --ei endHour 7
      */
     private fun handleSetCurfew(context: Context, intent: Intent) {
+        if (isMeFlavor()) {
+            Log.e("SelfControl.Cmd", "🛡️ SET_CURFEW REJECTED: Curfew rules cannot be modified via ADB on 'me' flavor.")
+            return
+        }
         val pkgsStr = intent.getStringExtra("pkgs") ?: intent.getStringExtra("pkg")
         if (pkgsStr.isNullOrBlank()) {
             Log.e("SelfControl.Cmd", "SET_CURFEW: missing --es pkgs <comma-separated pkgs>")
@@ -463,6 +501,10 @@ class CommandReceiver : BroadcastReceiver() {
     }
 
     private fun handleSetPrivateDns(context: Context, intent: Intent) {
+        if (isMeFlavor()) {
+            Log.e("SelfControl.Cmd", "🛡️ SET_PRIVATE_DNS REJECTED: Private DNS is immutable on 'me' flavor.")
+            return
+        }
         val host = intent.getStringExtra("host") ?: DeviceOwnerHelper.DEFAULT_PRIVATE_DNS
         val pendingResult = goAsync()
         Thread {
