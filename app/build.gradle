@@ -27,8 +27,8 @@ android {
         applicationId "com.jo.selfcontrol.ultimate"
         minSdk 26
         targetSdk 34
-        versionCode 5
-        versionName "1.4"
+        versionCode 6
+        versionName "1.5"
         // Privacy: the persistent on-device event log (records foreground-app history) is OFF by
         // default and only enabled for the `me` developer flavor below. Other flavors ship without
         // any foreground-activity logging.
