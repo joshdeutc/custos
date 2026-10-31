@@ -144,7 +144,7 @@ class GuardianService : Service() {
             val unlockApplies = !defer.fromExplicitTimer && DelayManager.isSettingsUnlocked(applicationContext)
             val mustDefer = defer.mustDefer && !unlockApplies
             return if (mustDefer) {
-                DelayManager.requestConfigUpdate(applicationContext, candidateJson, defer.reason, defer.seconds)
+                recordPendingConfigChange(applicationContext, currentConfig, newConfig, candidateJson, defer)
                 Log.w(TAG, "Config change deferred (${defer.seconds}s): ${defer.reason}")
                 false
             } else {
@@ -155,9 +155,90 @@ class GuardianService : Service() {
             }
         }
 
+        private fun recordPendingConfigChange(
+            context: android.content.Context,
+            old: ConfigManager.Config,
+            new: ConfigManager.Config,
+            candidateJson: String,
+            defer: ConfigManager.DeferRequirement
+        ) {
+            val oldLimits = old.limits.associateBy { it.packageName }
+            val newLimits = new.limits.associateBy { it.packageName }
+            val allPkgs = (oldLimits.keys + newLimits.keys).toSet()
+
+            val limitChanges = mutableListOf<Triple<String, ConfigManager.AppLimit?, Boolean>>()
+            for (pkg in allPkgs) {
+                val o = oldLimits[pkg]
+                val n = newLimits[pkg]
+                if (o != null && n == null) {
+                    limitChanges.add(Triple(pkg, null, true))
+                } else if (n != null && n != o) {
+                    limitChanges.add(Triple(pkg, n, false))
+                }
+            }
+
+            val curfewChanges = mutableListOf<Pair<ConfigManager.PeriodBlockRule, Boolean>>()
+            val oldCurfewSigs = old.periodBlocks.associateBy { it.scheduleSignature() }
+            val newCurfewSigs = new.periodBlocks.associateBy { it.scheduleSignature() }
+            for ((sig, r) in oldCurfewSigs) {
+                if (sig !in newCurfewSigs) curfewChanges.add(r to true)
+            }
+            for ((sig, r) in newCurfewSigs) {
+                if (sig !in oldCurfewSigs || r != oldCurfewSigs[sig]) curfewChanges.add(r to false)
+            }
+
+            val installChanges = mutableListOf<Pair<ConfigManager.InstallBlockGroup, Boolean>>()
+            val oldInstallNames = old.installBlocks.associateBy { it.name }
+            val newInstallNames = new.installBlocks.associateBy { it.name }
+            for ((name, g) in oldInstallNames) {
+                if (name !in newInstallNames) installChanges.add(g to true)
+            }
+            for ((name, g) in newInstallNames) {
+                if (name !in oldInstallNames || g != oldInstallNames[name]) installChanges.add(g to false)
+            }
+
+            var singleHandled = false
+            if (limitChanges.size == 1 && curfewChanges.isEmpty() && installChanges.isEmpty()) {
+                val (pkg, newLimit, isDelete) = limitChanges.first()
+                if (isDelete) {
+                    DelayManager.requestAppLimitDelete(context, pkg, defer.reason, defer.seconds)
+                } else if (newLimit != null) {
+                    DelayManager.requestAppLimitUpdate(context, pkg, newLimit, defer.reason, defer.seconds)
+                }
+                singleHandled = true
+            } else if (limitChanges.isEmpty() && curfewChanges.size == 1 && installChanges.isEmpty()) {
+                val (rule, isDelete) = curfewChanges.first()
+                if (isDelete) {
+                    DelayManager.requestCurfewDelete(context, rule.scheduleSignature(), defer.reason, defer.seconds)
+                } else {
+                    DelayManager.requestCurfewUpdate(context, rule.scheduleSignature(), rule, defer.reason, defer.seconds)
+                }
+                singleHandled = true
+            } else if (limitChanges.isEmpty() && curfewChanges.isEmpty() && installChanges.size == 1) {
+                val (group, isDelete) = installChanges.first()
+                if (isDelete) {
+                    DelayManager.requestInstallBlockDelete(context, group.name, defer.reason, defer.seconds)
+                } else {
+                    DelayManager.requestInstallBlockUpdate(context, group.name, group, defer.reason, defer.seconds)
+                }
+                singleHandled = true
+            }
+
+            if (!singleHandled) {
+                DelayManager.requestConfigUpdate(context, candidateJson, defer.reason, defer.seconds)
+            }
+        }
+
         override fun getDelayStateJson(): String {
-            val file = java.io.File(applicationContext.filesDir, "delay_state.json")
+            val file = java.io.File(applicationContext.filesDir, "delay_config.json")
             return if (file.exists()) file.readText() else "{}"
+        }
+
+        override fun saveDelayStateJson(json: String): Boolean {
+            val file = java.io.File(applicationContext.filesDir, "delay_config.json")
+            file.writeText(json)
+            DelayManager.loadState(applicationContext)
+            return true
         }
 
         override fun cancelPendingConfigChange(): Boolean {

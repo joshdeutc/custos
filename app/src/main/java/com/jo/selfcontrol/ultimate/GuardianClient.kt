@@ -70,6 +70,17 @@ object GuardianClient {
                 }
             }
 
+            // Sync delay config
+            val remoteDelay = service?.delayStateJson
+            val isRemoteDelayEmpty = remoteDelay.isNullOrBlank() || remoteDelay == "{}"
+            if (isRemoteDelayEmpty) {
+                val localDelayFile = java.io.File(ctx.filesDir, "delay_config.json")
+                if (localDelayFile.exists()) {
+                    val localDelayText = localDelayFile.readText()
+                    service?.saveDelayStateJson(localDelayText)
+                }
+            }
+
             // Sync whitelist state and delay
             val localWhitelistFile = java.io.File(ctx.filesDir, "whitelist_state.json")
             if (localWhitelistFile.exists()) {
@@ -350,6 +361,16 @@ object GuardianClient {
         } catch (e: Exception) {
             Log.e(TAG, "IPC error getDelayStateJson", e)
             null
+        }
+    }
+
+    fun saveDelayStateJson(json: String): Boolean {
+        val s = service ?: return false
+        return try {
+            s.saveDelayStateJson(json)
+        } catch (e: Exception) {
+            Log.e(TAG, "IPC error saveDelayStateJson", e)
+            false
         }
     }
 

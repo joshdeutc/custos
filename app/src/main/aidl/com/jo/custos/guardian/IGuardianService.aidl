@@ -30,6 +30,7 @@ interface IGuardianService {
     String getConfigJson();
     boolean requestConfigChange(String candidateJson);
     String getDelayStateJson();
+    boolean saveDelayStateJson(String json);
     boolean cancelPendingConfigChange();
 
     // --- Screen Rules (Reels, Actus, Shorts) ---

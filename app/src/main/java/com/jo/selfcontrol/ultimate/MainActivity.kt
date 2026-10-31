@@ -1487,12 +1487,14 @@ class MainActivity : Activity() {
                     val newConfig = cur.copy(limits = updatedLimits)
                     val candidateJson = ConfigManager.configToJsonString(newConfig)
                     val appliedImmediately = GuardianClient.requestConfigChange(candidateJson)
-                    ConfigManager.saveConfig(this, newConfig)
                     if (appliedImmediately) {
+                        ConfigManager.saveConfig(this, newConfig)
                         DelayManager.cancelAppLimitUpdate(this, pkg)
                         refreshDashboard()
                         Toast.makeText(this, "Limit updated for ${getAppName(pkg)}.", Toast.LENGTH_SHORT).show()
                     } else {
+                        refreshDashboard()
+                        refreshDelayUI()
                         val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
                         Toast.makeText(
                             this,
@@ -1555,12 +1557,14 @@ class MainActivity : Activity() {
                         val newConfig = cur.copy(limits = updatedLimits)
                         val candidateJson = ConfigManager.configToJsonString(newConfig)
                         val appliedImmediately = GuardianClient.requestConfigChange(candidateJson)
-                        ConfigManager.saveConfig(this, newConfig)
                         if (appliedImmediately) {
+                            ConfigManager.saveConfig(this, newConfig)
                             DelayManager.cancelAppLimitUpdate(this, pkg)
                             refreshDashboard()
                             Toast.makeText(this, "Limit deleted for ${getAppName(pkg)}.", Toast.LENGTH_SHORT).show()
                         } else {
+                            refreshDashboard()
+                            refreshDelayUI()
                             val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
                             Toast.makeText(
                                 this,
@@ -1647,10 +1651,11 @@ class MainActivity : Activity() {
         if (GuardianClient.isAvailable) {
             val candidateJson = ConfigManager.configToJsonString(newConfig)
             val appliedImmediately = GuardianClient.requestConfigChange(candidateJson)
-            ConfigManager.saveConfig(this, newConfig)
             if (appliedImmediately) {
+                ConfigManager.saveConfig(this, newConfig)
                 Toast.makeText(this, "Config updated.", Toast.LENGTH_SHORT).show()
             } else {
+                refreshDelayUI()
                 val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
                 Toast.makeText(
                     this,
@@ -1769,6 +1774,32 @@ class MainActivity : Activity() {
             val pendingUpdates = DelayManager.loadState(this@MainActivity).requestedConfigUpdates
             val pendingCurfewUpdate = pendingUpdates.find {
                 it.targetType == "CURFEW" && it.targetKey == rule.scheduleSignature()
+            } ?: pendingUpdates.find { it.targetType == "FULL_CONFIG" && it.executeAt > System.currentTimeMillis() }?.let { fullUpdate ->
+                val fullCfg = ConfigManager.fromJsonString(fullUpdate.newLimitsJson)
+                val matchingRule = fullCfg?.periodBlocks?.find { it.scheduleSignature() == rule.scheduleSignature() }
+                if (matchingRule != null && matchingRule != rule) {
+                    DelayManager.PendingConfigUpdate(
+                        id = fullUpdate.id,
+                        description = fullUpdate.description,
+                        newLimitsJson = "",
+                        executeAt = fullUpdate.executeAt,
+                        targetType = "CURFEW",
+                        targetKey = rule.scheduleSignature(),
+                        isDelete = false,
+                        payloadJson = ConfigManager.periodBlockRuleToJson(matchingRule).toString()
+                    )
+                } else if (fullCfg != null && fullCfg.periodBlocks.none { it.scheduleSignature() == rule.scheduleSignature() }) {
+                    DelayManager.PendingConfigUpdate(
+                        id = fullUpdate.id,
+                        description = fullUpdate.description,
+                        newLimitsJson = "",
+                        executeAt = fullUpdate.executeAt,
+                        targetType = "CURFEW",
+                        targetKey = rule.scheduleSignature(),
+                        isDelete = true,
+                        payloadJson = ""
+                    )
+                } else null
             }
             if (pendingCurfewUpdate != null) {
                 if (pendingCurfewUpdate.isDelete) {
@@ -3139,8 +3170,8 @@ class MainActivity : Activity() {
                     val pendingDelaySec = pendingLimit?.protectionDelaySec
                     if (activeDelaySec != null && activeDelaySec > 0) {
                         val activeStr = formatShortDuration(activeDelaySec)
-                        if (pendingDelaySec != null && pendingDelaySec != activeDelaySec) {
-                            val pendingStr = formatShortDuration(pendingDelaySec)
+                        if (pendingLimit != null && pendingDelaySec != activeDelaySec) {
+                            val pendingStr = if (pendingDelaySec != null && pendingDelaySec > 0) formatShortDuration(pendingDelaySec) else "Global"
                             delayBadge.text = "🛡️ $activeStr (⏳ → $pendingStr)"
                             delayBadge.setTextColor(Color.parseColor("#E65100"))
                         } else {

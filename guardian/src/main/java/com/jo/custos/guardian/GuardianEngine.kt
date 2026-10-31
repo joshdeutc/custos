@@ -72,7 +72,17 @@ object GuardianEngine {
         "gymworkout.gym.gymlog.gymtrainer",
         "in.krosbits.musicolet",
         "livio.pack.lang.fr_FR",
-        "oracle.idm.mobile.authenticator"
+        "oracle.idm.mobile.authenticator",
+        "com.android.vending",
+        "com.google.android.packageinstaller",
+        "com.android.packageinstaller",
+        "com.samsung.android.packageinstaller",
+        "com.google.android.dialer",
+        "com.google.android.apps.messaging",
+        "com.android.mms",
+        "com.google.android.inputmethod.latin",
+        "com.google.android.deskclock",
+        "com.google.android.calculator"
     )
 
     fun getInitialAllowedPackages(ctx: Context): Set<String> {
@@ -97,29 +107,22 @@ object GuardianEngine {
         return result
     }
 
-    private val HARD_GUARDS = setOf(
+    private val CRITICAL_PACKAGES = setOf(
         "android",
         "com.android.systemui",
         "com.android.settings",
+        "com.samsung.android.settings",
         "com.google.android.gms",
         "com.android.permissioncontroller",
-        "com.android.vending",
-        "com.google.android.packageinstaller",
-        "com.android.packageinstaller",
-        "com.samsung.android.packageinstaller",
         "com.android.phone",
         "com.android.server.telecom",
         "com.android.providers.telephony",
-        "com.google.android.dialer",
-        "com.google.android.apps.messaging",
-        "com.android.mms",
-        "com.google.android.inputmethod.latin",
-        "com.google.android.deskclock",
-        "com.google.android.calculator",
         "com.tailscale.ipn",
         "com.jo.custos.guardian",
         "com.jo.selfcontrol.ultimate" // Client UI
     )
+
+    private val HARD_GUARDS = CRITICAL_PACKAGES
 
     data class PendingRequest(
         val packageName: String,
@@ -170,15 +173,6 @@ object GuardianEngine {
     fun isGuarded(ctx: Context, pkg: String): Boolean {
         if (pkg in HARD_GUARDS) return true
         if (pkg == ctx.packageName) return true
-        val pm = ctx.packageManager
-        val isSys = try {
-            val appInfo = pm.getApplicationInfo(pkg, PackageManager.MATCH_UNINSTALLED_PACKAGES)
-            ((appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0) ||
-            ((appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0)
-        } catch (e: Exception) {
-            false
-        }
-        if (isSys) return true
         if (pkg in launcherPackages(ctx) || pkg in inputMethodPackages(ctx)) return true
         return false
     }
@@ -817,7 +811,10 @@ object GuardianEngine {
 
                 // Check daily usage quota
                 val maxSec = if (limit.maxSecondsPerDay > 0) limit.maxSecondsPerDay else limit.maxMinutesPerDay * 60
-                if (maxSec > 0) {
+                if (maxSec == 0) {
+                    // Quota 0 min/sec = completely blocked 24/7
+                    newlyBlocked.add(pkg)
+                } else if (maxSec > 0) {
                     val dayStart = java.util.Calendar.getInstance().apply {
                         set(java.util.Calendar.HOUR_OF_DAY, 0)
                         set(java.util.Calendar.MINUTE, 0)

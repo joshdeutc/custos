@@ -389,6 +389,22 @@ class LimitService : Service() {
         // Check if any suspended apps should be unblocked (curfew ended, allowed hours started, etc.)
         checkAndUnblockApps()
 
+        if (GuardianClient.isAvailable) {
+            val gBlocked = GuardianClient.getBlockedApps().toSet()
+            for (bp in gBlocked) {
+                if (bp !in suspendedApps) {
+                    suspendedApps.add(bp)
+                    AppWatcherService.blockedApps.add(bp)
+                }
+            }
+            for (pkg in suspendedApps.toList()) {
+                if (pkg !in gBlocked && !isAppBlocked(pkg)) {
+                    suspendedApps.remove(pkg)
+                    AppWatcherService.blockedApps.remove(pkg)
+                }
+            }
+        }
+
         if (currentApp != "unknown") {
             if (isCurrentlyPeriodBlocked(currentApp)) {
                 Log.w(TAG, "🌙 BLOCK REASON: curfew period | $currentApp")

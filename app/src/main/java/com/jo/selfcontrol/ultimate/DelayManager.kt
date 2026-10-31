@@ -48,7 +48,9 @@ object DelayManager {
             val remoteJson = GuardianClient.getDelayStateJson()
             if (!remoteJson.isNullOrEmpty() && remoteJson != "{}") {
                 try {
-                    return parseDelayState(JSONObject(remoteJson))
+                    val result = parseDelayState(JSONObject(remoteJson))
+                    cachedState = result
+                    return result
                 } catch (e: Exception) {
                     Log.e(TAG, "Error parsing remote delay state: ${e.message}")
                 }
@@ -191,9 +193,13 @@ object DelayManager {
                     remove("pending_delay_seconds")
                 }
             }
-            file.writeText(json.toString(2))
+            val jsonStr = json.toString(2)
+            file.writeText(jsonStr)
             cachedState = state
             lastStateModified = file.lastModified()
+            if (GuardianClient.isAvailable) {
+                GuardianClient.saveDelayStateJson(jsonStr)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error writing delay_config.json: ${e.message}")
         }
@@ -394,15 +400,19 @@ object DelayManager {
             for (limit in config.limits) {
                 val sec = limit.protectionDelaySec
                 val pendingInfo = getPendingAppLimit(context, limit.packageName)
-                val pendingLimit = if (pendingInfo != null && !pendingInfo.second) pendingInfo.first else null
+                val isDelete = pendingInfo?.second == true
+                val pendingLimit = if (pendingInfo != null && !isDelete) pendingInfo.first else null
                 val pendingSec = pendingLimit?.protectionDelaySec
 
                 if (sec != null && sec > 0) {
                     val appName = getAppLabel(context, limit.packageName)
-                    val desc = if (pendingSec != null && pendingSec != sec) {
-                        "${formatDuration(sec.toLong())} (⏳ → ${formatDuration(pendingSec.toLong())})"
-                    } else {
-                        formatDuration(sec.toLong())
+                    val desc = when {
+                        isDelete -> "${formatDuration(sec.toLong())} (⏳ → Suppression)"
+                        pendingLimit != null && pendingSec != sec -> {
+                            val targetLabel = if (pendingSec != null && pendingSec > 0) formatDuration(pendingSec.toLong()) else "Global"
+                            "${formatDuration(sec.toLong())} (⏳ → $targetLabel)"
+                        }
+                        else -> formatDuration(sec.toLong())
                     }
                     list.add(
                         ConfiguredDelayItem(
@@ -432,16 +442,23 @@ object DelayManager {
                 val more = if (rule.packages.size > 2) " (+${rule.packages.size - 2})" else ""
                 val label = if (targetApps.isNotBlank()) "🌙 Couvre-feu ($targetApps$more)" else "🌙 Couvre-feu #${idx + 1}"
 
-                val pendingCurfew = pendingUpdates.find {
-                    it.targetType == "CURFEW" && it.targetKey == rule.scheduleSignature() && !it.isDelete
-                }?.let { runCatching { ConfigManager.parsePeriodBlockRule(JSONObject(it.payloadJson)) }.getOrNull() }
+                val pendingCurfewUpdate = pendingUpdates.find {
+                    it.targetType == "CURFEW" && it.targetKey == rule.scheduleSignature()
+                }
+                val isDelete = pendingCurfewUpdate?.isDelete == true
+                val pendingCurfew = if (pendingCurfewUpdate != null && !isDelete) {
+                    runCatching { ConfigManager.parsePeriodBlockRule(JSONObject(pendingCurfewUpdate.payloadJson)) }.getOrNull()
+                } else null
                 val pendingSec = pendingCurfew?.protectionDelaySec
 
                 if (sec != null && sec > 0) {
-                    val desc = if (pendingSec != null && pendingSec != sec) {
-                        "${formatDuration(sec.toLong())} (⏳ → ${formatDuration(pendingSec.toLong())})"
-                    } else {
-                        formatDuration(sec.toLong())
+                    val desc = when {
+                        isDelete -> "${formatDuration(sec.toLong())} (⏳ → Suppression)"
+                        pendingCurfew != null && pendingSec != sec -> {
+                            val targetLabel = if (pendingSec != null && pendingSec > 0) formatDuration(pendingSec.toLong()) else "Global"
+                            "${formatDuration(sec.toLong())} (⏳ → $targetLabel)"
+                        }
+                        else -> formatDuration(sec.toLong())
                     }
                     list.add(
                         ConfiguredDelayItem(
@@ -744,15 +761,154 @@ object DelayManager {
         val state = loadState(context)
         val now = System.currentTimeMillis()
         val update = state.requestedConfigUpdates
-            .filter { it.targetType == "APP_LIMIT" && it.targetKey == pkg && it.executeAt > now }
+            .filter { (it.targetType == "APP_LIMIT" && it.targetKey == pkg || it.targetType == "FULL_CONFIG") && it.executeAt > now }
             .maxByOrNull { it.executeAt } ?: return null
-        if (update.isDelete) return Pair(null, true)
-        return try {
-            val limit = ConfigManager.parseAppLimit(JSONObject(update.payloadJson))
-            Pair(limit, false)
-        } catch (e: Exception) {
-            null
+        if (update.targetType == "APP_LIMIT") {
+            if (update.isDelete) return Pair(null, true)
+            return try {
+                val limit = ConfigManager.parseAppLimit(JSONObject(update.payloadJson))
+                Pair(limit, false)
+            } catch (e: Exception) {
+                null
+            }
+        } else if (update.targetType == "FULL_CONFIG") {
+            return try {
+                val config = ConfigManager.fromJsonString(update.newLimitsJson)
+                val limit = config?.limits?.find { it.packageName == pkg }
+                val currentConfig = ConfigManager.loadConfig(context)
+                val currentLimit = currentConfig.limits.find { it.packageName == pkg }
+                if (currentLimit != null && limit == null) {
+                    Pair(null, true)
+                } else if (limit != null && limit != currentLimit) {
+                    Pair(limit, false)
+                } else {
+                    null
+                }
+            } catch (e: Exception) {
+                null
+            }
         }
+        return null
+    }
+
+    fun requestCurfewUpdate(
+        context: Context,
+        sig: String,
+        newRule: ConfigManager.PeriodBlockRule,
+        description: String,
+        overrideDelaySeconds: Int? = null
+    ) {
+        val state = loadState(context)
+        val effectiveDelaySeconds = overrideDelaySeconds ?: getEffectiveDelaySeconds(state)
+        val executeAt = System.currentTimeMillis() + (effectiveDelaySeconds * 1000L)
+
+        val filtered = state.requestedConfigUpdates.filterNot {
+            it.targetType == "CURFEW" && it.targetKey == sig
+        }.toMutableList()
+
+        val payload = ConfigManager.periodBlockRuleToJson(newRule).toString()
+        filtered.add(
+            PendingConfigUpdate(
+                id = UUID.randomUUID().toString(),
+                description = description,
+                newLimitsJson = payload,
+                executeAt = executeAt,
+                targetType = "CURFEW",
+                targetKey = sig,
+                isDelete = false,
+                payloadJson = payload
+            )
+        )
+        saveState(context, state.copy(requestedConfigUpdates = filtered))
+    }
+
+    fun requestCurfewDelete(
+        context: Context,
+        sig: String,
+        description: String,
+        overrideDelaySeconds: Int? = null
+    ) {
+        val state = loadState(context)
+        val effectiveDelaySeconds = overrideDelaySeconds ?: getEffectiveDelaySeconds(state)
+        val executeAt = System.currentTimeMillis() + (effectiveDelaySeconds * 1000L)
+
+        val filtered = state.requestedConfigUpdates.filterNot {
+            it.targetType == "CURFEW" && it.targetKey == sig
+        }.toMutableList()
+
+        filtered.add(
+            PendingConfigUpdate(
+                id = UUID.randomUUID().toString(),
+                description = description,
+                newLimitsJson = "",
+                executeAt = executeAt,
+                targetType = "CURFEW",
+                targetKey = sig,
+                isDelete = true,
+                payloadJson = ""
+            )
+        )
+        saveState(context, state.copy(requestedConfigUpdates = filtered))
+    }
+
+    fun requestInstallBlockUpdate(
+        context: Context,
+        groupName: String,
+        newGroup: ConfigManager.InstallBlockGroup,
+        description: String,
+        overrideDelaySeconds: Int? = null
+    ) {
+        val state = loadState(context)
+        val effectiveDelaySeconds = overrideDelaySeconds ?: getEffectiveDelaySeconds(state)
+        val executeAt = System.currentTimeMillis() + (effectiveDelaySeconds * 1000L)
+
+        val filtered = state.requestedConfigUpdates.filterNot {
+            it.targetType == "INSTALL_BLOCK" && it.targetKey == groupName
+        }.toMutableList()
+
+        val payload = ConfigManager.installBlockGroupToJson(newGroup).toString()
+        filtered.add(
+            PendingConfigUpdate(
+                id = UUID.randomUUID().toString(),
+                description = description,
+                newLimitsJson = payload,
+                executeAt = executeAt,
+                targetType = "INSTALL_BLOCK",
+                targetKey = groupName,
+                isDelete = false,
+                payloadJson = payload
+            )
+        )
+        saveState(context, state.copy(requestedConfigUpdates = filtered))
+    }
+
+    fun requestInstallBlockDelete(
+        context: Context,
+        groupName: String,
+        description: String,
+        overrideDelaySeconds: Int? = null
+    ) {
+        val state = loadState(context)
+        val effectiveDelaySeconds = overrideDelaySeconds ?: getEffectiveDelaySeconds(state)
+        val executeAt = System.currentTimeMillis() + (effectiveDelaySeconds * 1000L)
+
+        val filtered = state.requestedConfigUpdates.filterNot {
+            it.targetType == "INSTALL_BLOCK" && it.targetKey == groupName
+        }.toMutableList()
+
+        filtered.add(
+            PendingConfigUpdate(
+                id = UUID.randomUUID().toString(),
+                description = description,
+                newLimitsJson = "",
+                executeAt = executeAt,
+                targetType = "INSTALL_BLOCK",
+                targetKey = groupName,
+                isDelete = true,
+                payloadJson = ""
+            )
+        )
+        saveState(context, state.copy(requestedConfigUpdates = filtered))
     }
 
     fun cancelConfigUpdates(context: Context) {
