@@ -24,16 +24,61 @@ class GuardianService : Service() {
         }
     }
 
+    private var packageReceiver: android.content.BroadcastReceiver? = null
+
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "GuardianService created")
         GuardianEngine.init(this)
         GuardianEngine.enforceLockdown(this)
+        registerPackageReceiver()
         loopHandler.post(loopRunnable)
+    }
+
+    private fun registerPackageReceiver() {
+        if (packageReceiver != null) return
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val action = intent.action ?: return
+                if (action == Intent.ACTION_PACKAGE_ADDED || action == Intent.ACTION_PACKAGE_REPLACED) {
+                    val pkg = intent.data?.schemeSpecificPart ?: return
+                    if (intent.getBooleanExtra(Intent.EXTRA_REPLACING, false) && action == Intent.ACTION_PACKAGE_ADDED) {
+                        return
+                    }
+                    Log.i(TAG, "Package detected dynamically in GuardianService: $pkg")
+                    GuardianEngine.init(context)
+                    if (GuardianEngine.isGuarded(context, pkg)) return
+                    val state = GuardianEngine.getState(context)
+                    if (state.enabled && pkg !in state.allowedPackages) {
+                        GuardianEngine.setPackageSuspendedInternal(context, pkg, true)
+                        GuardianEngine.setPackageHiddenInternal(context, pkg, true)
+                        Log.w(TAG, "Guardian dynamically locked down newly installed app: $pkg")
+                    }
+                }
+            }
+        }
+        val filter = android.content.IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_ADDED)
+            addAction(Intent.ACTION_PACKAGE_REPLACED)
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_FULLY_REMOVED)
+            addDataScheme("package")
+        }
+        try {
+            registerReceiver(receiver, filter)
+            packageReceiver = receiver
+            Log.i(TAG, "Registered dynamic package receiver in GuardianService")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register dynamic package receiver in GuardianService: ${e.message}")
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        packageReceiver?.let {
+            try { unregisterReceiver(it) } catch (_: Exception) {}
+            packageReceiver = null
+        }
         loopHandler.removeCallbacks(loopRunnable)
         Log.w(TAG, "GuardianService destroyed")
     }

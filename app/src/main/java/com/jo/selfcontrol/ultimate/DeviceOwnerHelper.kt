@@ -200,11 +200,11 @@ object DeviceOwnerHelper {
      * false if caller must fall back to HOME spam via AccessibilityService.
      */
     fun suspendApp(ctx: Context, pkg: String): Boolean {
-        if (!BuildConfig.OS_SUSPENSION_ENABLED) return false
         if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
             GuardianClient.setPackageSuspended(pkg, true)
             return true
         }
+        if (!BuildConfig.OS_SUSPENSION_ENABLED) return false
         if (!dpm(ctx).isDeviceOwnerApp(ctx.packageName)) return false
         return runCatching {
             val failed = dpm(ctx).setPackagesSuspended(admin(ctx), arrayOf(pkg), true)
