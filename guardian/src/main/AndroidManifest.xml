@@ -49,6 +49,7 @@
             </intent-filter>
         </receiver>
 
+
         <!-- AIDL IPC Service for Custos UI communication -->
         <service
             android:name=".GuardianService"
