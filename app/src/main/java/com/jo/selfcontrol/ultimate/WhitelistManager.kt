@@ -396,6 +396,9 @@ object WhitelistManager {
         return state
     }
 
+    @Volatile
+    private var lastScheduledTargetTime: Long = 0L
+
     fun scheduleNextUnlockAlarm(ctx: Context) {
         val state = loadStateInternal(ctx)
         val now = System.currentTimeMillis()
@@ -404,8 +407,30 @@ object WhitelistManager {
         val nextDisable = if (state.pendingDisableExecuteAt > now) state.pendingDisableExecuteAt else null
 
         val candidateTimes = listOfNotNull(nextPending, nextDelay, nextDisable)
-        if (candidateTimes.isEmpty()) return
+        if (candidateTimes.isEmpty()) {
+            if (lastScheduledTargetTime != 0L) {
+                try {
+                    val am = ctx.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+                    val intent = Intent(ctx, CommandReceiver::class.java).apply {
+                        action = "com.jo.selfcontrol.ultimate.CHECK_WHITELIST_EXPIRATION"
+                    }
+                    val pi = PendingIntent.getBroadcast(
+                        ctx,
+                        8888,
+                        intent,
+                        PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    if (pi != null) {
+                        am?.cancel(pi)
+                        pi.cancel()
+                    }
+                } catch (_: Exception) {}
+                lastScheduledTargetTime = 0L
+            }
+            return
+        }
         val targetTime = candidateTimes.min()
+        if (targetTime == lastScheduledTargetTime) return
 
         try {
             val am = ctx.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
@@ -423,6 +448,7 @@ object WhitelistManager {
             } else {
                 am.setExact(AlarmManager.RTC_WAKEUP, targetTime, pi)
             }
+            lastScheduledTargetTime = targetTime
             Log.i(TAG, "Scheduled whitelist unlock alarm for ${java.util.Date(targetTime)}")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to schedule unlock alarm: ${e.message}")
@@ -531,6 +557,7 @@ object WhitelistManager {
             file.writeText(jsonStr)
             cachedState = state
             lastStateModified = file.lastModified()
+            lastScheduledTargetTime = 0L
 
             if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
                 GuardianClient.saveWhitelistStateJson(jsonStr)
