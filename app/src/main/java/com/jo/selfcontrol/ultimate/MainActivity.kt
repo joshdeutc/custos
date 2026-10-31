@@ -1366,12 +1366,38 @@ class MainActivity : Activity() {
             setPadding(0, 0, 0, dp(8))
         })
 
+        // ── Notification mute toggle when blocked ───────────
+        val initialMute = if (GuardianClient.isAvailable) {
+            GuardianClient.getNotificationMutePreference(pkg)
+        } else {
+            BlockedNotificationManager.getMuteWhenBlockedPreference(this, pkg) ?: false
+        }
+        val muteToggle = CheckBox(this).apply {
+            text = "🔕 Muter les notifications une fois bloqué"
+            setTextColor(Color.WHITE)
+            isChecked = initialMute
+            setPadding(0, dp(12), 0, dp(2))
+        }
+        root.addView(muteToggle)
+        root.addView(TextView(this).apply {
+            text = "Coupe silencieusement les notifications dès que l'app est bloquée (quota ou couvre-feu), et les réactive automatiquement à minuit."
+            textSize = 12f
+            setTextColor(Color.parseColor("#888888"))
+            setPadding(0, 0, 0, dp(8))
+        })
+
         val scroll = ScrollView(this).apply { addView(root) }
 
         val builder = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
             .setTitle("Set Limit for ${getAppName(pkg)}")
             .setView(scroll)
             .setPositiveButton("Save") { _, _ ->
+                val muteChecked = muteToggle.isChecked
+                if (GuardianClient.isAvailable) {
+                    GuardianClient.setNotificationMutePreference(pkg, muteChecked)
+                }
+                BlockedNotificationManager.setMuteWhenBlockedPreference(this, pkg, muteChecked)
+
                 val newMins = dailyPicker.value
                 val session = if (sessionToggle.isChecked) {
                     ConfigManager.SessionConfig(
@@ -1442,6 +1468,29 @@ class MainActivity : Activity() {
                 val unlockApplies = !requirement.fromExplicitTimer && DelayManager.isSettingsUnlocked(this)
                 val mustDefer = requirement.mustDefer && !unlockApplies
 
+                if (GuardianClient.isAvailable) {
+                    val cur = ConfigManager.loadConfig(this)
+                    val updatedLimits = cur.limits.filter { it.packageName != pkg }.toMutableList()
+                    updatedLimits.add(newLimit)
+                    val newConfig = cur.copy(limits = updatedLimits)
+                    val candidateJson = ConfigManager.configToJsonString(newConfig)
+                    val appliedImmediately = GuardianClient.requestConfigChange(candidateJson)
+                    ConfigManager.saveConfig(this, newConfig)
+                    if (appliedImmediately) {
+                        DelayManager.cancelAppLimitUpdate(this, pkg)
+                        refreshDashboard()
+                        Toast.makeText(this, "Limit updated for ${getAppName(pkg)}.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
+                        Toast.makeText(
+                            this,
+                            "Change queued for ${formatLongDuration(requirement.seconds)} ($scope — ${requirement.reason}).",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    return@setPositiveButton
+                }
+
                 if (!mustDefer) {
                     val cur = ConfigManager.loadConfig(this)
                     val updatedLimits = cur.limits.filter { it.packageName != pkg }.toMutableList()
@@ -1487,6 +1536,28 @@ class MainActivity : Activity() {
                     val requirement = ConfigManager.requiredDeferForAppLimit(activeLimit, null, globalDelay)
                     val unlockApplies = !requirement.fromExplicitTimer && DelayManager.isSettingsUnlocked(this)
                     val mustDefer = requirement.mustDefer && !unlockApplies
+
+                    if (GuardianClient.isAvailable) {
+                        val cur = ConfigManager.loadConfig(this)
+                        val updatedLimits = cur.limits.filter { it.packageName != pkg }
+                        val newConfig = cur.copy(limits = updatedLimits)
+                        val candidateJson = ConfigManager.configToJsonString(newConfig)
+                        val appliedImmediately = GuardianClient.requestConfigChange(candidateJson)
+                        ConfigManager.saveConfig(this, newConfig)
+                        if (appliedImmediately) {
+                            DelayManager.cancelAppLimitUpdate(this, pkg)
+                            refreshDashboard()
+                            Toast.makeText(this, "Limit deleted for ${getAppName(pkg)}.", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
+                            Toast.makeText(
+                                this,
+                                "Deletion queued for ${formatLongDuration(requirement.seconds)} ($scope — ${requirement.reason}).",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                        return@setNeutralButton
+                    }
 
                     if (!mustDefer) {
                         val cur = ConfigManager.loadConfig(this)
@@ -1560,6 +1631,25 @@ class MainActivity : Activity() {
         // defusable through a 1h unlock. Rules without an explicit timer keep the old behaviour.
         val unlockApplies = !requirement.fromExplicitTimer && DelayManager.isSettingsUnlocked(this)
         val mustDefer = requirement.mustDefer && !unlockApplies
+
+        if (GuardianClient.isAvailable) {
+            val candidateJson = ConfigManager.configToJsonString(newConfig)
+            val appliedImmediately = GuardianClient.requestConfigChange(candidateJson)
+            ConfigManager.saveConfig(this, newConfig)
+            if (appliedImmediately) {
+                Toast.makeText(this, "Config updated.", Toast.LENGTH_SHORT).show()
+            } else {
+                val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
+                Toast.makeText(
+                    this,
+                    "Change queued for ${formatLongDuration(requirement.seconds)} " +
+                        "($scope — ${requirement.reason}).",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            refreshDashboard()
+            return
+        }
 
         if (!mustDefer) {
             ConfigManager.saveConfig(this, newConfig)
@@ -2909,9 +2999,10 @@ class MainActivity : Activity() {
         val configLimits = curConfig.limits.associateBy { it.packageName }
         val serviceLimits = LimitService.getLimits()
         val limits = if (configLimits.isNotEmpty()) configLimits else serviceLimits
-        val blocked = LimitService.getBlockedApps()
+        val blocked = if (GuardianClient.isAvailable) GuardianClient.getBlockedApps() else LimitService.getBlockedApps()
 
-        serviceStatusText.text = if (LimitService.isRunning)
+        val isRunning = (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) || LimitService.isRunning
+        serviceStatusText.text = if (isRunning)
             "Service Active — ${limits.size} app(s) monitored"
         else
             "Service starting..."

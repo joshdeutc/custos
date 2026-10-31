@@ -25,4 +25,22 @@ interface IGuardianService {
 
     boolean setPrivateDnsHost(String hostname);
     String getPrivateDnsHost();
+
+    // --- Rules & Limits Engine ---
+    String getConfigJson();
+    boolean requestConfigChange(String candidateJson);
+    String getDelayStateJson();
+    boolean cancelPendingConfigChange();
+
+    // --- Screen Rules (Reels, Actus, Shorts) ---
+    String getScreenRulesJson();
+    boolean saveScreenRulesJson(String json);
+
+    // --- Realtime Usage & Block State ---
+    List<String> getBlockedApps();
+    String getUsageStatsJson();
+
+    // --- Notification Preferences ---
+    boolean setNotificationMutePreference(String packageName, boolean mute);
+    boolean getNotificationMutePreference(String packageName);
 }

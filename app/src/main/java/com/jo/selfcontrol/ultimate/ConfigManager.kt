@@ -137,6 +137,17 @@ class ConfigManager {
          * Missing or invalid file yields an empty config (fresh install / clean slate).
          */
         fun loadConfig(context: Context): Config {
+            if (GuardianClient.isAvailable) {
+                val remoteJson = GuardianClient.getConfigJson()
+                if (!remoteJson.isNullOrEmpty()) {
+                    try {
+                        return parseConfig(JSONObject(remoteJson))
+                    } catch (e: Exception) {
+                        Log.e(TAG, "❌ Error parsing Guardian config: ${e.message}")
+                    }
+                }
+            }
+
             val localFile = File(context.filesDir, LOCAL_CONFIG_NAME)
 
             if (!localFile.exists()) {
@@ -170,9 +181,13 @@ class ConfigManager {
          * Save configuration directly to the internal storage.
          */
         fun saveConfig(context: Context, config: Config) {
+            val jsonStr = configToJsonString(config)
+            if (GuardianClient.isAvailable) {
+                GuardianClient.requestConfigChange(jsonStr)
+            }
             val localFile = File(context.filesDir, LOCAL_CONFIG_NAME)
             try {
-                localFile.writeText(configToJsonString(config))
+                localFile.writeText(jsonStr)
                 Log.i(TAG, "✅ Config saved successfully")
                 LimitService.notifyConfigChanged(context)
             } catch (e: Exception) {

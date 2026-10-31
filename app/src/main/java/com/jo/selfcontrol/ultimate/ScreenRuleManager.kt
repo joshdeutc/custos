@@ -199,6 +199,16 @@ object ScreenRuleManager {
 
     /** The whole file as a JSON object, or an empty one — the single reader both keys go through. */
     private fun readRoot(ctx: Context): JSONObject {
+        if (GuardianClient.isAvailable) {
+            val remoteJson = GuardianClient.getScreenRulesJson()
+            if (!remoteJson.isNullOrEmpty() && remoteJson != "{}") {
+                try {
+                    return JSONObject(remoteJson)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Cannot parse Guardian screen rules: ${e.message}")
+                }
+            }
+        }
         val file = File(ctx.filesDir, RULES_FILE)
         if (!file.exists()) return JSONObject()
         return try {
@@ -210,6 +220,9 @@ object ScreenRuleManager {
     }
 
     private fun writeRoot(ctx: Context, root: JSONObject): Boolean = try {
+        if (GuardianClient.isAvailable) {
+            GuardianClient.saveScreenRulesJson(root.toString())
+        }
         File(ctx.filesDir, RULES_FILE).writeText(root.toString(2))
         true
     } catch (e: Exception) {

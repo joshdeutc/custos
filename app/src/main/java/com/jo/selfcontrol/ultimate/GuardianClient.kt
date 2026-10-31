@@ -18,12 +18,14 @@ object GuardianClient {
     private var service: IGuardianService? = null
     @Volatile
     private var isBound = false
+    private var appContext: Context? = null
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             service = IGuardianService.Stub.asInterface(binder)
             isBound = true
             Log.i(TAG, "Connected to GuardianService IPC (version=${service?.version})")
+            appContext?.let { syncInitialConfigIfNeeded(it) }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -33,8 +35,49 @@ object GuardianClient {
         }
     }
 
+    private fun syncInitialConfigIfNeeded(ctx: Context) {
+        try {
+            val remoteJson = service?.configJson
+            val isRemoteEmpty = remoteJson.isNullOrBlank() || remoteJson == "{}" ||
+                (org.json.JSONObject(remoteJson).optJSONArray("limits")?.length() ?: 0) == 0
+
+            if (isRemoteEmpty) {
+                val localFile = java.io.File(ctx.filesDir, "limits.json")
+                if (localFile.exists()) {
+                    val localText = localFile.readText()
+                    val localLimits = org.json.JSONObject(localText).optJSONArray("limits")?.length() ?: 0
+                    if (localLimits > 0) {
+                        Log.i(TAG, "Migrating $localLimits local app limits to Guardian")
+                        service?.requestConfigChange(localText)
+                    }
+                }
+            }
+
+            val remoteRules = service?.screenRulesJson
+            val isRemoteRulesEmpty = remoteRules.isNullOrBlank() || remoteRules == "{}" ||
+                (org.json.JSONObject(remoteRules).optJSONArray("rules")?.length() ?: 0) == 0
+            if (isRemoteRulesEmpty) {
+                val localRulesFile = java.io.File(ctx.filesDir, "screen_rules.json")
+                if (localRulesFile.exists()) {
+                    val localRulesText = localRulesFile.readText()
+                    val count = org.json.JSONObject(localRulesText).optJSONArray("rules")?.length() ?: 0
+                    if (count > 0) {
+                        Log.i(TAG, "Migrating $count local screen rules to Guardian")
+                        service?.saveScreenRulesJson(localRulesText)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during syncInitialConfigIfNeeded", e)
+        }
+    }
+
     fun init(context: Context) {
-        if (isBound && service != null) return
+        appContext = context.applicationContext
+        if (isBound && service != null) {
+            syncInitialConfigIfNeeded(context.applicationContext)
+            return
+        }
         try {
             val intent = Intent(GUARDIAN_ACTION).apply {
                 component = ComponentName(GUARDIAN_PACKAGE, "com.jo.custos.guardian.GuardianService")
@@ -232,6 +275,106 @@ object GuardianClient {
         } catch (e: Exception) {
             Log.e(TAG, "IPC error getPrivateDnsHost", e)
             null
+        }
+    }
+
+    fun getConfigJson(): String? {
+        val s = service ?: return null
+        return try {
+            s.configJson
+        } catch (e: Exception) {
+            Log.e(TAG, "IPC error getConfigJson", e)
+            null
+        }
+    }
+
+    fun requestConfigChange(candidateJson: String): Boolean {
+        val s = service ?: return false
+        return try {
+            s.requestConfigChange(candidateJson)
+        } catch (e: Exception) {
+            Log.e(TAG, "IPC error requestConfigChange", e)
+            false
+        }
+    }
+
+    fun getDelayStateJson(): String? {
+        val s = service ?: return null
+        return try {
+            s.delayStateJson
+        } catch (e: Exception) {
+            Log.e(TAG, "IPC error getDelayStateJson", e)
+            null
+        }
+    }
+
+    fun cancelPendingConfigChange(): Boolean {
+        val s = service ?: return false
+        return try {
+            s.cancelPendingConfigChange()
+        } catch (e: Exception) {
+            Log.e(TAG, "IPC error cancelPendingConfigChange", e)
+            false
+        }
+    }
+
+    fun getScreenRulesJson(): String? {
+        val s = service ?: return null
+        return try {
+            s.screenRulesJson
+        } catch (e: Exception) {
+            Log.e(TAG, "IPC error getScreenRulesJson", e)
+            null
+        }
+    }
+
+    fun saveScreenRulesJson(json: String): Boolean {
+        val s = service ?: return false
+        return try {
+            s.saveScreenRulesJson(json)
+        } catch (e: Exception) {
+            Log.e(TAG, "IPC error saveScreenRulesJson", e)
+            false
+        }
+    }
+
+    fun getBlockedApps(): List<String> {
+        val s = service ?: return emptyList()
+        return try {
+            s.blockedApps
+        } catch (e: Exception) {
+            Log.e(TAG, "IPC error getBlockedApps", e)
+            emptyList()
+        }
+    }
+
+    fun getUsageStatsJson(): String? {
+        val s = service ?: return null
+        return try {
+            s.usageStatsJson
+        } catch (e: Exception) {
+            Log.e(TAG, "IPC error getUsageStatsJson", e)
+            null
+        }
+    }
+
+    fun setNotificationMutePreference(packageName: String, mute: Boolean): Boolean {
+        val s = service ?: return false
+        return try {
+            s.setNotificationMutePreference(packageName, mute)
+        } catch (e: Exception) {
+            Log.e(TAG, "IPC error setNotificationMutePreference", e)
+            false
+        }
+    }
+
+    fun getNotificationMutePreference(packageName: String): Boolean {
+        val s = service ?: return false
+        return try {
+            s.getNotificationMutePreference(packageName)
+        } catch (e: Exception) {
+            Log.e(TAG, "IPC error getNotificationMutePreference", e)
+            false
         }
     }
 }

@@ -44,6 +44,16 @@ object DelayManager {
 
     @Synchronized
     fun loadState(context: Context): DelayState {
+        if (GuardianClient.isAvailable) {
+            val remoteJson = GuardianClient.getDelayStateJson()
+            if (!remoteJson.isNullOrEmpty() && remoteJson != "{}") {
+                try {
+                    return parseDelayState(JSONObject(remoteJson))
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error parsing remote delay state: ${e.message}")
+                }
+            }
+        }
         val file = File(context.filesDir, FILE_NAME)
         if (!file.exists()) {
             val default = DelayState(
@@ -62,66 +72,7 @@ object DelayManager {
         }
         return try {
             val json = JSONObject(file.readText())
-            val delay = json.optInt("global_delay_seconds", 0)
-            val unlockTime = json.optLong("unlock_time", 0L)
-
-            val execAt = json.optLong("pending_delay_execute_at", 0L)
-            val pendingSec = if (execAt > 0L && json.has("pending_delay_seconds")) {
-                json.getInt("pending_delay_seconds")
-            } else null
-            
-            val pendingArray = json.optJSONArray("pending_configs")
-            val pendingList = mutableListOf<PendingConfigUpdate>()
-            if (pendingArray != null) {
-                for (i in 0 until pendingArray.length()) {
-                    val obj = pendingArray.getJSONObject(i)
-                    pendingList.add(PendingConfigUpdate(
-                        id = obj.optString("id", UUID.randomUUID().toString()),
-                        description = obj.optString("description", "Config change"),
-                        newLimitsJson = obj.optString("config", ""),
-                        executeAt = obj.getLong("execute_at"),
-                        targetType = obj.optString("target_type", "FULL_CONFIG"),
-                        targetKey = obj.optString("target_key", ""),
-                        isDelete = obj.optBoolean("is_delete", false),
-                        payloadJson = obj.optString("payload", obj.optString("config", ""))
-                    ))
-                }
-            }
-
-            val scheduleArray = json.optJSONArray("delay_schedule")
-            val schedule = mutableListOf<DelayScheduleRule>()
-            if (scheduleArray != null) {
-                for (i in 0 until scheduleArray.length()) {
-                    val obj = scheduleArray.getJSONObject(i)
-                    val days = mutableListOf<Int>()
-                    val daysRaw = obj.opt("allowed_days")
-                    if (daysRaw is String && daysRaw == "*") {
-                        days.addAll(0..6)
-                    } else {
-                        val arr = obj.optJSONArray("allowed_days")
-                        if (arr != null) {
-                            for (d in 0 until arr.length()) {
-                                days.add(arr.getInt(d))
-                            }
-                        }
-                    }
-                    if (days.isEmpty()) {
-                        days.addAll(0..6)
-                    }
-
-                    schedule.add(
-                        DelayScheduleRule(
-                            id = obj.optString("id", UUID.randomUUID().toString()),
-                            startMinutes = obj.optInt("start_minutes", 0).coerceIn(0, 1439),
-                            endMinutes = obj.optInt("end_minutes", 1440).coerceIn(0, 1440),
-                            delaySeconds = obj.optInt("delay_seconds", 0).coerceAtLeast(0),
-                            allowedDays = days.distinct().sorted()
-                        )
-                    )
-                }
-            }
-
-            val result = DelayState(delay, unlockTime, pendingList, schedule, pendingSec, execAt)
+            val result = parseDelayState(json)
             cachedState = result
             lastStateModified = lastMod
             result
@@ -129,6 +80,69 @@ object DelayManager {
             Log.e(TAG, "Error reading delay_config.json: ${e.message}")
             DelayState(globalDelaySeconds = 0, unlockSettingsUnlockTime = 0, requestedConfigUpdates = emptyList())
         }
+    }
+
+    fun parseDelayState(json: JSONObject): DelayState {
+        val delay = json.optInt("global_delay_seconds", 0)
+        val unlockTime = json.optLong("unlock_time", 0L)
+
+        val execAt = json.optLong("pending_delay_execute_at", 0L)
+        val pendingSec = if (execAt > 0L && json.has("pending_delay_seconds")) {
+            json.getInt("pending_delay_seconds")
+        } else null
+        
+        val pendingArray = json.optJSONArray("pending_configs")
+        val pendingList = mutableListOf<PendingConfigUpdate>()
+        if (pendingArray != null) {
+            for (i in 0 until pendingArray.length()) {
+                val obj = pendingArray.getJSONObject(i)
+                pendingList.add(PendingConfigUpdate(
+                    id = obj.optString("id", UUID.randomUUID().toString()),
+                    description = obj.optString("description", "Config change"),
+                    newLimitsJson = obj.optString("config", ""),
+                    executeAt = obj.getLong("execute_at"),
+                    targetType = obj.optString("target_type", "FULL_CONFIG"),
+                    targetKey = obj.optString("target_key", ""),
+                    isDelete = obj.optBoolean("is_delete", false),
+                    payloadJson = obj.optString("payload", obj.optString("config", ""))
+                ))
+            }
+        }
+
+        val scheduleArray = json.optJSONArray("delay_schedule")
+        val schedule = mutableListOf<DelayScheduleRule>()
+        if (scheduleArray != null) {
+            for (i in 0 until scheduleArray.length()) {
+                val obj = scheduleArray.getJSONObject(i)
+                val days = mutableListOf<Int>()
+                val daysRaw = obj.opt("allowed_days")
+                if (daysRaw is String && daysRaw == "*") {
+                    days.addAll(0..6)
+                } else {
+                    val arr = obj.optJSONArray("allowed_days")
+                    if (arr != null) {
+                        for (d in 0 until arr.length()) {
+                            days.add(arr.getInt(d))
+                        }
+                    }
+                }
+                if (days.isEmpty()) {
+                    days.addAll(0..6)
+                }
+
+                schedule.add(
+                    DelayScheduleRule(
+                        id = obj.optString("id", UUID.randomUUID().toString()),
+                        startMinutes = obj.optInt("start_minutes", 0).coerceIn(0, 1439),
+                        endMinutes = obj.optInt("end_minutes", 1440).coerceIn(0, 1440),
+                        delaySeconds = obj.optInt("delay_seconds", 0).coerceAtLeast(0),
+                        allowedDays = days.distinct().sorted()
+                    )
+                )
+            }
+        }
+
+        return DelayState(delay, unlockTime, pendingList, schedule, pendingSec, execAt)
     }
 
     @Synchronized
@@ -716,6 +730,9 @@ object DelayManager {
     }
 
     fun cancelAppLimitUpdate(context: Context, pkg: String) {
+        if (GuardianClient.isAvailable) {
+            GuardianClient.cancelPendingConfigChange()
+        }
         val state = loadState(context)
         val filtered = state.requestedConfigUpdates.filterNot {
             it.targetType == "APP_LIMIT" && it.targetKey == pkg
@@ -739,6 +756,9 @@ object DelayManager {
     }
 
     fun cancelConfigUpdates(context: Context) {
+        if (GuardianClient.isAvailable) {
+            GuardianClient.cancelPendingConfigChange()
+        }
         val state = loadState(context)
         saveState(context, state.copy(requestedConfigUpdates = emptyList()))
     }

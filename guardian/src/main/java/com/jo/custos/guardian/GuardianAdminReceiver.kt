@@ -21,6 +21,13 @@ class GuardianAdminReceiver : DeviceAdminReceiver() {
         GuardianEngine.enforceLockdown(context)
     }
 
+    override fun onTransferOwnershipComplete(context: Context, bundle: android.os.PersistableBundle?) {
+        super.onTransferOwnershipComplete(context, bundle)
+        Log.i(TAG, "Guardian onTransferOwnershipComplete! Guardian is now active Device Owner!")
+        GuardianEngine.init(context)
+        GuardianEngine.enforceLockdown(context)
+    }
+
     override fun onDisabled(context: Context, intent: Intent) {
         super.onDisabled(context, intent)
         Log.w(TAG, "Guardian Device Admin disabled")

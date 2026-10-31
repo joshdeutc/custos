@@ -2,21 +2,45 @@ package com.jo.custos.guardian
 
 import android.app.Service
 import android.content.Intent
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 
 class GuardianService : Service() {
+
+    private val loopHandler = Handler(Looper.getMainLooper())
+    private val loopRunnable = object : Runnable {
+        override fun run() {
+            try {
+                GuardianEngine.evaluateLimits(applicationContext)
+                DelayManager.applyPendingDelayIfReady(applicationContext)
+                DelayManager.applyPendingConfigsIfReady(applicationContext)
+                ScreenRuleManager.applyPendingRemovalsIfReady(applicationContext)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in evaluation loop: ${e.message}")
+            }
+            loopHandler.postDelayed(this, 1000L)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "GuardianService created")
         GuardianEngine.init(this)
         GuardianEngine.enforceLockdown(this)
+        loopHandler.post(loopRunnable)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        loopHandler.removeCallbacks(loopRunnable)
+        Log.w(TAG, "GuardianService destroyed")
     }
 
     private val binder = object : IGuardianService.Stub() {
 
-        override fun getVersion(): Int = 1
+        override fun getVersion(): Int = 2
 
         override fun isDeviceOwnerActive(): Boolean = GuardianEngine.isDeviceOwner(applicationContext)
 
@@ -105,6 +129,84 @@ class GuardianService : Service() {
 
         override fun getPrivateDnsHost(): String? {
             return GuardianEngine.getPrivateDnsHost(applicationContext)
+        }
+
+        override fun getConfigJson(): String {
+            val config = ConfigManager.loadConfig(applicationContext)
+            return ConfigManager.configToJsonString(config)
+        }
+
+        override fun requestConfigChange(candidateJson: String): Boolean {
+            val newConfig = ConfigManager.fromJsonString(candidateJson) ?: return false
+            val currentConfig = ConfigManager.loadConfig(applicationContext)
+            val globalDelay = DelayManager.getCurrentEffectiveDelaySeconds(applicationContext)
+            val defer = ConfigManager.requiredDefer(currentConfig, newConfig, globalDelay)
+            val unlockApplies = !defer.fromExplicitTimer && DelayManager.isSettingsUnlocked(applicationContext)
+            val mustDefer = defer.mustDefer && !unlockApplies
+            return if (mustDefer) {
+                DelayManager.requestConfigUpdate(applicationContext, candidateJson, defer.reason, defer.seconds)
+                Log.w(TAG, "Config change deferred (${defer.seconds}s): ${defer.reason}")
+                false
+            } else {
+                ConfigManager.saveConfig(applicationContext, newConfig)
+                GuardianEngine.evaluateLimits(applicationContext)
+                Log.i(TAG, "Config change applied immediately")
+                true
+            }
+        }
+
+        override fun getDelayStateJson(): String {
+            val file = java.io.File(applicationContext.filesDir, "delay_state.json")
+            return if (file.exists()) file.readText() else "{}"
+        }
+
+        override fun cancelPendingConfigChange(): Boolean {
+            DelayManager.cancelConfigUpdates(applicationContext)
+            return true
+        }
+
+        override fun getScreenRulesJson(): String {
+            val file = java.io.File(applicationContext.filesDir, "screen_rules.json")
+            return if (file.exists()) file.readText() else "{}"
+        }
+
+        override fun saveScreenRulesJson(json: String): Boolean {
+            val file = java.io.File(applicationContext.filesDir, "screen_rules.json")
+            file.writeText(json)
+            return true
+        }
+
+        override fun getBlockedApps(): List<String> {
+            return GuardianEngine.getBlockedApps().toList()
+        }
+
+        override fun getUsageStatsJson(): String {
+            val config = ConfigManager.loadConfig(applicationContext)
+            val obj = org.json.JSONObject()
+            val dayStart = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, 0)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            val nowMs = System.currentTimeMillis()
+            for (limit in config.limits) {
+                val usedSec = UsageQuery.foregroundSeconds(applicationContext, limit.packageName, dayStart, nowMs)
+                obj.put(limit.packageName, usedSec)
+            }
+            return obj.toString()
+        }
+
+        override fun setNotificationMutePreference(packageName: String, mute: Boolean): Boolean {
+            BlockedNotificationManager.setMuteWhenBlockedPreference(applicationContext, packageName, mute)
+            if (packageName in GuardianEngine.getBlockedApps()) {
+                BlockedNotificationManager.applyNotificationMute(applicationContext, packageName, mute)
+            }
+            return true
+        }
+
+        override fun getNotificationMutePreference(packageName: String): Boolean {
+            return BlockedNotificationManager.getMuteWhenBlockedPreference(applicationContext, packageName) ?: false
         }
     }
 

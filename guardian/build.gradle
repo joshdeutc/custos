@@ -26,6 +26,11 @@ android {
         targetSdk 34
         versionCode 1
         versionName "1.0"
+
+        buildConfigField "boolean", "PERMANENT_APP_LIMITS", "false"
+        buildConfigField "boolean", "PERMANENT_CURFEW", "false"
+        buildConfigField "boolean", "PERMANENT_SCREEN_RULES", "false"
+        buildConfigField "boolean", "EVENT_LOG_ENABLED", "true"
     }
 
     buildFeatures {

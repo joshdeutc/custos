@@ -74,6 +74,7 @@ class CommandReceiver : BroadcastReceiver() {
                 WhitelistManager.checkAndPromotePendingRequests(context)
             "com.jo.selfcontrol.ultimate.SET_PRIVATE_DNS" -> handleSetPrivateDns(context, intent)
             "com.jo.selfcontrol.ultimate.GET_PRIVATE_DNS" -> handleGetPrivateDns(context)
+            "com.jo.selfcontrol.ultimate.TRANSFER_OWNERSHIP_TO_GUARDIAN" -> handleTransferOwnershipToGuardian(context)
         }
     }
 
@@ -522,5 +523,30 @@ class CommandReceiver : BroadcastReceiver() {
         val host = DeviceOwnerHelper.getPrivateDnsHost(context)
         Log.w("SelfControl.Cmd", "=== GET_PRIVATE_DNS host=$host ===")
         EventLog.log(context, "DNS", "GET_PRIVATE_DNS host=$host")
+    }
+
+    private fun handleTransferOwnershipToGuardian(context: Context) {
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? android.app.admin.DevicePolicyManager
+        if (dpm == null) {
+            Log.e("SelfControl.Cmd", "TRANSFER_OWNERSHIP: DPM is null")
+            return
+        }
+        if (!dpm.isDeviceOwnerApp(context.packageName)) {
+            Log.e("SelfControl.Cmd", "TRANSFER_OWNERSHIP: Not Device Owner (isDO=${dpm.isDeviceOwnerApp(context.packageName)})")
+            return
+        }
+        val currentAdmin = ComponentName(context, AdminReceiver::class.java)
+        val targetAdmin = ComponentName("com.jo.custos.guardian", "com.jo.custos.guardian.GuardianAdminReceiver")
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                Log.w("SelfControl.Cmd", "=== INITIATING OWNERSHIP TRANSFER to $targetAdmin ===")
+                dpm.transferOwnership(currentAdmin, targetAdmin, null)
+                Log.w("SelfControl.Cmd", "=== OWNERSHIP TRANSFER SUCCESSFUL! ===")
+            } else {
+                Log.e("SelfControl.Cmd", "TRANSFER_OWNERSHIP requires Android 9 (API 28)+")
+            }
+        } catch (e: Exception) {
+            Log.e("SelfControl.Cmd", "TRANSFER_OWNERSHIP failed with exception: ${e.message}", e)
+        }
     }
 }

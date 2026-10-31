@@ -622,4 +622,94 @@ object GuardianEngine {
             android.os.StrictMode.setThreadPolicy(oldPolicy)
         }
     }
+
+    private val activeBlockedApps = mutableSetOf<String>()
+
+    fun getBlockedApps(): Set<String> = synchronized(lock) {
+        activeBlockedApps.toSet()
+    }
+
+    fun notifyConfigChanged(ctx: Context) {
+        evaluateLimits(ctx)
+    }
+
+    fun evaluateLimits(ctx: Context) {
+        synchronized(lock) {
+            val config = ConfigManager.loadConfig(ctx)
+            val now = java.util.Calendar.getInstance()
+            val dayOfWeek = (now.get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7 // 0=Dimanche, 1=Lundi...
+            val currentMinutes = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE)
+
+            val newlyBlocked = mutableSetOf<String>()
+
+            // 1. Period Blocks (Couvre-feux)
+            for (period in config.periodBlocks) {
+                if (dayOfWeek in period.allowedDays) {
+                    val inWindow = if (period.blockedStartMinutes <= period.blockedEndMinutes) {
+                        currentMinutes in period.blockedStartMinutes until period.blockedEndMinutes
+                    } else {
+                        currentMinutes >= period.blockedStartMinutes || currentMinutes < period.blockedEndMinutes
+                    }
+                    if (inWindow) {
+                        newlyBlocked.addAll(period.packages)
+                    }
+                }
+            }
+
+            // 2. Daily Quota Limits
+            for (limit in config.limits) {
+                val pkg = limit.packageName
+                if (pkg in newlyBlocked) continue
+
+                // Check allowed hours
+                if (!limit.allDay) {
+                    val inAllowed = if (limit.allowedHoursStart <= limit.allowedHoursEnd) {
+                        currentMinutes in limit.allowedHoursStart until limit.allowedHoursEnd
+                    } else {
+                        currentMinutes >= limit.allowedHoursStart || currentMinutes < limit.allowedHoursEnd
+                    }
+                    if (!inAllowed) {
+                        newlyBlocked.add(pkg)
+                        continue
+                    }
+                }
+
+                // Check daily usage quota
+                val maxSec = if (limit.maxSecondsPerDay > 0) limit.maxSecondsPerDay else limit.maxMinutesPerDay * 60
+                if (maxSec > 0) {
+                    val dayStart = java.util.Calendar.getInstance().apply {
+                        set(java.util.Calendar.HOUR_OF_DAY, 0)
+                        set(java.util.Calendar.MINUTE, 0)
+                        set(java.util.Calendar.SECOND, 0)
+                        set(java.util.Calendar.MILLISECOND, 0)
+                    }.timeInMillis
+                    val usedSec = UsageQuery.foregroundSeconds(ctx, pkg, dayStart, System.currentTimeMillis())
+                    if (usedSec >= maxSec) {
+                        newlyBlocked.add(pkg)
+                    }
+                }
+            }
+
+            // Apply newly blocked / unblocked transitions
+            val toBlock = newlyBlocked - activeBlockedApps
+            val toUnblock = activeBlockedApps - newlyBlocked
+
+            for (pkg in toBlock) {
+                activeBlockedApps.add(pkg)
+                setPackageSuspendedInternal(ctx, pkg, true)
+                val mute = BlockedNotificationManager.getMuteWhenBlockedPreference(ctx, pkg) ?: false
+                if (mute) {
+                    BlockedNotificationManager.applyNotificationMute(ctx, pkg, true)
+                }
+                Log.w(TAG, "Quota reached / Curfew active -> Blocked & Suspended: $pkg")
+            }
+
+            for (pkg in toUnblock) {
+                activeBlockedApps.remove(pkg)
+                setPackageSuspendedInternal(ctx, pkg, false)
+                BlockedNotificationManager.applyNotificationMute(ctx, pkg, false)
+                Log.i(TAG, "Quota reset / Curfew lifted -> Unblocked & Unsuspended: $pkg")
+            }
+        }
+    }
 }
