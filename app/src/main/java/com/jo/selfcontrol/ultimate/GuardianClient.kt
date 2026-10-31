@@ -407,7 +407,7 @@ object GuardianClient {
     fun getBlockedApps(): List<String> {
         val s = service ?: return emptyList()
         return try {
-            s.blockedApps
+            s.blockedApps?.filterNotNull() ?: emptyList()
         } catch (e: Exception) {
             Log.e(TAG, "IPC error getBlockedApps", e)
             emptyList()

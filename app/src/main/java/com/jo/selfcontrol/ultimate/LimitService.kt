@@ -390,7 +390,7 @@ class LimitService : Service() {
         checkAndUnblockApps()
 
         if (GuardianClient.isAvailable) {
-            val gBlocked = GuardianClient.getBlockedApps().toSet()
+            val gBlocked = GuardianClient.getBlockedApps().filterNotNull().filter { it.isNotBlank() }.toSet()
             for (bp in gBlocked) {
                 if (bp !in suspendedApps) {
                     suspendedApps.add(bp)

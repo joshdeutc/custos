@@ -30,7 +30,6 @@ interface IGuardianService {
     String getConfigJson();
     boolean requestConfigChange(String candidateJson);
     String getDelayStateJson();
-    boolean saveDelayStateJson(String json);
     boolean cancelPendingConfigChange();
 
     // --- Screen Rules (Reels, Actus, Shorts) ---
@@ -48,4 +47,7 @@ interface IGuardianService {
     // --- Notification Preferences ---
     boolean setNotificationMutePreference(String packageName, boolean mute);
     boolean getNotificationMutePreference(String packageName);
+
+    // --- Delay State Persistence (appended at end for ABI stability) ---
+    boolean saveDelayStateJson(String json);
 }
