@@ -197,6 +197,14 @@ class GuardianService : Service() {
             return obj.toString()
         }
 
+        override fun getWhitelistStateJson(): String {
+            return GuardianEngine.getWhitelistStateJson(applicationContext)
+        }
+
+        override fun saveWhitelistStateJson(json: String): Boolean {
+            return GuardianEngine.importWhitelistState(applicationContext, json)
+        }
+
         override fun setNotificationMutePreference(packageName: String, mute: Boolean): Boolean {
             BlockedNotificationManager.setMuteWhenBlockedPreference(applicationContext, packageName, mute)
             if (packageName in GuardianEngine.getBlockedApps()) {

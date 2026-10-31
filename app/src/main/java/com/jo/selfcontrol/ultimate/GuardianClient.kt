@@ -19,6 +19,7 @@ object GuardianClient {
     @Volatile
     private var isBound = false
     private var appContext: Context? = null
+    var onConnectedCallback: (() -> Unit)? = null
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
@@ -26,6 +27,7 @@ object GuardianClient {
             isBound = true
             Log.i(TAG, "Connected to GuardianService IPC (version=${service?.version})")
             appContext?.let { syncInitialConfigIfNeeded(it) }
+            onConnectedCallback?.invoke()
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -67,6 +69,49 @@ object GuardianClient {
                     }
                 }
             }
+
+            // Sync whitelist state and delay
+            val localWhitelistFile = java.io.File(ctx.filesDir, "whitelist_state.json")
+            if (localWhitelistFile.exists()) {
+                val localWhitelistText = localWhitelistFile.readText()
+                val json = org.json.JSONObject(localWhitelistText)
+                val hours = json.optInt("quarantine_delay_hours", 72)
+                if (hours > 0) {
+                    service?.requestChangeQuarantineDelay(hours)
+                }
+            } else {
+                service?.requestChangeQuarantineDelay(72)
+            }
+
+            val remoteWhitelist = service?.whitelistStateJson
+            val remoteAllowedCount = if (!remoteWhitelist.isNullOrBlank() && remoteWhitelist != "{}") {
+                try {
+                    val arr = org.json.JSONObject(remoteWhitelist).optJSONArray("allowed_packages")
+                    arr?.length() ?: 0
+                } catch (e: Exception) { 0 }
+            } else 0
+            val isRemoteWhitelistEmpty = remoteAllowedCount <= 21
+
+            if (isRemoteWhitelistEmpty) {
+                val initialPkgs = WhitelistManager.getInitialAllowedPackages(ctx)
+                val initialJson = org.json.JSONObject().apply {
+                    put("enabled", true)
+                    put("quarantine_delay_hours", 72)
+                    put("allowed_packages", org.json.JSONArray(initialPkgs.toList()))
+                }
+                service?.saveWhitelistStateJson(initialJson.toString())
+                try {
+                    localWhitelistFile.writeText(initialJson.toString(2))
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed writing local whitelist", e)
+                }
+            } else {
+                try {
+                    localWhitelistFile.writeText(remoteWhitelist!!)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed caching remote whitelist to local file", e)
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error during syncInitialConfigIfNeeded", e)
         }
@@ -102,12 +147,12 @@ object GuardianClient {
     }
 
     fun getQuarantineDelaySeconds(): Long {
-        val s = service ?: return 24 * 3600L
+        val s = service ?: return 72 * 3600L
         return try {
             s.quarantineDelaySeconds
         } catch (e: Exception) {
             Log.e(TAG, "IPC error getQuarantineDelaySeconds", e)
-            24 * 3600L
+            72 * 3600L
         }
     }
 
@@ -355,6 +400,26 @@ object GuardianClient {
         } catch (e: Exception) {
             Log.e(TAG, "IPC error getUsageStatsJson", e)
             null
+        }
+    }
+
+    fun getWhitelistStateJson(): String? {
+        val s = service ?: return null
+        return try {
+            s.whitelistStateJson
+        } catch (e: Exception) {
+            Log.e(TAG, "IPC error getWhitelistStateJson", e)
+            null
+        }
+    }
+
+    fun saveWhitelistStateJson(json: String): Boolean {
+        val s = service ?: return false
+        return try {
+            s.saveWhitelistStateJson(json)
+        } catch (e: Exception) {
+            Log.e(TAG, "IPC error saveWhitelistStateJson", e)
+            false
         }
     }
 

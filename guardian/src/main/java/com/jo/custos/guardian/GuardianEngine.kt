@@ -20,9 +20,82 @@ object GuardianEngine {
 
     private const val TAG = "Custos.Guardian.Engine"
     private const val STATE_FILE = "guardian_state.json"
-    private const val DEFAULT_DELAY_HOURS = 24
+    private const val DEFAULT_DELAY_HOURS = 72
     const val DEFAULT_PRIVATE_DNS = "b91912.dns.nextdns.io"
     const val ACTION_CHECK_EXPIRATION = "com.jo.custos.guardian.ACTION_CHECK_EXPIRATION"
+
+    val INITIAL_ALLOWED_PACKAGES = setOf(
+        "com.jo.lycee",
+        "com.waze",
+        "fr.gouv.franceidentite",
+        "com.shazam.android",
+        "com.app.tgtg",
+        "com.azure.authenticator",
+        "com.memrise.android.memrisecompanion",
+        "ch.protonmail.android",
+        "com.google.android.apps.docs.editors.docs",
+        "com.enki.Enki750g",
+        "com.tribab.tricount.android",
+        "com.jo.notubeplayer",
+        "air.com.unit9.bkFrApp",
+        "com.jo.selfcontrol.ultimate",
+        "com.guardian",
+        "com.vsct.vsc.mobile.horaireetresa.android",
+        "cc.dreamspark.intervaltimer",
+        "com.lexilize.fc",
+        "com.jo.discordpersonal",
+        "com.microsoft.skydrive",
+        "com.sportigoaccess",
+        "com.ttxapps.autosync",
+        "fr.epiconcept.pdfnoteskiosk",
+        "com.jo.community",
+        "com.google.android.apps.translate",
+        "fr.iledefrance.labaz",
+        "com.passbolt.mobile.android",
+        "com.eurotalk.uTalk",
+        "fr.bouyguestelecom.ecm.android",
+        "com.voxsquare.voxpay.android",
+        "coop.up.beneficiaire",
+        "co.feeld",
+        "tv.arte.plus7",
+        "com.whatsapp",
+        "fr.doctolib.www",
+        "com.bambuna.podcastaddict",
+        "com.boursorama.android.clients",
+        "com.chess",
+        "com.deepl.mobiletranslator",
+        "com.google.android.apps.authenticator2",
+        "com.google.android.keep",
+        "com.intsig.camscanner",
+        "com.letterboxd.letterboxd",
+        "mobi.societegenerale.mobile.lappli",
+        "gymworkout.gym.gymlog.gymtrainer",
+        "in.krosbits.musicolet",
+        "livio.pack.lang.fr_FR",
+        "oracle.idm.mobile.authenticator"
+    )
+
+    fun getInitialAllowedPackages(ctx: Context): Set<String> {
+        val result = INITIAL_ALLOWED_PACKAGES.toMutableSet()
+        try {
+            val pm = ctx.packageManager
+            val installed = pm.getInstalledPackages(PackageManager.MATCH_UNINSTALLED_PACKAGES)
+            for (info in installed) {
+                if (info.packageName == ctx.packageName) continue
+                if (isGuarded(ctx, info.packageName)) continue
+                val ai = info.applicationInfo
+                val isSys = if (ai != null) {
+                    ((ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0) || ((ai.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0)
+                } else false
+                if (!isSys) {
+                    result.add(info.packageName)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting initial installed packages: ${e.message}")
+        }
+        return result
+    }
 
     private val HARD_GUARDS = setOf(
         "android",
@@ -136,7 +209,7 @@ object GuardianEngine {
             val initial = GuardianState(
                 enabled = true,
                 quarantineDelayHours = DEFAULT_DELAY_HOURS,
-                allowedPackages = HARD_GUARDS
+                allowedPackages = HARD_GUARDS + getInitialAllowedPackages(ctx)
             )
             saveStateInternal(ctx, initial)
             return initial
@@ -144,13 +217,17 @@ object GuardianEngine {
         return try {
             val json = JSONObject(file.readText())
             val enabled = json.optBoolean("enabled", true)
-            val delayHours = json.optInt("quarantine_delay_hours", DEFAULT_DELAY_HOURS)
+            val delayHours = maxOf(json.optInt("quarantine_delay_hours", DEFAULT_DELAY_HOURS), DEFAULT_DELAY_HOURS)
             val allowedArr = json.optJSONArray("allowed_packages") ?: JSONArray()
             val allowed = mutableSetOf<String>()
             for (i in 0 until allowedArr.length()) {
                 allowed.add(allowedArr.getString(i))
             }
             allowed.addAll(HARD_GUARDS)
+            val nonGuards = allowed.filterNot { it in HARD_GUARDS }
+            if (nonGuards.isEmpty()) {
+                allowed.addAll(getInitialAllowedPackages(ctx))
+            }
 
             val reqsArr = json.optJSONArray("pending_requests") ?: JSONArray()
             val reqs = mutableListOf<PendingRequest>()
@@ -174,7 +251,7 @@ object GuardianEngine {
                 if (json.isNull("private_dns_host")) null else json.getString("private_dns_host")
             } else DEFAULT_PRIVATE_DNS
 
-            GuardianState(
+            val state = GuardianState(
                 enabled = enabled,
                 quarantineDelayHours = delayHours,
                 allowedPackages = allowed,
@@ -184,6 +261,10 @@ object GuardianEngine {
                 pendingDisableExecuteAt = pendingDisableExec,
                 privateDnsHost = dnsHost
             )
+            if (nonGuards.isEmpty() || delayHours != json.optInt("quarantine_delay_hours", 0)) {
+                saveStateInternal(ctx, state)
+            }
+            state
         } catch (e: Exception) {
             Log.e(TAG, "Error loading state, restoring defaults", e)
             GuardianState(enabled = true, quarantineDelayHours = DEFAULT_DELAY_HOURS, allowedPackages = HARD_GUARDS, privateDnsHost = DEFAULT_PRIVATE_DNS)
@@ -214,6 +295,66 @@ object GuardianEngine {
             File(ctx.filesDir, STATE_FILE).writeText(json.toString(2))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to persist state", e)
+        }
+    }
+
+    fun getWhitelistStateJson(ctx: Context): String {
+        val file = File(ctx.filesDir, STATE_FILE)
+        return if (file.exists()) file.readText() else "{}"
+    }
+
+    fun importWhitelistState(ctx: Context, jsonStr: String): Boolean {
+        return synchronized(lock) {
+            try {
+                val json = JSONObject(jsonStr)
+                val enabled = json.optBoolean("enabled", true)
+                val delayHours = maxOf(json.optInt("quarantine_delay_hours", DEFAULT_DELAY_HOURS), DEFAULT_DELAY_HOURS)
+                val allowedArr = json.optJSONArray("allowed_packages") ?: JSONArray()
+                val allowed = mutableSetOf<String>()
+                for (i in 0 until allowedArr.length()) {
+                    allowed.add(allowedArr.getString(i))
+                }
+                allowed.addAll(HARD_GUARDS)
+                if (allowed.none { it !in HARD_GUARDS }) {
+                    allowed.addAll(getInitialAllowedPackages(ctx))
+                }
+
+                val reqsArr = json.optJSONArray("pending_requests") ?: JSONArray()
+                val reqs = mutableListOf<PendingRequest>()
+                for (i in 0 until reqsArr.length()) {
+                    val obj = reqsArr.getJSONObject(i)
+                    reqs.add(
+                        PendingRequest(
+                            packageName = obj.getString("package"),
+                            requestedAt = obj.getLong("requested_at"),
+                            availableAt = obj.getLong("available_at")
+                        )
+                    )
+                }
+
+                val pendingDelayHours = if (json.has("pending_delay_hours") && !json.isNull("pending_delay_hours")) {
+                    json.getInt("pending_delay_hours")
+                } else null
+                val pendingDelayExec = json.optLong("pending_delay_execute_at", 0L)
+                val pendingDisableExec = json.optLong("pending_disable_execute_at", 0L)
+
+                val newState = GuardianState(
+                    enabled = enabled,
+                    quarantineDelayHours = delayHours,
+                    allowedPackages = allowed,
+                    pendingRequests = reqs,
+                    pendingDelayHours = pendingDelayHours,
+                    pendingDelayExecuteAt = pendingDelayExec,
+                    pendingDisableExecuteAt = pendingDisableExec
+                )
+                saveStateInternal(ctx, newState)
+                enforceLockdown(ctx)
+                Log.i(TAG, "Imported whitelist state: ${allowed.size} apps, delay=${delayHours}h")
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed importing whitelist state: ${e.message}", e)
+                false
+            }
         }
     }
 
@@ -478,7 +619,7 @@ object GuardianEngine {
 
         val installedSet = installed.map { it.packageName }.toSet()
         val ghostAllowed = state.allowedPackages.filter {
-            it !in installedSet && !isGuarded(ctx, it) && it != ctx.packageName && it !in HARD_GUARDS
+            it !in installedSet && !isGuarded(ctx, it) && it != ctx.packageName && it !in HARD_GUARDS && it !in INITIAL_ALLOWED_PACKAGES
         }.toSet()
         if (ghostAllowed.isNotEmpty()) {
             val prunedAllowed = state.allowedPackages - ghostAllowed
@@ -489,7 +630,7 @@ object GuardianEngine {
 
         for (pkgInfo in installed) {
             val pkg = pkgInfo.packageName
-            if (isGuarded(ctx, pkg) || pkg in state.allowedPackages) {
+            if (isGuarded(ctx, pkg) || pkg in state.allowedPackages || pkg in INITIAL_ALLOWED_PACKAGES) {
                 // Allowed app -> ensure unhidden and unsuspended
                 setPackageSuspendedInternal(ctx, pkg, false)
                 setPackageHiddenInternal(ctx, pkg, false)

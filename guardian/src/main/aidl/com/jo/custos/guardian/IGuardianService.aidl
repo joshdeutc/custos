@@ -40,6 +40,10 @@ interface IGuardianService {
     List<String> getBlockedApps();
     String getUsageStatsJson();
 
+    // --- Whitelist State ---
+    String getWhitelistStateJson();
+    boolean saveWhitelistStateJson(String json);
+
     // --- Notification Preferences ---
     boolean setNotificationMutePreference(String packageName, boolean mute);
     boolean getNotificationMutePreference(String packageName);

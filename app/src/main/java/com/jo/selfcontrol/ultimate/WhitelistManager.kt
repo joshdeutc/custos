@@ -33,7 +33,7 @@ object WhitelistManager {
     private const val TAG = "SelfControl.Whitelist"
     private const val STATE_FILE = "whitelist_state.json"
     private const val HIDDEN_STATE_FILE = "whitelist_hidden.json"
-    const val DEFAULT_DELAY_HOURS = 24
+    const val DEFAULT_DELAY_HOURS = 72
 
     /**
      * Set to true if unauthorized apps should also be uninstalled silently.
@@ -228,13 +228,74 @@ object WhitelistManager {
     @Volatile private var cachedState: WhitelistState? = null
     @Volatile private var lastStateModified: Long = 0L
 
+    fun parseWhitelistState(ctx: Context, json: JSONObject): WhitelistState {
+        val enabled = json.optBoolean("enabled", false)
+        val allowedArr = json.optJSONArray("allowed_packages") ?: JSONArray()
+        val rawAllowed = (0 until allowedArr.length()).map { allowedArr.getString(it) }.toSet()
+        // Clean up any guarded/system packages if present
+        val hasGuarded = rawAllowed.any { isGuarded(ctx, it) }
+        val allowed = if (hasGuarded) rawAllowed.filterNot { isGuarded(ctx, it) }.toSet() else rawAllowed
+
+        val pendingArr = json.optJSONArray("pending_requests") ?: JSONArray()
+        val pending = (0 until pendingArr.length()).mapNotNull { i ->
+            val obj = pendingArr.optJSONObject(i) ?: return@mapNotNull null
+            val pkg = obj.optString("package")
+            val reqAt = obj.optLong("requested_at")
+            val availAt = obj.optLong("available_at")
+            if (pkg.isNotBlank()) PendingRequest(pkg, reqAt, availAt) else null
+        }
+
+        val quarantineHours = json.optInt("quarantine_delay_hours", DEFAULT_DELAY_HOURS)
+        val useGlobal = json.optBoolean("use_global_delay", false)
+        val pendingDelayHours = if (json.has("pending_delay_hours") && !json.isNull("pending_delay_hours")) json.getInt("pending_delay_hours") else null
+        val pendingDelayUseGlobal = json.optBoolean("pending_delay_use_global", false)
+        val pendingDelayExecuteAt = json.optLong("pending_delay_execute_at", 0L)
+        val pendingDisableExecuteAt = json.optLong("pending_disable_execute_at", 0L)
+
+        return WhitelistState(
+            enabled = enabled,
+            allowedPackages = allowed,
+            pendingRequests = pending,
+            quarantineDelayHours = quarantineHours,
+            useGlobalDelay = useGlobal,
+            pendingDelayHours = pendingDelayHours,
+            pendingDelayUseGlobal = pendingDelayUseGlobal,
+            pendingDelayExecuteAt = pendingDelayExecuteAt,
+            pendingDisableExecuteAt = pendingDisableExecuteAt
+        )
+    }
+
     @Synchronized
     fun loadState(ctx: Context): WhitelistState {
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            val remoteJson = GuardianClient.getWhitelistStateJson()
+            if (!remoteJson.isNullOrBlank() && remoteJson != "{}") {
+                try {
+                    val state = parseWhitelistState(ctx, JSONObject(remoteJson))
+                    cachedState = state
+                    return state
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error parsing remote whitelist state: ${e.message}")
+                }
+            }
+        }
         return checkAndPromotePendingRequests(ctx)
     }
 
     @Synchronized
     fun loadStateInternal(ctx: Context): WhitelistState {
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            val remoteJson = GuardianClient.getWhitelistStateJson()
+            if (!remoteJson.isNullOrBlank() && remoteJson != "{}") {
+                try {
+                    val state = parseWhitelistState(ctx, JSONObject(remoteJson))
+                    cachedState = state
+                    return state
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error parsing remote whitelist state: ${e.message}")
+                }
+            }
+        }
         val file = File(ctx.filesDir, STATE_FILE)
         if (!file.exists()) {
             val initialAllowed = getInitialAllowedPackages(ctx)
@@ -249,47 +310,9 @@ object WhitelistManager {
         }
         return try {
             val json = JSONObject(file.readText())
-            val enabled = json.optBoolean("enabled", false)
-            val allowedArr = json.optJSONArray("allowed_packages") ?: JSONArray()
-            val rawAllowed = (0 until allowedArr.length()).map { allowedArr.getString(it) }.toSet()
-            // Clean up any guarded/system packages if present
-            val hasGuarded = rawAllowed.any { isGuarded(ctx, it) }
-            val allowed = if (hasGuarded) rawAllowed.filterNot { isGuarded(ctx, it) }.toSet() else rawAllowed
-
-            val pendingArr = json.optJSONArray("pending_requests") ?: JSONArray()
-            val pending = (0 until pendingArr.length()).mapNotNull { i ->
-                val obj = pendingArr.optJSONObject(i) ?: return@mapNotNull null
-                val pkg = obj.optString("package")
-                val reqAt = obj.optLong("requested_at")
-                val availAt = obj.optLong("available_at")
-                if (pkg.isNotBlank()) PendingRequest(pkg, reqAt, availAt) else null
-            }
-
-            val quarantineHours = json.optInt("quarantine_delay_hours", DEFAULT_DELAY_HOURS)
-            val useGlobal = json.optBoolean("use_global_delay", false)
-            val pendingDelayHours = if (json.has("pending_delay_hours") && !json.isNull("pending_delay_hours")) json.getInt("pending_delay_hours") else null
-            val pendingDelayUseGlobal = json.optBoolean("pending_delay_use_global", false)
-            val pendingDelayExecuteAt = json.optLong("pending_delay_execute_at", 0L)
-            val pendingDisableExecuteAt = json.optLong("pending_disable_execute_at", 0L)
-
-            val state = WhitelistState(
-                enabled = enabled,
-                allowedPackages = allowed,
-                pendingRequests = pending,
-                quarantineDelayHours = quarantineHours,
-                useGlobalDelay = useGlobal,
-                pendingDelayHours = pendingDelayHours,
-                pendingDelayUseGlobal = pendingDelayUseGlobal,
-                pendingDelayExecuteAt = pendingDelayExecuteAt,
-                pendingDisableExecuteAt = pendingDisableExecuteAt
-            )
+            val state = parseWhitelistState(ctx, json)
             cachedState = state
             lastStateModified = lastMod
-
-            if (hasGuarded) {
-                Log.i(TAG, "Pruned ${rawAllowed.size - allowed.size} system packages from whitelist state (remaining: ${allowed.size})")
-                saveState(ctx, state)
-            }
             state
         } catch (e: Exception) {
             Log.e(TAG, "Error reading $STATE_FILE: ${e.message}", e)
@@ -504,9 +527,14 @@ object WhitelistManager {
                 put("pending_delay_execute_at", state.pendingDelayExecuteAt)
                 put("pending_disable_execute_at", state.pendingDisableExecuteAt)
             }
-            file.writeText(json.toString(2))
+            val jsonStr = json.toString(2)
+            file.writeText(jsonStr)
             cachedState = state
             lastStateModified = file.lastModified()
+
+            if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+                GuardianClient.saveWhitelistStateJson(jsonStr)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error saving $STATE_FILE: ${e.message}", e)
         }

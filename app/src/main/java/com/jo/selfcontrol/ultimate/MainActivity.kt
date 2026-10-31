@@ -112,6 +112,17 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         Log.i(TAG, "MainActivity started")
+        GuardianClient.onConnectedCallback = {
+            runOnUiThread {
+                try {
+                    refreshInstallBlocksUI(force = true)
+                    refreshDelayUI()
+                    refreshDashboard()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error refreshing UI on Guardian connected: ${e.message}")
+                }
+            }
+        }
         GuardianClient.init(this)
         LimitService.start(this)
         setContentView(buildUI())
@@ -175,6 +186,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        GuardianClient.onConnectedCallback = null
         handler.removeCallbacks(refreshRunnable)
     }
 
