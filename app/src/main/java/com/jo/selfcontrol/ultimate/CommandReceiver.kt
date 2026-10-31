@@ -75,6 +75,7 @@ class CommandReceiver : BroadcastReceiver() {
             "com.jo.selfcontrol.ultimate.SET_PRIVATE_DNS" -> handleSetPrivateDns(context, intent)
             "com.jo.selfcontrol.ultimate.GET_PRIVATE_DNS" -> handleGetPrivateDns(context)
             "com.jo.selfcontrol.ultimate.TRANSFER_OWNERSHIP_TO_GUARDIAN" -> handleTransferOwnershipToGuardian(context)
+            "com.jo.selfcontrol.ultimate.UNBLOCK_UNINSTALL_GUARDIAN" -> handleUnblockUninstallGuardian(context)
         }
     }
 
@@ -547,6 +548,17 @@ class CommandReceiver : BroadcastReceiver() {
             }
         } catch (e: Exception) {
             Log.e("SelfControl.Cmd", "TRANSFER_OWNERSHIP failed with exception: ${e.message}", e)
+        }
+    }
+
+    private fun handleUnblockUninstallGuardian(context: Context) {
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? android.app.admin.DevicePolicyManager ?: return
+        val currentAdmin = ComponentName(context, AdminReceiver::class.java)
+        try {
+            dpm.setUninstallBlocked(currentAdmin, "com.jo.custos.guardian", false)
+            Log.w("SelfControl.Cmd", "setUninstallBlocked(false) on com.jo.custos.guardian succeeded!")
+        } catch (e: Exception) {
+            Log.e("SelfControl.Cmd", "Failed unblocking uninstall", e)
         }
     }
 }
