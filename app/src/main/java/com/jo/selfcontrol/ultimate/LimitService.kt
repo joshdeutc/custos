@@ -308,7 +308,7 @@ class LimitService : Service() {
     private fun loadTodayUsageFromSystem() {
         val seconds = UsageQuery.foregroundSecondsByPackage(this, dayStartMillis(), System.currentTimeMillis())
         for ((pkg, limit) in limitsByPackage) {
-            val usedSeconds = seconds[pkg] ?: continue
+            val usedSeconds = seconds[pkg] ?: 0
             usageToday[pkg] = usedSeconds
             if (usedSeconds >= limit.maxSecondsPerDay) {
                 blockApp(pkg, "quota")

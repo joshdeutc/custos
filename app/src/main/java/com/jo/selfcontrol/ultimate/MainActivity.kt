@@ -736,7 +736,11 @@ class MainActivity : Activity() {
                             text = "Cancel this change"
                             setTextColor(Color.WHITE)
                             background = roundedBackground(Color.parseColor("#D32F2F"))
-                            setOnClickListener { DelayManager.cancelConfigUpdate(this@MainActivity, update.id) }
+                            setOnClickListener {
+                                DelayManager.cancelConfigUpdate(this@MainActivity, update.id)
+                                refreshDelayUI()
+                                refreshDashboard()
+                            }
                         })
                     })
                 }
@@ -745,7 +749,11 @@ class MainActivity : Activity() {
                     text = "Cancel all pending changes"
                     setTextColor(Color.WHITE)
                     background = roundedBackground(Color.parseColor("#5C1E1E"))
-                    setOnClickListener { DelayManager.cancelConfigUpdates(this@MainActivity) }
+                    setOnClickListener {
+                        DelayManager.cancelConfigUpdates(this@MainActivity)
+                        refreshDelayUI()
+                        refreshDashboard()
+                    }
                 })
             }
         }
@@ -765,7 +773,11 @@ class MainActivity : Activity() {
                     text = "Cancel delay change"
                     setTextColor(Color.WHITE)
                     background = roundedBackground(Color.parseColor("#D32F2F"))
-                    setOnClickListener { DelayManager.cancelPendingDelayChange(this@MainActivity) }
+                    setOnClickListener {
+                        DelayManager.cancelPendingDelayChange(this@MainActivity)
+                        refreshDelayUI()
+                        refreshDashboard()
+                    }
                 })
             }
         }
@@ -1147,15 +1159,21 @@ class MainActivity : Activity() {
                     newSeconds > currentSeconds -> {
                         // Increasing delay → immediate (stricter)
                         DelayManager.setGlobalDelay(this, newSeconds)
+                        refreshDelayUI()
+                        refreshDashboard()
                         Toast.makeText(this, "Delay increased.", Toast.LENGTH_SHORT).show()
                     }
                     else -> {
                         // Decreasing delay → must wait (loosening control)
                         if (currentSeconds == 0 || DelayManager.isSettingsUnlocked(this)) {
                             DelayManager.setGlobalDelay(this, newSeconds)
+                            refreshDelayUI()
+                            refreshDashboard()
                             Toast.makeText(this, "Delay updated.", Toast.LENGTH_SHORT).show()
                         } else {
                             DelayManager.requestDelayChange(this, newSeconds)
+                            refreshDelayUI()
+                            refreshDashboard()
                             Toast.makeText(
                                 this,
                                 "Delay decrease will apply after the current waiting period.",
@@ -1480,38 +1498,15 @@ class MainActivity : Activity() {
                 val unlockApplies = !requirement.fromExplicitTimer && DelayManager.isSettingsUnlocked(this)
                 val mustDefer = requirement.mustDefer && !unlockApplies
 
-                if (GuardianClient.isAvailable) {
-                    val cur = ConfigManager.loadConfig(this)
-                    val updatedLimits = cur.limits.filter { it.packageName != pkg }.toMutableList()
-                    updatedLimits.add(newLimit)
-                    val newConfig = cur.copy(limits = updatedLimits)
-                    val candidateJson = ConfigManager.configToJsonString(newConfig)
-                    val appliedImmediately = GuardianClient.requestConfigChange(candidateJson)
-                    if (appliedImmediately) {
-                        ConfigManager.saveConfig(this, newConfig)
-                        DelayManager.cancelAppLimitUpdate(this, pkg)
-                        refreshDashboard()
-                        Toast.makeText(this, "Limit updated for ${getAppName(pkg)}.", Toast.LENGTH_SHORT).show()
-                    } else {
-                        refreshDashboard()
-                        refreshDelayUI()
-                        val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
-                        Toast.makeText(
-                            this,
-                            "Change queued for ${formatLongDuration(requirement.seconds)} ($scope — ${requirement.reason}).",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-                    return@setPositiveButton
-                }
-
                 if (!mustDefer) {
                     val cur = ConfigManager.loadConfig(this)
                     val updatedLimits = cur.limits.filter { it.packageName != pkg }.toMutableList()
                     updatedLimits.add(newLimit)
-                    ConfigManager.saveConfig(this, cur.copy(limits = updatedLimits))
+                    val newConfig = cur.copy(limits = updatedLimits)
+                    ConfigManager.saveConfig(this, newConfig)
                     DelayManager.cancelAppLimitUpdate(this, pkg)
                     refreshDashboard()
+                    refreshDelayUI()
                     Toast.makeText(this, "Limit updated for ${getAppName(pkg)}.", Toast.LENGTH_SHORT).show()
                 } else {
                     DelayManager.requestAppLimitUpdate(
@@ -1521,6 +1516,8 @@ class MainActivity : Activity() {
                         describeSingleAppChange(activeLimit, newLimit),
                         overrideDelaySeconds = requirement.seconds
                     )
+                    refreshDashboard()
+                    refreshDelayUI()
                     val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
                     Toast.makeText(
                         this,
@@ -1551,36 +1548,14 @@ class MainActivity : Activity() {
                     val unlockApplies = !requirement.fromExplicitTimer && DelayManager.isSettingsUnlocked(this)
                     val mustDefer = requirement.mustDefer && !unlockApplies
 
-                    if (GuardianClient.isAvailable) {
-                        val cur = ConfigManager.loadConfig(this)
-                        val updatedLimits = cur.limits.filter { it.packageName != pkg }
-                        val newConfig = cur.copy(limits = updatedLimits)
-                        val candidateJson = ConfigManager.configToJsonString(newConfig)
-                        val appliedImmediately = GuardianClient.requestConfigChange(candidateJson)
-                        if (appliedImmediately) {
-                            ConfigManager.saveConfig(this, newConfig)
-                            DelayManager.cancelAppLimitUpdate(this, pkg)
-                            refreshDashboard()
-                            Toast.makeText(this, "Limit deleted for ${getAppName(pkg)}.", Toast.LENGTH_SHORT).show()
-                        } else {
-                            refreshDashboard()
-                            refreshDelayUI()
-                            val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
-                            Toast.makeText(
-                                this,
-                                "Deletion queued for ${formatLongDuration(requirement.seconds)} ($scope — ${requirement.reason}).",
-                                Toast.LENGTH_LONG
-                            ).show()
-                        }
-                        return@setNeutralButton
-                    }
-
                     if (!mustDefer) {
                         val cur = ConfigManager.loadConfig(this)
                         val updatedLimits = cur.limits.filter { it.packageName != pkg }
-                        ConfigManager.saveConfig(this, cur.copy(limits = updatedLimits))
+                        val newConfig = cur.copy(limits = updatedLimits)
+                        ConfigManager.saveConfig(this, newConfig)
                         DelayManager.cancelAppLimitUpdate(this, pkg)
                         refreshDashboard()
+                        refreshDelayUI()
                         Toast.makeText(this, "Limit deleted for ${getAppName(pkg)}.", Toast.LENGTH_SHORT).show()
                     } else {
                         DelayManager.requestAppLimitDelete(
@@ -1589,6 +1564,8 @@ class MainActivity : Activity() {
                             "Suppr. limite : ${getAppName(pkg)}",
                             overrideDelaySeconds = requirement.seconds
                         )
+                        refreshDashboard()
+                        refreshDelayUI()
                         val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
                         Toast.makeText(
                             this,
@@ -1648,28 +1625,10 @@ class MainActivity : Activity() {
         val unlockApplies = !requirement.fromExplicitTimer && DelayManager.isSettingsUnlocked(this)
         val mustDefer = requirement.mustDefer && !unlockApplies
 
-        if (GuardianClient.isAvailable) {
-            val candidateJson = ConfigManager.configToJsonString(newConfig)
-            val appliedImmediately = GuardianClient.requestConfigChange(candidateJson)
-            if (appliedImmediately) {
-                ConfigManager.saveConfig(this, newConfig)
-                Toast.makeText(this, "Config updated.", Toast.LENGTH_SHORT).show()
-            } else {
-                refreshDelayUI()
-                val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
-                Toast.makeText(
-                    this,
-                    "Change queued for ${formatLongDuration(requirement.seconds)} " +
-                        "($scope — ${requirement.reason}).",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-            refreshDashboard()
-            return
-        }
-
         if (!mustDefer) {
             ConfigManager.saveConfig(this, newConfig)
+            refreshDashboard()
+            refreshDelayUI()
             Toast.makeText(this, "Config updated.", Toast.LENGTH_SHORT).show()
         } else {
             DelayManager.requestConfigUpdate(
@@ -1678,6 +1637,8 @@ class MainActivity : Activity() {
                 describeConfigChange(old, newConfig),
                 overrideDelaySeconds = requirement.seconds
             )
+            refreshDashboard()
+            refreshDelayUI()
             val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
             Toast.makeText(
                 this,

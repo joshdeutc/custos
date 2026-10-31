@@ -79,6 +79,8 @@ object GuardianClient {
                     val localDelayText = localDelayFile.readText()
                     service?.saveDelayStateJson(localDelayText)
                 }
+            } else {
+                DelayManager.loadState(ctx)
             }
 
             // Sync whitelist state and delay

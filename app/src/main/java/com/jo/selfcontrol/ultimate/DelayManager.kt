@@ -44,44 +44,53 @@ object DelayManager {
 
     @Synchronized
     fun loadState(context: Context): DelayState {
+        val file = File(context.filesDir, FILE_NAME)
+        val localState = if (file.exists()) {
+            try {
+                parseDelayState(JSONObject(file.readText()))
+            } catch (e: Exception) {
+                Log.e(TAG, "Error reading delay_config.json: ${e.message}")
+                DelayState(globalDelaySeconds = 0, unlockSettingsUnlockTime = 0, requestedConfigUpdates = emptyList())
+            }
+        } else {
+            DelayState(globalDelaySeconds = 0, unlockSettingsUnlockTime = 0, requestedConfigUpdates = emptyList())
+        }
+
         if (GuardianClient.isAvailable) {
             val remoteJson = GuardianClient.getDelayStateJson()
             if (!remoteJson.isNullOrEmpty() && remoteJson != "{}") {
                 try {
-                    val result = parseDelayState(JSONObject(remoteJson))
-                    cachedState = result
-                    return result
+                    val remoteState = parseDelayState(JSONObject(remoteJson))
+                    val mergedGlobalDelay = maxOf(localState.globalDelaySeconds, remoteState.globalDelaySeconds)
+                    val mergedUnlockTime = maxOf(localState.unlockSettingsUnlockTime, remoteState.unlockSettingsUnlockTime)
+
+                    val allUpdates = localState.requestedConfigUpdates + remoteState.requestedConfigUpdates
+                    val mergedUpdates = allUpdates.groupBy { "${it.targetType}:${it.targetKey}" }.values.map { list ->
+                        list.maxByOrNull { it.executeAt }!!
+                    }
+
+                    val allSchedule = (localState.delaySchedule + remoteState.delaySchedule).distinctBy { it.id }
+                    val mergedPendingSec = localState.pendingDelaySeconds ?: remoteState.pendingDelaySeconds
+                    val mergedExecAt = maxOf(localState.pendingDelayExecuteAt, remoteState.pendingDelayExecuteAt)
+
+                    val merged = DelayState(
+                        globalDelaySeconds = mergedGlobalDelay,
+                        unlockSettingsUnlockTime = mergedUnlockTime,
+                        requestedConfigUpdates = mergedUpdates,
+                        delaySchedule = allSchedule,
+                        pendingDelaySeconds = mergedPendingSec,
+                        pendingDelayExecuteAt = mergedExecAt
+                    )
+                    cachedState = merged
+                    return merged
                 } catch (e: Exception) {
                     Log.e(TAG, "Error parsing remote delay state: ${e.message}")
                 }
             }
         }
-        val file = File(context.filesDir, FILE_NAME)
-        if (!file.exists()) {
-            val default = DelayState(
-                globalDelaySeconds = 0,
-                unlockSettingsUnlockTime = 0,
-                requestedConfigUpdates = emptyList()
-            )
-            cachedState = default
-            lastStateModified = 0L
-            return default
-        }
-        val lastMod = file.lastModified()
-        val mem = cachedState
-        if (mem != null && lastMod == lastStateModified && lastMod > 0L) {
-            return mem
-        }
-        return try {
-            val json = JSONObject(file.readText())
-            val result = parseDelayState(json)
-            cachedState = result
-            lastStateModified = lastMod
-            result
-        } catch (e: Exception) {
-            Log.e(TAG, "Error reading delay_config.json: ${e.message}")
-            DelayState(globalDelaySeconds = 0, unlockSettingsUnlockTime = 0, requestedConfigUpdates = emptyList())
-        }
+
+        cachedState = localState
+        return localState
     }
 
     fun parseDelayState(json: JSONObject): DelayState {

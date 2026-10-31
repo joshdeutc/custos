@@ -138,7 +138,11 @@ class GuardianService : Service() {
 
         override fun requestConfigChange(candidateJson: String): Boolean {
             val newConfig = ConfigManager.fromJsonString(candidateJson) ?: return false
+            DelayManager.applyPendingConfigsIfReady(applicationContext)
             val currentConfig = ConfigManager.loadConfig(applicationContext)
+            if (candidateJson == ConfigManager.configToJsonString(currentConfig)) {
+                return true
+            }
             val globalDelay = DelayManager.getCurrentEffectiveDelaySeconds(applicationContext)
             val defer = ConfigManager.requiredDefer(currentConfig, newConfig, globalDelay)
             val unlockApplies = !defer.fromExplicitTimer && DelayManager.isSettingsUnlocked(applicationContext)
