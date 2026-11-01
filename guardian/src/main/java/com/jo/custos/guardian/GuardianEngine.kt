@@ -288,6 +288,7 @@ object GuardianEngine {
                 allowed.add(allowedArr.getString(i))
             }
             allowed.addAll(HARD_GUARDS)
+            allowed.addAll(INITIAL_ALLOWED_PACKAGES)
             val nonGuards = allowed.filterNot { it in HARD_GUARDS }
             if (nonGuards.isEmpty()) {
                 allowed.addAll(getInitialAllowedPackages(ctx))
@@ -379,6 +380,7 @@ object GuardianEngine {
                     allowed.add(allowedArr.getString(i))
                 }
                 allowed.addAll(HARD_GUARDS)
+            allowed.addAll(INITIAL_ALLOWED_PACKAGES)
                 if (allowed.none { it !in HARD_GUARDS }) {
                     allowed.addAll(getInitialAllowedPackages(ctx))
                 }
@@ -701,6 +703,11 @@ object GuardianEngine {
             Log.w(TAG, "Guardian pruned ${ghostAllowed.size} ghost app(s) from whitelist: $ghostAllowed")
         }
 
+        for (pkg in INITIAL_ALLOWED_PACKAGES + getState(ctx).allowedPackages) {
+            setPackageSuspendedInternal(ctx, pkg, false)
+            setPackageHiddenInternal(ctx, pkg, false)
+        }
+
         for (pkgInfo in installed) {
             val pkg = pkgInfo.packageName
             if (isGuarded(ctx, pkg) || pkg in state.allowedPackages || pkg in INITIAL_ALLOWED_PACKAGES) {
@@ -722,6 +729,11 @@ object GuardianEngine {
         } catch (e: Exception) {
             emptyList()
         }
+        for (pkg in INITIAL_ALLOWED_PACKAGES + getState(ctx).allowedPackages) {
+            setPackageSuspendedInternal(ctx, pkg, false)
+            setPackageHiddenInternal(ctx, pkg, false)
+        }
+
         for (pkgInfo in installed) {
             setPackageSuspendedInternal(ctx, pkgInfo.packageName, false)
             setPackageHiddenInternal(ctx, pkgInfo.packageName, false)
