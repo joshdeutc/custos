@@ -88,12 +88,12 @@ object GuardianClient {
             if (localWhitelistFile.exists()) {
                 val localWhitelistText = localWhitelistFile.readText()
                 val json = org.json.JSONObject(localWhitelistText)
-                val hours = json.optInt("quarantine_delay_hours", 72)
-                if (hours > 0) {
+                val hours = json.optInt("quarantine_delay_hours", 0)
+                if (hours >= 0) {
                     service?.requestChangeQuarantineDelay(hours)
                 }
             } else {
-                service?.requestChangeQuarantineDelay(72)
+                service?.requestChangeQuarantineDelay(0)
             }
 
             val remoteWhitelist = service?.whitelistStateJson
@@ -109,7 +109,7 @@ object GuardianClient {
                 val initialPkgs = WhitelistManager.getInitialAllowedPackages(ctx)
                 val initialJson = org.json.JSONObject().apply {
                     put("enabled", true)
-                    put("quarantine_delay_hours", 72)
+                    put("quarantine_delay_hours", 0)
                     put("allowed_packages", org.json.JSONArray(initialPkgs.toList()))
                 }
                 service?.saveWhitelistStateJson(initialJson.toString())
@@ -160,12 +160,12 @@ object GuardianClient {
     }
 
     fun getQuarantineDelaySeconds(): Long {
-        val s = service ?: return 72 * 3600L
+        val s = service ?: return 0L
         return try {
             s.quarantineDelaySeconds
         } catch (e: Exception) {
             Log.e(TAG, "IPC error getQuarantineDelaySeconds", e)
-            72 * 3600L
+            0L
         }
     }
 

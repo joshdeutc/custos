@@ -607,13 +607,13 @@ object WhitelistManager {
     fun getEffectiveQuarantineDelaySeconds(ctx: Context): Long {
         if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
             val sec = GuardianClient.getQuarantineDelaySeconds()
-            if (sec > 0L) return sec
+            if (sec >= 0L) return sec
         }
         val state = loadState(ctx)
         return if (state.useGlobalDelay) {
-            DelayManager.getCurrentEffectiveDelaySeconds(ctx).toLong().coerceAtLeast(60L)
+            DelayManager.getCurrentEffectiveDelaySeconds(ctx).toLong()
         } else {
-            (state.quarantineDelayHours * 3600L).coerceAtLeast(60L)
+            state.quarantineDelayHours * 3600L
         }
     }
 
@@ -622,7 +622,7 @@ object WhitelistManager {
      */
     fun getEffectiveQuarantineDelayHours(ctx: Context): Int {
         val sec = getEffectiveQuarantineDelaySeconds(ctx)
-        return (sec / 3600L).toInt().coerceAtLeast(1)
+        return (sec / 3600L).toInt()
     }
 
     /**
@@ -645,9 +645,9 @@ object WhitelistManager {
         val state = loadState(ctx)
         val currentSec = getEffectiveQuarantineDelaySeconds(ctx)
         val newSec = if (useGlobal) {
-            DelayManager.getCurrentEffectiveDelaySeconds(ctx).toLong().coerceAtLeast(60L)
+            DelayManager.getCurrentEffectiveDelaySeconds(ctx).toLong()
         } else {
-            (newHours * 3600L).coerceAtLeast(60L)
+            newHours * 3600L
         }
 
         val now = System.currentTimeMillis()
@@ -655,7 +655,7 @@ object WhitelistManager {
 
         if (newSec >= currentSec || DelayManager.isSettingsUnlocked(ctx)) {
             val updated = state.copy(
-                quarantineDelayHours = if (newHours > 0) newHours else state.quarantineDelayHours,
+                quarantineDelayHours = if (newHours >= 0) newHours else state.quarantineDelayHours,
                 useGlobalDelay = useGlobal,
                 pendingDelayHours = null,
                 pendingDelayUseGlobal = false,
@@ -975,7 +975,7 @@ object WhitelistManager {
 
         // 2b. Reconcile ghost packages: prune any 3rd-party allowed package that is no longer installed on the device
         val ghostAllowed = state.allowedPackages.filter {
-            it !in installedSet && !isGuarded(ctx, it) && it != ctx.packageName && it !in HARD_GUARDS
+            it !in installedSet && !isGuarded(ctx, it) && it != ctx.packageName && it !in HARD_GUARDS && it !in INITIAL_ALLOWED_PACKAGES
         }.toSet()
         if (ghostAllowed.isNotEmpty()) {
             val prunedAllowed = state.allowedPackages - ghostAllowed
@@ -988,6 +988,20 @@ object WhitelistManager {
                     GuardianClient.removeAppFromWhitelist(ghost)
                 }
             }
+        }
+
+        val effectiveDelay = getEffectiveQuarantineDelaySeconds(ctx)
+        if (effectiveDelay <= 0L) {
+            val newAllowed = state.allowedPackages + installed.map { it.packageName }.filterNot { isGuarded(ctx, it) }
+            if (newAllowed != state.allowedPackages) {
+                state = state.copy(allowedPackages = newAllowed)
+                saveState(ctx, state)
+            }
+            saveHiddenState(ctx, emptySet())
+            for (pkgInfo in installed) {
+                release(ctx, pkgInfo.packageName)
+            }
+            return
         }
 
         for (pkgInfo in installed) {
@@ -1023,6 +1037,15 @@ object WhitelistManager {
         }
         if (pkg in state.allowedPackages) {
             Log.i(TAG, "Installed package $pkg is in whitelist. Allowed.")
+            return
+        }
+
+        val effectiveDelay = getEffectiveQuarantineDelaySeconds(ctx)
+        if (effectiveDelay <= 0L) {
+            val updated = state.allowedPackages + pkg
+            saveState(ctx, state.copy(allowedPackages = updated))
+            release(ctx, pkg)
+            Log.i(TAG, "Quarantine delay is 0: automatically whitelisted $pkg")
             return
         }
 
@@ -1089,6 +1112,7 @@ object WhitelistManager {
      * Tapping opens MainActivity directly to the quarantine confirmation dialog.
      */
     fun notifyAppQuarantined(ctx: Context, pkg: String) {
+        if (getEffectiveQuarantineDelaySeconds(ctx) <= 0L) return
         try {
             ensureNotificationChannel(ctx)
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return

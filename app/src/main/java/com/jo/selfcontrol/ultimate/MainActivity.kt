@@ -324,7 +324,7 @@ class MainActivity : Activity() {
             } else {
                 val sec = WhitelistManager.getEffectiveQuarantineDelaySeconds(this@MainActivity)
                 val hours = WhitelistManager.getEffectiveQuarantineDelayHours(this@MainActivity)
-                val tag = if (sec >= 3600) "${hours}h" else "${sec / 60}m"
+                val tag = if (sec <= 0L) "0s" else if (sec >= 3600) "${hours}h" else "${sec / 60}m"
                 text = "+ Demander une app ($tag)"
                 setTextColor(Color.WHITE)
                 background = roundedBackground(Color.BLACK)
@@ -2059,7 +2059,7 @@ class MainActivity : Activity() {
         if (::requestWhitelistAppButton.isInitialized) {
             val reqSec = WhitelistManager.getEffectiveQuarantineDelaySeconds(this)
             val reqHours = WhitelistManager.getEffectiveQuarantineDelayHours(this)
-            val reqTag = if (reqSec >= 3600) "${reqHours}h" else "${reqSec / 60}m"
+            val reqTag = if (reqSec <= 0L) "0s" else if (reqSec >= 3600) "${reqHours}h" else "${reqSec / 60}m"
             requestWhitelistAppButton.text = "+ Demander une app ($reqTag)"
         }
 
@@ -2533,7 +2533,7 @@ class MainActivity : Activity() {
 
         val delaySec = WhitelistManager.getEffectiveQuarantineDelaySeconds(this)
         val delayHours = WhitelistManager.getEffectiveQuarantineDelayHours(this)
-        val delayText = if (delaySec >= 3600) "${delayHours} heure(s)" else "${delaySec / 60} minute(s)"
+        val delayText = if (delaySec <= 0L) "immédiat (0s)" else if (delaySec >= 3600) "${delayHours} heure(s)" else "${delaySec / 60} minute(s)"
         val unlockTime = System.currentTimeMillis() + delaySec * 1000L
         val unlockDateStr = java.text.SimpleDateFormat("dd/MM/yyyy à HH:mm", java.util.Locale.FRANCE).format(java.util.Date(unlockTime))
 

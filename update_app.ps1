@@ -28,7 +28,7 @@ for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
 
 if ($deviceLines.Count -eq 0) {
     Write-Host "[INFO] Aucun appareil USB détecté, tentative de connexion Tailscale..." -ForegroundColor Yellow
-    & $adb connect 100.112.214.84:5555
+    & $adb connect 100.104.70.72:5555
     Start-Sleep -Milliseconds 800
     $devicesOutput = & $adb devices
     $deviceLines = @($devicesOutput | Where-Object { $_ -match "\tdevice$" })
