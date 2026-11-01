@@ -114,6 +114,7 @@ object GuardianEngine {
         "com.samsung.android.settings",
         "com.google.android.gms",
         "com.android.permissioncontroller",
+        "com.google.android.permissioncontroller",
         "com.android.phone",
         "com.android.server.telecom",
         "com.android.providers.telephony",
@@ -173,8 +174,23 @@ object GuardianEngine {
     fun isGuarded(ctx: Context, pkg: String): Boolean {
         if (pkg in HARD_GUARDS) return true
         if (pkg == ctx.packageName) return true
+        // SAFETY: never hide/suspend a system app. Hiding a core system package
+        // (e.g. com.google.android.permissioncontroller) makes PackageManagerService
+        // crash at boot -> unrecoverable bootloop (incident 2026-11-01).
+        if (isSystemPackage(ctx, pkg)) return true
         if (pkg in launcherPackages(ctx) || pkg in inputMethodPackages(ctx)) return true
         return false
+    }
+
+    fun isSystemPackage(ctx: Context, pkg: String): Boolean {
+        return try {
+            val ai = ctx.packageManager.getApplicationInfo(pkg, PackageManager.MATCH_UNINSTALLED_PACKAGES)
+            (ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
+                (ai.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+        } catch (e: Exception) {
+            // Unknown -> be conservative and treat as guarded
+            true
+        }
     }
 
     private fun launcherPackages(ctx: Context): Set<String> {
