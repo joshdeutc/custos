@@ -40,6 +40,24 @@ Signer #1 certificate SHA-1 digest: a60302db56bc69d698a882db742a2a2953bb12bf
 
 ---
 
+## 2. Déclenchement Réel & Validation Bout-en-Bout du Workflow GitHub Actions (v1.8)
+
+Le workflow officiel [.github/workflows/release.yml](file:///c:/Users/jo/Documents/Personnal_project/custos/.github/workflows/release.yml) a été déclenché en conditions réelles sur GitHub via la création et le push du tag **`v1.8`** :
+
+```bash
+git tag -a v1.8 -m "Release v1.8 - Guardian & Custos with optimized whitelist and release verification"
+git push origin v1.8
+```
+
+### Étapes Validées avec Succès dans le Cloud GitHub Actions :
+1. **Déclenchement automatique** : Prise en charge immédiate par le runner Ubuntu sous l'environnement `production`.
+2. **Décodage du Keystore** : Le secret `KEYSTORE_BASE64` a été décodé avec succès dans `/tmp/release.jks`.
+3. **Compilation & Signature Release** : Exécution de `./gradlew :guardian:assembleRelease :app:assembleMeRelease` avec succès.
+4. **Publication de la Release** : Publication automatique des APKs signés sur la page Releases de GitHub (`Custos Release v1.8`).
+5. **Politique de Sécurité Single-Release** : Exécution de la dernière étape du workflow qui a purgé l'ancienne release `v1.7` (`refs/tags/v1.7` supprimé du dépôt distant), confirmant que le workflow est allé jusqu'à son terme absolu avec succès.
+
+---
+
 ## 2. Protocole pour Sauvegarde sur Clé USB (Cold Storage)
 
 Pour rendre le verrou GitHub 24h totalement inviolable dans le futur :
