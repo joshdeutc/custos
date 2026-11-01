@@ -595,6 +595,9 @@ class LimitService : Service() {
         if (packageName in InstallWindowManager.INSTALLER_PACKAGES && InstallWindowManager.isOpen(this)) {
             return false
         }
+        if (GuardianClient.isAvailable && packageName in GuardianClient.getBlockedApps()) {
+            return true
+        }
         if (isCurrentlyPeriodBlocked(packageName)) return true
         return shouldStayBlockedForNonCurfewReasons(packageName)
     }
@@ -669,7 +672,9 @@ class LimitService : Service() {
      * This handles: curfew ended, allowed hours started, day-of-week changed, quota reset, session cooldown ended.
      */
     private fun checkAndUnblockApps() {
+        val gBlocked = if (GuardianClient.isAvailable) GuardianClient.getBlockedApps() else emptySet()
         for (pkg in suspendedApps.toList()) {
+            if (pkg in gBlocked) continue
             if (isAppBlocked(pkg)) continue
 
             // No reason to keep blocking — app is completely unblocked

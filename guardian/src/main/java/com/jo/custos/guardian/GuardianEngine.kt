@@ -772,7 +772,7 @@ object GuardianEngine {
         synchronized(lock) {
             val config = ConfigManager.loadConfig(ctx)
             val now = java.util.Calendar.getInstance()
-            val dayOfWeek = (now.get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7 // 0=Dimanche, 1=Lundi...
+            val dayOfWeek = now.get(java.util.Calendar.DAY_OF_WEEK) - 1 // 0=Dimanche, 1=Lundi, ..., 6=Samedi
             val currentMinutes = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE)
 
             val newlyBlocked = mutableSetOf<String>()
@@ -795,6 +795,12 @@ object GuardianEngine {
             for (limit in config.limits) {
                 val pkg = limit.packageName
                 if (pkg in newlyBlocked) continue
+
+                // Check allowed days
+                if (dayOfWeek !in limit.allowedDays) {
+                    newlyBlocked.add(pkg)
+                    continue
+                }
 
                 // Check allowed hours
                 if (!limit.allDay) {
