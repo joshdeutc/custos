@@ -182,7 +182,11 @@ object DeviceOwnerHelper {
             val list = pm.queryIntentActivities(intent, PackageManager.MATCH_ALL)
             for (ri in list) {
                 val pkg = ri.activityInfo?.packageName ?: continue
-                if (pkg != ctx.packageName && !pkg.startsWith("com.android.settings") && !pkg.startsWith("com.android.systemui")) {
+                if (pkg != ctx.packageName &&
+                    pkg !in BrowserBlocklist.EXEMPT_PACKAGES &&
+                    !pkg.startsWith("com.android.settings") &&
+                    !pkg.startsWith("com.android.systemui")
+                ) {
                     hideApp(ctx, pkg, true)
                     runCatching { dpm(ctx).setPackagesSuspended(admin(ctx), arrayOf(pkg), true) }
                     Log.w(TAG, "enforceBrowserLockdown: hid and suspended dynamic browsable app $pkg")

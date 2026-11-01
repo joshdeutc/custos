@@ -86,6 +86,7 @@ object WhitelistManager {
         "com.enki.Enki750g",
         "com.tribab.tricount.android",
         "com.jo.notubeplayer",
+        "com.jo.linktrash",
         "air.com.unit9.bkFrApp",
         "com.jo.selfcontrol.ultimate",
         "com.guardian",
@@ -935,6 +936,11 @@ object WhitelistManager {
                 state = state.copy(allowedPackages = state.allowedPackages - browsersInAllowed)
                 saveState(ctx, state)
                 Log.w(TAG, "Pruned browsers from whitelist on brother flavor: $browsersInAllowed")
+            }
+            if ("com.jo.linktrash" !in state.allowedPackages) {
+                state = state.copy(allowedPackages = state.allowedPackages + "com.jo.linktrash")
+                saveState(ctx, state)
+                Log.w(TAG, "Auto-whitelisted com.jo.linktrash on brother flavor")
             }
         }
 

@@ -7,9 +7,16 @@ import android.net.Uri
 
 object BrowserBlocklist {
 
+    val EXEMPT_PACKAGES = setOf(
+        "com.jo.linktrash",
+        "com.jo.notubeplayer"
+    )
+
     val ALL_BROWSERS = setOf(
         "com.android.chrome",
         "com.google.android.apps.chrome",
+        "com.google.android.googlequicksearchbox", // Google App (contains search WebView & Chrome Custom Tabs)
+        "com.google.android.apps.googleassistant",
         "com.ecosia.android",
         "com.opera.preinstall",
         "com.opera.browser",
@@ -38,6 +45,7 @@ object BrowserBlocklist {
     )
 
     fun isBrowser(ctx: Context, pkg: String): Boolean {
+        if (pkg in EXEMPT_PACKAGES) return false
         if (pkg in ALL_BROWSERS) return true
         return try {
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://google.com")).apply {
