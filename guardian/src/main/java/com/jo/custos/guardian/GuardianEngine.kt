@@ -281,7 +281,7 @@ object GuardianEngine {
         return try {
             val json = JSONObject(file.readText())
             val enabled = json.optBoolean("enabled", true)
-            val delayHours = json.optInt("quarantine_delay_hours", DEFAULT_DELAY_HOURS)
+            var delayHours = json.optInt("quarantine_delay_hours", DEFAULT_DELAY_HOURS)
             val allowedArr = json.optJSONArray("allowed_packages") ?: JSONArray()
             val allowed = mutableSetOf<String>()
             for (i in 0 until allowedArr.length()) {
@@ -307,11 +307,18 @@ object GuardianEngine {
                 )
             }
 
-            val pendingDelayHours = if (json.has("pending_delay_hours") && !json.isNull("pending_delay_hours")) {
+            var pendingDelayHours = if (json.has("pending_delay_hours") && !json.isNull("pending_delay_hours")) {
                 json.getInt("pending_delay_hours")
             } else null
-            val pendingDelayExec = json.optLong("pending_delay_execute_at", 0L)
+            var pendingDelayExec = json.optLong("pending_delay_execute_at", 0L)
             val pendingDisableExec = json.optLong("pending_disable_execute_at", 0L)
+
+            if (delayHours >= 100) {
+                Log.w(TAG, "Guardian auto-reset excessive quarantine delay ($delayHours h -> 0 h)")
+                delayHours = 0
+                pendingDelayHours = null
+                pendingDelayExec = 0L
+            }
             val dnsHost = if (json.has("private_dns_host")) {
                 if (json.isNull("private_dns_host")) null else json.getString("private_dns_host")
             } else DEFAULT_PRIVATE_DNS
@@ -326,7 +333,7 @@ object GuardianEngine {
                 pendingDisableExecuteAt = pendingDisableExec,
                 privateDnsHost = dnsHost
             )
-            if (nonGuards.isEmpty() || delayHours != json.optInt("quarantine_delay_hours", 0)) {
+            if (nonGuards.isEmpty() || delayHours != json.optInt("quarantine_delay_hours", 0) || pendingDelayExec != json.optLong("pending_delay_execute_at", 0L)) {
                 saveStateInternal(ctx, state)
             }
             state
@@ -373,7 +380,7 @@ object GuardianEngine {
             try {
                 val json = JSONObject(jsonStr)
                 val enabled = json.optBoolean("enabled", true)
-                val delayHours = json.optInt("quarantine_delay_hours", DEFAULT_DELAY_HOURS)
+                var delayHours = json.optInt("quarantine_delay_hours", DEFAULT_DELAY_HOURS)
                 val allowedArr = json.optJSONArray("allowed_packages") ?: JSONArray()
                 val allowed = mutableSetOf<String>()
                 for (i in 0 until allowedArr.length()) {
@@ -642,6 +649,29 @@ object GuardianEngine {
             scheduleNextUnlockAlarm(ctx)
             return true
         }
+    }
+
+    fun resetQuarantineDelay(ctx: Context) {
+        synchronized(lock) {
+            val state = getState(ctx)
+            saveStateInternal(ctx, state.copy(
+                quarantineDelayHours = 0,
+                pendingDelayHours = null,
+                pendingDelayExecuteAt = 0L
+            ))
+            Log.w(TAG, "Quarantine delay forcefully reset to 0 via admin action")
+            scheduleNextUnlockAlarm(ctx)
+        }
+    }
+
+    fun setClientUninstallBlocked(ctx: Context, blocked: Boolean) {
+        if (!isDeviceOwner(ctx)) return
+        val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
+        val admin = getAdminComponent(ctx)
+        runCatching {
+            dpm.setUninstallBlocked(admin, "com.jo.selfcontrol.ultimate", blocked)
+            Log.w(TAG, "Client uninstall blocked set to $blocked")
+        }.onFailure { Log.e(TAG, "Failed to set client uninstall blocked ($blocked): ${it.message}") }
     }
 
     fun setWhitelistEnabled(ctx: Context, enabled: Boolean): Boolean {

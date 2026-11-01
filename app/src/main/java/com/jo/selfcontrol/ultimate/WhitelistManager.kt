@@ -253,11 +253,19 @@ object WhitelistManager {
             if (pkg.isNotBlank()) PendingRequest(pkg, reqAt, availAt) else null
         }
 
-        val quarantineHours = json.optInt("quarantine_delay_hours", DEFAULT_DELAY_HOURS)
+        var quarantineHours = json.optInt("quarantine_delay_hours", DEFAULT_DELAY_HOURS)
         val useGlobal = json.optBoolean("use_global_delay", false)
-        val pendingDelayHours = if (json.has("pending_delay_hours") && !json.isNull("pending_delay_hours")) json.getInt("pending_delay_hours") else null
-        val pendingDelayUseGlobal = json.optBoolean("pending_delay_use_global", false)
-        val pendingDelayExecuteAt = json.optLong("pending_delay_execute_at", 0L)
+        var pendingDelayHours = if (json.has("pending_delay_hours") && !json.isNull("pending_delay_hours")) json.getInt("pending_delay_hours") else null
+        var pendingDelayUseGlobal = json.optBoolean("pending_delay_use_global", false)
+        var pendingDelayExecuteAt = json.optLong("pending_delay_execute_at", 0L)
+
+        if (quarantineHours >= 100) {
+            Log.w(TAG, "WhitelistManager auto-reset excessive quarantine delay ($quarantineHours h -> 0 h)")
+            quarantineHours = 0
+            pendingDelayHours = null
+            pendingDelayUseGlobal = false
+            pendingDelayExecuteAt = 0L
+        }
         val pendingDisableExecuteAt = json.optLong("pending_disable_execute_at", 0L)
 
         return WhitelistState(

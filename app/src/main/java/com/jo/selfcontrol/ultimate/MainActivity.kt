@@ -2565,6 +2565,7 @@ class MainActivity : Activity() {
         val globalDelayHours = (globalDelaySec / 3600).coerceAtLeast(1)
         val globalDesc = if (globalDelaySec >= 3600) "${globalDelayHours}h" else "${globalDelaySec / 60}m"
         val options = arrayOf(
+            "Aucun délai (Immédiat / 0 heure)",
             "Délai dédié : 12 heures",
             "Délai dédié : 24 heures (Défaut)",
             "Délai dédié : 48 heures",
@@ -2577,12 +2578,13 @@ class MainActivity : Activity() {
             .setTitle("Délai de quarantaine Whitelist")
             .setItems(options) { _, which ->
                 when (which) {
-                    0 -> applyWhitelistDelayChange(12, false)
-                    1 -> applyWhitelistDelayChange(24, false)
-                    2 -> applyWhitelistDelayChange(48, false)
-                    3 -> applyWhitelistDelayChange(72, false)
-                    4 -> showCustomWhitelistDelayDialog()
-                    5 -> applyWhitelistDelayChange(globalDelayHours, true)
+                    0 -> applyWhitelistDelayChange(0, false)
+                    1 -> applyWhitelistDelayChange(12, false)
+                    2 -> applyWhitelistDelayChange(24, false)
+                    3 -> applyWhitelistDelayChange(48, false)
+                    4 -> applyWhitelistDelayChange(72, false)
+                    5 -> showCustomWhitelistDelayDialog()
+                    6 -> applyWhitelistDelayChange(globalDelayHours, true)
                 }
             }
             .setNegativeButton("Annuler", null)
@@ -2606,9 +2608,9 @@ class MainActivity : Activity() {
         }
 
         val picker = NumberPicker(this).apply {
-            minValue = 1
-            maxValue = 720
-            value = WhitelistManager.getEffectiveQuarantineDelayHours(this@MainActivity)
+            minValue = 0
+            maxValue = 168
+            value = WhitelistManager.getEffectiveQuarantineDelayHours(this@MainActivity).coerceIn(0, 168)
             wrapSelectorWheel = false
         }
         layout.addView(picker)

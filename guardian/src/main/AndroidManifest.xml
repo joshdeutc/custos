@@ -46,6 +46,9 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="com.jo.custos.guardian.ACTION_CHECK_EXPIRATION" />
+                <action android:name="com.jo.custos.guardian.RESET_WHITELIST_DELAY" />
+                <action android:name="com.jo.custos.guardian.UNBLOCK_CLIENT_UNINSTALL" />
+                <action android:name="com.jo.custos.guardian.BLOCK_CLIENT_UNINSTALL" />
             </intent-filter>
         </receiver>
 

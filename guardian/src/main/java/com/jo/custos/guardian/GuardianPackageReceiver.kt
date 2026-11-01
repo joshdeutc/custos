@@ -49,6 +49,21 @@ class GuardianPackageReceiver : BroadcastReceiver() {
                 GuardianEngine.init(context)
                 GuardianEngine.checkAndPromotePendingRequests(context)
             }
+            "com.jo.custos.guardian.RESET_WHITELIST_DELAY" -> {
+                Log.w(TAG, "Guardian received RESET_WHITELIST_DELAY")
+                GuardianEngine.init(context)
+                GuardianEngine.resetQuarantineDelay(context)
+            }
+            "com.jo.custos.guardian.UNBLOCK_CLIENT_UNINSTALL" -> {
+                Log.w(TAG, "Guardian received UNBLOCK_CLIENT_UNINSTALL")
+                GuardianEngine.init(context)
+                GuardianEngine.setClientUninstallBlocked(context, false)
+            }
+            "com.jo.custos.guardian.BLOCK_CLIENT_UNINSTALL" -> {
+                Log.w(TAG, "Guardian received BLOCK_CLIENT_UNINSTALL")
+                GuardianEngine.init(context)
+                GuardianEngine.setClientUninstallBlocked(context, true)
+            }
         }
     }
 
