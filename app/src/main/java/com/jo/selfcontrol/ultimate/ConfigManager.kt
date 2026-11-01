@@ -288,8 +288,17 @@ class ConfigManager {
         /** True si maintenant (minutes depuis minuit) est dans la plage bloquée [start, end) avec passage minuit si start > end. */
         fun isInBlockedWindow(nowMinutes: Int, start: Int, end: Int): Boolean {
             if (start == end) return false
-            if (start < end) return nowMinutes >= start && nowMinutes < end
-            return nowMinutes >= start || nowMinutes < end
+            val effectiveEnd = if (end >= 1439) 1440 else end
+            if (start < effectiveEnd) return nowMinutes in start until effectiveEnd
+            return nowMinutes >= start || nowMinutes < effectiveEnd
+        }
+
+        /** True si maintenant (minutes depuis minuit) est dans la plage autorisée avec passage minuit si start > end. */
+        fun isInAllowedWindow(nowMinutes: Int, start: Int, end: Int): Boolean {
+            if (start == end) return true
+            val effectiveEnd = if (end >= 1439) 1440 else end
+            if (start < effectiveEnd) return nowMinutes in start until effectiveEnd
+            return nowMinutes >= start || nowMinutes < effectiveEnd
         }
 
         /**

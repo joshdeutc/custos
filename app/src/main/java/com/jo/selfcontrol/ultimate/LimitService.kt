@@ -430,7 +430,7 @@ class LimitService : Service() {
         if (!limit.allDay) {
             val cal = Calendar.getInstance()
             val nowMinutes = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
-            if (nowMinutes < limit.allowedHoursStart || nowMinutes >= limit.allowedHoursEnd) {
+            if (!ConfigManager.isInAllowedWindow(nowMinutes, limit.allowedHoursStart, limit.allowedHoursEnd)) {
                 blockApp(currentApp, "hour")
                 return
             }
@@ -578,7 +578,7 @@ class LimitService : Service() {
         if (!limit.allDay) {
             val cal = Calendar.getInstance()
             val nowMinutes = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
-            if (nowMinutes < limit.allowedHoursStart || nowMinutes >= limit.allowedHoursEnd) {
+            if (!ConfigManager.isInAllowedWindow(nowMinutes, limit.allowedHoursStart, limit.allowedHoursEnd)) {
                 return true
             }
         }

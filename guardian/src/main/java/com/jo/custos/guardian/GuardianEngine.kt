@@ -768,6 +768,20 @@ object GuardianEngine {
         evaluateLimits(ctx)
     }
 
+    fun dayStartMillis(): Long {
+        val cal = java.util.Calendar.getInstance()
+        if (cal.get(java.util.Calendar.HOUR_OF_DAY) < 2) {
+            cal.add(java.util.Calendar.DATE, -1)
+        }
+        cal.apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 2)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        return cal.timeInMillis
+    }
+
     fun evaluateLimits(ctx: Context) {
         synchronized(lock) {
             val config = ConfigManager.loadConfig(ctx)
@@ -775,17 +789,18 @@ object GuardianEngine {
             val dayOfWeek = now.get(java.util.Calendar.DAY_OF_WEEK) - 1 // 0=Dimanche, 1=Lundi, ..., 6=Samedi
             val currentMinutes = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE)
 
+            // Logical quota day resets at 02:00 AM (aligned with LimitService and DailyResetReceiver)
+            val calQuota = java.util.Calendar.getInstance().apply {
+                add(java.util.Calendar.HOUR_OF_DAY, -2)
+            }
+            val quotaDayOfWeek = calQuota.get(java.util.Calendar.DAY_OF_WEEK) - 1
+
             val newlyBlocked = mutableSetOf<String>()
 
-            // 1. Period Blocks (Couvre-feux)
+            // 1. Period Blocks (Couvre-feux) - uses wall-clock time and ConfigManager.isInBlockedWindow
             for (period in config.periodBlocks) {
                 if (dayOfWeek in period.allowedDays) {
-                    val inWindow = if (period.blockedStartMinutes <= period.blockedEndMinutes) {
-                        currentMinutes in period.blockedStartMinutes until period.blockedEndMinutes
-                    } else {
-                        currentMinutes >= period.blockedStartMinutes || currentMinutes < period.blockedEndMinutes
-                    }
-                    if (inWindow) {
+                    if (ConfigManager.isInBlockedWindow(currentMinutes, period.blockedStartMinutes, period.blockedEndMinutes)) {
                         newlyBlocked.addAll(period.packages)
                     }
                 }
@@ -796,37 +811,27 @@ object GuardianEngine {
                 val pkg = limit.packageName
                 if (pkg in newlyBlocked) continue
 
-                // Check allowed days
-                if (dayOfWeek !in limit.allowedDays) {
+                // Check allowed days (logical day, 2:00 AM reset)
+                if (quotaDayOfWeek !in limit.allowedDays) {
                     newlyBlocked.add(pkg)
                     continue
                 }
 
                 // Check allowed hours
                 if (!limit.allDay) {
-                    val inAllowed = if (limit.allowedHoursStart <= limit.allowedHoursEnd) {
-                        currentMinutes in limit.allowedHoursStart until limit.allowedHoursEnd
-                    } else {
-                        currentMinutes >= limit.allowedHoursStart || currentMinutes < limit.allowedHoursEnd
-                    }
-                    if (!inAllowed) {
+                    if (!ConfigManager.isInAllowedWindow(currentMinutes, limit.allowedHoursStart, limit.allowedHoursEnd)) {
                         newlyBlocked.add(pkg)
                         continue
                     }
                 }
 
-                // Check daily usage quota
+                // Check daily usage quota (calculated from 02:00 AM logical day start)
                 val maxSec = if (limit.maxSecondsPerDay > 0) limit.maxSecondsPerDay else limit.maxMinutesPerDay * 60
                 if (maxSec == 0) {
                     // Quota 0 min/sec = completely blocked 24/7
                     newlyBlocked.add(pkg)
                 } else if (maxSec > 0) {
-                    val dayStart = java.util.Calendar.getInstance().apply {
-                        set(java.util.Calendar.HOUR_OF_DAY, 0)
-                        set(java.util.Calendar.MINUTE, 0)
-                        set(java.util.Calendar.SECOND, 0)
-                        set(java.util.Calendar.MILLISECOND, 0)
-                    }.timeInMillis
+                    val dayStart = dayStartMillis()
                     val usedSec = UsageQuery.foregroundSeconds(ctx, pkg, dayStart, System.currentTimeMillis())
                     if (usedSec >= maxSec) {
                         newlyBlocked.add(pkg)

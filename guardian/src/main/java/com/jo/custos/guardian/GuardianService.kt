@@ -314,12 +314,7 @@ class GuardianService : Service() {
         override fun getUsageStatsJson(): String {
             val config = ConfigManager.loadConfig(applicationContext)
             val obj = org.json.JSONObject()
-            val dayStart = java.util.Calendar.getInstance().apply {
-                set(java.util.Calendar.HOUR_OF_DAY, 0)
-                set(java.util.Calendar.MINUTE, 0)
-                set(java.util.Calendar.SECOND, 0)
-                set(java.util.Calendar.MILLISECOND, 0)
-            }.timeInMillis
+            val dayStart = GuardianEngine.dayStartMillis()
             val nowMs = System.currentTimeMillis()
             for (limit in config.limits) {
                 val usedSec = UsageQuery.foregroundSeconds(applicationContext, limit.packageName, dayStart, nowMs)

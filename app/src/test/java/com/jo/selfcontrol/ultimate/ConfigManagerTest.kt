@@ -129,4 +129,51 @@ class ConfigManagerTest {
         assertEquals(259200, requirement.seconds)
         assertTrue(requirement.fromExplicitTimer)
     }
+
+    @Test
+    fun testIsInBlockedWindowDaytime() {
+        val start = 14 * 60 // 14:00 (840)
+        val end = 18 * 60   // 18:00 (1080)
+        assertFalse(ConfigManager.isInBlockedWindow(839, start, end))
+        assertTrue(ConfigManager.isInBlockedWindow(840, start, end))
+        assertTrue(ConfigManager.isInBlockedWindow(1000, start, end))
+        assertTrue(ConfigManager.isInBlockedWindow(1079, start, end))
+        assertFalse(ConfigManager.isInBlockedWindow(1080, start, end))
+    }
+
+    @Test
+    fun testIsInBlockedWindowOvernight() {
+        val start = 23 * 60 // 23:00 (1380)
+        val end = 10 * 60   // 10:00 (600)
+        assertFalse(ConfigManager.isInBlockedWindow(1379, start, end))
+        assertTrue(ConfigManager.isInBlockedWindow(1380, start, end))
+        assertTrue(ConfigManager.isInBlockedWindow(1439, start, end))
+        assertTrue(ConfigManager.isInBlockedWindow(0, start, end))
+        assertTrue(ConfigManager.isInBlockedWindow(599, start, end))
+        assertFalse(ConfigManager.isInBlockedWindow(600, start, end))
+    }
+
+    @Test
+    fun testIsInBlockedWindowUntil2359IncludesEndOfDay() {
+        val start = 14 * 60 // 14:00 (840)
+        val end = 23 * 60 + 59 // 23:59 (1439)
+        assertFalse(ConfigManager.isInBlockedWindow(839, start, end))
+        assertTrue(ConfigManager.isInBlockedWindow(840, start, end))
+        assertTrue(ConfigManager.isInBlockedWindow(1438, start, end))
+        assertTrue(ConfigManager.isInBlockedWindow(1439, start, end)) // 23:59 must be included!
+        assertFalse(ConfigManager.isInBlockedWindow(0, start, end))
+    }
+
+    @Test
+    fun testIsInAllowedWindowOvernight() {
+        val start = 22 * 60 // 22:00 (1320)
+        val end = 2 * 60    // 02:00 (120)
+        assertFalse(ConfigManager.isInAllowedWindow(14 * 60, start, end)) // 14:00 is not allowed
+        assertFalse(ConfigManager.isInAllowedWindow(1319, start, end))   // 21:59 is not allowed
+        assertTrue(ConfigManager.isInAllowedWindow(1320, start, end))    // 22:00 is allowed
+        assertTrue(ConfigManager.isInAllowedWindow(1439, start, end))    // 23:59 is allowed
+        assertTrue(ConfigManager.isInAllowedWindow(0, start, end))       // 00:00 is allowed
+        assertTrue(ConfigManager.isInAllowedWindow(119, start, end))     // 01:59 is allowed
+        assertFalse(ConfigManager.isInAllowedWindow(120, start, end))    // 02:00 is not allowed
+    }
 }
