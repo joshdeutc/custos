@@ -997,9 +997,12 @@ object WhitelistManager {
                 state = state.copy(allowedPackages = newAllowed)
                 saveState(ctx, state)
             }
-            saveHiddenState(ctx, emptySet())
-            for (pkgInfo in installed) {
-                release(ctx, pkgInfo.packageName)
+            val currentlyHidden = loadHiddenState(ctx)
+            if (currentlyHidden.isNotEmpty()) {
+                saveHiddenState(ctx, emptySet())
+                for (pkg in currentlyHidden) {
+                    release(ctx, pkg)
+                }
             }
             return
         }

@@ -83,7 +83,9 @@ class LimitService : Service() {
         fun notifyConfigChanged(context: Context) {
             val inst = instance
             if (inst != null) {
-                inst.checkConfigReload(force = true)
+                Thread {
+                    inst.checkConfigReload(force = true)
+                }.start()
             } else {
                 start(context)
             }
@@ -940,8 +942,10 @@ class LimitService : Service() {
 
             // Picks up newly added groups AND releases packages whose group's protection timer
             // ran out — this is the path a queued removal takes once DelayManager applies it.
-            InstallBlockManager.enforce(this, newConfig)
-            WhitelistManager.enforce(this)
+            Thread {
+                InstallBlockManager.enforce(this, newConfig)
+                WhitelistManager.enforce(this)
+            }.start()
 
             updateNotification("Config reloaded — ${newPackages.size} app(s)")
             Log.i(TAG, "🔄 Config reloaded")
