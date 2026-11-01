@@ -42,6 +42,7 @@ object InstallBlockManager {
         "com.android.settings",
         "com.google.android.gms",
         "com.android.permissioncontroller",
+        "com.google.android.permissioncontroller",
     )
 
     // ──────────────────────────────────────

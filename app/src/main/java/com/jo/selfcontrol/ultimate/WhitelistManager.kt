@@ -33,7 +33,7 @@ object WhitelistManager {
     private const val TAG = "SelfControl.Whitelist"
     private const val STATE_FILE = "whitelist_state.json"
     private const val HIDDEN_STATE_FILE = "whitelist_hidden.json"
-    const val DEFAULT_DELAY_HOURS = 72
+    const val DEFAULT_DELAY_HOURS = 0
 
     /**
      * Set to true if unauthorized apps should also be uninstalled silently.
@@ -47,6 +47,7 @@ object WhitelistManager {
         "com.android.settings",
         "com.google.android.gms",
         "com.android.permissioncontroller",
+        "com.google.android.permissioncontroller",
         "com.android.vending",
         "com.google.android.packageinstaller",
         "com.android.packageinstaller",

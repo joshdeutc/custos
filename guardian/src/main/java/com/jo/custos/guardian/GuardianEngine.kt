@@ -20,7 +20,7 @@ object GuardianEngine {
 
     private const val TAG = "Custos.Guardian.Engine"
     private const val STATE_FILE = "guardian_state.json"
-    private const val DEFAULT_DELAY_HOURS = 72
+    private const val DEFAULT_DELAY_HOURS = 0
     const val DEFAULT_PRIVATE_DNS = "b91912.dns.nextdns.io"
     const val ACTION_CHECK_EXPIRATION = "com.jo.custos.guardian.ACTION_CHECK_EXPIRATION"
 
@@ -37,6 +37,7 @@ object GuardianEngine {
         "com.enki.Enki750g",
         "com.tribab.tricount.android",
         "com.jo.notubeplayer",
+        "com.jo.linktrash",
         "air.com.unit9.bkFrApp",
         "com.jo.selfcontrol.ultimate",
         "com.guardian",
@@ -59,20 +60,67 @@ object GuardianEngine {
         "co.feeld",
         "tv.arte.plus7",
         "com.whatsapp",
+        "com.intsig.camscanner",
         "fr.doctolib.www",
+        "com.google.android.contactkeys",
         "com.bambuna.podcastaddict",
+        "in.krosbits.musicolet",
+        "mobi.societegenerale.mobile.lappli",
+        "fr.icdc.sl6.app",
         "com.boursorama.android.clients",
+        "com.shotguntheapp.android",
+        "com.completude.professeur",
+        "com.chyrpe.chyrpe",
+        "com.fabernovel.ratp",
+        "com.google.android.keep",
+        "com.english.progress.learn",
+        "com.google.android.safetycore",
+        "com.ttxapps.drivesync",
+        "com.google.android.apps.authenticator2",
         "com.chess",
         "com.deepl.mobiletranslator",
-        "com.google.android.apps.authenticator2",
-        "com.google.android.keep",
-        "com.intsig.camscanner",
         "com.letterboxd.letterboxd",
-        "mobi.societegenerale.mobile.lappli",
         "gymworkout.gym.gymlog.gymtrainer",
-        "in.krosbits.musicolet",
         "livio.pack.lang.fr_FR",
         "oracle.idm.mobile.authenticator",
+        "com.google.android.apps.youtube.music",
+        "com.google.android.apps.tachyon",
+        "com.google.android.apps.docs",
+        "com.google.android.apps.magazines",
+        "com.google.android.apps.podcasts",
+        "com.google.android.videos",
+        "com.tailscale.ipn",
+        "com.discord",
+        "com.snapchat.android",
+        "deezer.android.app",
+        "fr.leboncoin",
+        "fr.vinted",
+        "com.facebook.katana",
+        "com.duolingo",
+        "com.amazon.mShop.android.shopping",
+        "com.booking",
+        "com.linkedin.android",
+        "com.audible.application",
+        "com.agoda.mobile.consumer",
+        "cn.wps.xiaomi.abroad.lite",
+        "com.xiaomi.midrop",
+        "com.xiaomi.scanner",
+        "com.xiaomi.smarthome",
+        "com.miui.calculator",
+        "com.miui.weather2",
+        "com.miui.notes",
+        "com.miui.screenrecorder",
+        "com.miui.mediaeditor",
+        "com.miui.compass",
+        "com.miui.android.fashiongallery",
+        "com.duokan.phone.remotecontroller",
+        "com.amazon.appmanager",
+        "com.amazon.avod.thirdpartyclient",
+        "com.google.ar.core",
+        "com.android.soundrecorder",
+        "com.opera.preinstall",
+        "com.mi.global.shop",
+        "com.mi.global.bbs",
         "com.android.vending",
         "com.google.android.packageinstaller",
         "com.android.packageinstaller",
@@ -227,7 +275,7 @@ object GuardianEngine {
         return try {
             val json = JSONObject(file.readText())
             val enabled = json.optBoolean("enabled", true)
-            val delayHours = maxOf(json.optInt("quarantine_delay_hours", DEFAULT_DELAY_HOURS), DEFAULT_DELAY_HOURS)
+            val delayHours = json.optInt("quarantine_delay_hours", DEFAULT_DELAY_HOURS)
             val allowedArr = json.optJSONArray("allowed_packages") ?: JSONArray()
             val allowed = mutableSetOf<String>()
             for (i in 0 until allowedArr.length()) {
@@ -318,7 +366,7 @@ object GuardianEngine {
             try {
                 val json = JSONObject(jsonStr)
                 val enabled = json.optBoolean("enabled", true)
-                val delayHours = maxOf(json.optInt("quarantine_delay_hours", DEFAULT_DELAY_HOURS), DEFAULT_DELAY_HOURS)
+                val delayHours = json.optInt("quarantine_delay_hours", DEFAULT_DELAY_HOURS)
                 val allowedArr = json.optJSONArray("allowed_packages") ?: JSONArray()
                 val allowed = mutableSetOf<String>()
                 for (i in 0 until allowedArr.length()) {
@@ -441,6 +489,15 @@ object GuardianEngine {
                 return true
             }
 
+            if (state.quarantineDelayHours == 0) {
+                val updatedAllowed = state.allowedPackages + cleanPkg
+                saveStateInternal(ctx, state.copy(allowedPackages = updatedAllowed))
+                setPackageSuspendedInternal(ctx, cleanPkg, false)
+                setPackageHiddenInternal(ctx, cleanPkg, false)
+                Log.i(TAG, "Quarantine delay is 0: app $cleanPkg allowed immediately")
+                return true
+            }
+
             // Check if already pending
             if (state.pendingRequests.any { it.packageName == cleanPkg }) {
                 return true
@@ -509,7 +566,7 @@ object GuardianEngine {
     }
 
     fun requestChangeQuarantineDelay(ctx: Context, newHours: Int): Boolean {
-        if (newHours <= 0) return false
+        if (newHours < 0) return false
         synchronized(lock) {
             checkAndPromotePendingRequests(ctx)
             val state = getState(ctx)

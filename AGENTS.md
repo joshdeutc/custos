@@ -16,6 +16,7 @@ Pour le contexte technique complet, la liste des téléphones connectés et l'hi
 2. **AUCUNE PORTE DÉROBÉE** : Le code de révocation du Device Owner (`REMOVE_OWNER`, `clearDeviceOwnerApp`) a été définitivement éradiqué. Ne jamais réintroduire de broadcast ou de mécanisme permettant d'annuler le statut Device Owner sans un Factory Reset.
 3. **TIME-LOCK 24H RESPETÉ** : Tout build de release officiel doit obligatoirement passer par `.github/workflows/release.yml` sous le Wait Timer de 24h de l'environnement GitHub `production`.
 4. **PÉRIMÈTRE PRIVÉ** : Ne jamais toucher aux WebViews personnalisées (`notubeplayer`), chats privés, applications de rencontre ou réseaux sociaux.
+5. **IMMUNITÉ SYSTÈME ABSOLUE (Anti-Bootloop)** : Ne **JAMAIS** masquer (`setApplicationHidden`) ou suspendre (`setPackagesSuspended`) une application système (`FLAG_SYSTEM` ou `FLAG_UPDATED_SYSTEM_APP`) ni un composant critique du framework Android (notamment `com.google.android.permissioncontroller` / `com.android.permissioncontroller`). Voir [docs/POST_MORTEM_BOOTLOOP_20261101.md](docs/POST_MORTEM_BOOTLOOP_20261101.md).
 
 ---
 
