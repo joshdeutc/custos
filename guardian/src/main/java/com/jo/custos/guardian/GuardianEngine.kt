@@ -816,7 +816,9 @@ object GuardianEngine {
         val admin = getAdminComponent(ctx)
         try {
             if (dpm.isDeviceOwnerApp(ctx.packageName)) {
-                dpm.setPackagesSuspended(admin, arrayOf(packageName), suspended)
+                if (dpm.isPackageSuspended(admin, packageName) != suspended) {
+                    dpm.setPackagesSuspended(admin, arrayOf(packageName), suspended)
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set package suspended: $packageName", e)
@@ -829,7 +831,9 @@ object GuardianEngine {
         val admin = getAdminComponent(ctx)
         try {
             if (dpm.isDeviceOwnerApp(ctx.packageName)) {
-                dpm.setApplicationHidden(admin, packageName, hidden)
+                if (dpm.isApplicationHidden(admin, packageName) != hidden) {
+                    dpm.setApplicationHidden(admin, packageName, hidden)
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set package hidden: $packageName", e)

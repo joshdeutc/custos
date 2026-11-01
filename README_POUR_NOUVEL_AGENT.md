@@ -8,17 +8,20 @@ Bienvenue sur le projet **Custos** (anciennement *SelfControl Ultimate*). Ce doc
 
 ---
 
-## 1. Vue d'Ensemble de l'Architecture
+## 1. Vue d'Ensemble de l'Architecture (Modèle Asymétrique)
 
-Custos est un système de contrôle de soi et de discipline numérique Android ultra-résilient basé sur une architecture multi-modules :
+👉 **Référence complète : [docs/ARCHITECTURE_ASYMETRIQUE_DEV_RELEASE.md](docs/ARCHITECTURE_ASYMETRIQUE_DEV_RELEASE.md)**
 
-1. **`:app` (Custos Client / UI)** :
-   * Interface utilisateur, moteur de détection en avant-plan (`AppWatcherService`), règles d'écran partiel (`ScreenRuleManager`), suivi du temps et quotas journaliers (`LimitService`).
-   * Gère les listes de blocage, horaires et notifications muettes.
-2. **`:guardian` (Custos Guardian Service)** :
-   * Service démon autonome détenant ou partageant le statut **Device Owner**.
-   * Applique le verrouillage système strict, l'interdiction de désinstallation croisée (`setUninstallBlocked`), la quarantaine des nouvelles applications (délai de 24h/48h) et le DNS Privé chiffré (DoT).
-   * Dialoguant avec l'application principale via AIDL (`IGuardianService.aidl`).
+Custos repose sur une séparation asymétrique stricte :
+
+1. **`:guardian` (Custos Guardian Service) — Le Cadenas Constitutionnel** :
+   * Démon autonome détenant le statut **Device Owner**.
+   * Applique le verrouillage système strict, l'interdiction de désinstallation croisée (`setUninstallBlocked`), la quarantaine de la Whitelist et le DNS Privé chiffré (DoT).
+   * **Doit toujours être compilé via GitHub Actions (`release.yml`)** sous le Time-Lock 24h avec `custos-release.jks`.
+2. **`:app` (Custos Client / UI) — Le Tableau de Bord & Dev Local** :
+   * Interface utilisateur, détection en avant-plan (`AppWatcherService`), règles d'écran (`ScreenRuleManager`), suivi du temps et quotas (`LimitService`).
+   * **Se compile en local en DEBUG** (`:app:assembleMeDebug`) via `update_app.ps1` pour un développement immédiat sans délai GitHub.
+   * Protégé contre la désinstallation par Guardian (`setUninstallBlocked`), déblocable temporairement via broadcast ADB si besoin.
 
 ---
 
