@@ -313,6 +313,25 @@ class AppWatcherService : AccessibilityService() {
             applySessionOverlay(null)
         }
 
+        if (BuildConfig.BLOCK_ALL_BROWSERS && BrowserBlocklist.isBrowser(this, packageName)) {
+            goHome("Browser blocked on brother flavor: $packageName")
+            DeviceOwnerHelper.hideApp(this, packageName, true)
+            DeviceOwnerHelper.suspendApp(this, packageName)
+            return
+        }
+
+        if (BuildConfig.BLOCK_ALL_APP_INSTALLS) {
+            if (packageName == "com.android.vending") {
+                goHome("Play Store blocked on brother flavor")
+                DeviceOwnerHelper.hideApp(this, packageName, true)
+                return
+            }
+            if (packageName in UNINSTALL_PACKAGES && !InstallWindowManager.isOpen(this)) {
+                goHome("Package installer blocked on brother flavor: $packageName")
+                return
+            }
+        }
+
         if (packageName in blockedApps) {
             if (packageName in InstallWindowManager.INSTALLER_PACKAGES && InstallWindowManager.isOpen(this)) {
                 blockedApps.remove(packageName)

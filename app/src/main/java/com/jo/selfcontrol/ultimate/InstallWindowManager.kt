@@ -82,6 +82,7 @@ object InstallWindowManager {
         }
         // Unsuspend and unblock installer packages (Play Store, package installers)
         for (pkg in INSTALLER_PACKAGES) {
+            if (BuildConfig.BLOCK_ALL_APP_INSTALLS && pkg == "com.android.vending") continue
             DeviceOwnerHelper.unsuspendApp(ctx, pkg)
             AppWatcherService.blockedApps.remove(pkg)
         }
@@ -99,7 +100,9 @@ object InstallWindowManager {
     fun close(ctx: Context, reason: String) {
         InstallWindowReceiver.cancel(ctx)
         clearState(ctx)
-        // Note: We do NOT re-impose DISALLOW_INSTALL_APPS here; WhitelistManager isolates unapproved apps.
+        if (DeviceOwnerHelper.isDeviceOwner(ctx)) {
+            DeviceOwnerHelper.setInstallRestrictions(ctx, blocked = true)
+        }
         syncInstallBlocks(ctx)
         Log.w(TAG, "Install window CLOSED ($reason)")
         EventLog.log(ctx, "INSTALL_WINDOW", "closed ($reason)")

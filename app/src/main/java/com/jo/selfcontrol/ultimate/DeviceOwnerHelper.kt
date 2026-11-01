@@ -4,6 +4,8 @@ import android.Manifest
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.UserManager
 import android.provider.Settings
 import android.util.Log
@@ -81,11 +83,20 @@ object DeviceOwnerHelper {
             Log.i(TAG, "Silent auto-grant disabled for this flavor — onboarding checklist handles permissions")
         }
 
-        // 5. App installations are allowed — unauthorized apps are quarantined by WhitelistManager
-        runCatching {
-            d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS)
-            d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
-            Log.i(TAG, "Install restrictions cleared (delegated to WhitelistManager)")
+        // 5. App installations restrictions
+        if (BuildConfig.BLOCK_ALL_APP_INSTALLS) {
+            runCatching {
+                d.addUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS)
+                d.addUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+                Log.i(TAG, "Install restrictions imposed (flavor with BLOCK_ALL_APP_INSTALLS: DISALLOW_INSTALL_APPS)")
+            }
+            hideApp(ctx, "com.android.vending", true)
+        } else {
+            runCatching {
+                d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS)
+                d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+                Log.i(TAG, "Install restrictions cleared (delegated to WhitelistManager)")
+            }
         }
 
         // 6. Security restrictions: Factory reset is ALWAYS permitted so the user can rescue the device
@@ -117,6 +128,11 @@ object DeviceOwnerHelper {
             val configuredHost = getPrivateDnsHost(ctx) ?: DEFAULT_PRIVATE_DNS
             applyPrivateDnsInternal(ctx, configuredHost)
         }
+
+        // 9. Block all browsers if required by flavor
+        if (BuildConfig.BLOCK_ALL_BROWSERS) {
+            enforceBrowserLockdown(ctx)
+        }
     }
 
     /**
@@ -128,10 +144,51 @@ object DeviceOwnerHelper {
         val d = dpm(ctx)
         val a = admin(ctx)
         runCatching {
-            d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS)
-            d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
-            Log.i(TAG, "setInstallRestrictions: install restrictions remain cleared (Whitelist mode)")
+            if (blocked && BuildConfig.BLOCK_ALL_APP_INSTALLS) {
+                d.addUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS)
+                d.addUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+                hideApp(ctx, "com.android.vending", true)
+                Log.i(TAG, "setInstallRestrictions: DISALLOW_INSTALL_APPS imposed (BLOCK_ALL_APP_INSTALLS)")
+            } else if (!blocked) {
+                d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS)
+                d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+                if (!BuildConfig.BLOCK_ALL_APP_INSTALLS) {
+                    hideApp(ctx, "com.android.vending", false)
+                }
+                Log.i(TAG, "setInstallRestrictions: install restrictions temporarily cleared for install window")
+            } else {
+                d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS)
+                d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+                Log.i(TAG, "setInstallRestrictions: install restrictions remain cleared (Whitelist mode)")
+            }
         }.onFailure { Log.e(TAG, "setInstallRestrictions failed: ${it.message}") }
+    }
+
+    fun enforceBrowserLockdown(ctx: Context) {
+        if (!isDeviceOwner(ctx)) return
+        val pm = ctx.packageManager
+        for (pkg in BrowserBlocklist.ALL_BROWSERS) {
+            try {
+                pm.getApplicationInfo(pkg, PackageManager.MATCH_UNINSTALLED_PACKAGES)
+                hideApp(ctx, pkg, true)
+                runCatching { dpm(ctx).setPackagesSuspended(admin(ctx), arrayOf(pkg), true) }
+                Log.w(TAG, "enforceBrowserLockdown: hid and suspended $pkg")
+            } catch (_: Exception) {}
+        }
+        runCatching {
+            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://google.com")).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+            }
+            val list = pm.queryIntentActivities(intent, PackageManager.MATCH_ALL)
+            for (ri in list) {
+                val pkg = ri.activityInfo?.packageName ?: continue
+                if (pkg != ctx.packageName && !pkg.startsWith("com.android.settings") && !pkg.startsWith("com.android.systemui")) {
+                    hideApp(ctx, pkg, true)
+                    runCatching { dpm(ctx).setPackagesSuspended(admin(ctx), arrayOf(pkg), true) }
+                    Log.w(TAG, "enforceBrowserLockdown: hid and suspended dynamic browsable app $pkg")
+                }
+            }
+        }
     }
 
     /**
@@ -217,6 +274,10 @@ object DeviceOwnerHelper {
     }
 
     fun unsuspendApp(ctx: Context, pkg: String): Boolean {
+        if (BuildConfig.BLOCK_ALL_BROWSERS && BrowserBlocklist.isBrowser(ctx, pkg)) {
+            Log.w(TAG, "unsuspendApp rejected: $pkg is a browser and BLOCK_ALL_BROWSERS is enabled")
+            return false
+        }
         if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
             GuardianClient.setPackageSuspended(pkg, false)
             return true
@@ -254,6 +315,7 @@ object DeviceOwnerHelper {
                 val pkg = app.packageName
                 if (pkg == ctx.packageName) continue
                 if (pkg in keep) continue
+                if (BuildConfig.BLOCK_ALL_BROWSERS && BrowserBlocklist.isBrowser(ctx, pkg)) continue
                 runCatching {
                     if (pm.isPackageSuspended(pkg)) {
                         attempted.add(pkg)
@@ -276,6 +338,14 @@ object DeviceOwnerHelper {
 
     /** Hide an app entirely (used for Nuclear Mode OS-level enforcement). */
     fun hideApp(ctx: Context, pkg: String, hidden: Boolean): Boolean {
+        if (!hidden && BuildConfig.BLOCK_ALL_BROWSERS && BrowserBlocklist.isBrowser(ctx, pkg)) {
+            Log.w(TAG, "hideApp(false) rejected: $pkg is a browser and BLOCK_ALL_BROWSERS is enabled")
+            return false
+        }
+        if (!hidden && BuildConfig.BLOCK_ALL_APP_INSTALLS && pkg == "com.android.vending") {
+            Log.w(TAG, "hideApp(false) rejected: $pkg is Play Store and BLOCK_ALL_APP_INSTALLS is enabled")
+            return false
+        }
         if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
             GuardianClient.setPackageHidden(pkg, hidden)
             return true

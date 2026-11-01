@@ -807,6 +807,11 @@ object WhitelistManager {
 
     fun isWhitelisted(ctx: Context, pkg: String): Boolean {
         val cleanPkg = sanitizePackageName(pkg)
+        if (cleanPkg.isBlank()) return false
+        if (BuildConfig.BLOCK_ALL_BROWSERS && BrowserBlocklist.isBrowser(ctx, cleanPkg)) {
+            Log.w(TAG, "Refusing whitelist addition of browser $cleanPkg (BLOCK_ALL_BROWSERS active)")
+            return false
+        }
         if (cleanPkg in HARD_GUARDS) return true
         if (cleanPkg == ctx.packageName) return true
         if (isGuarded(ctx, cleanPkg)) return true
@@ -829,6 +834,10 @@ object WhitelistManager {
     fun isGuarded(ctx: Context, pkgInfo: PackageInfo): Boolean {
         val pkg = pkgInfo.packageName
         guardedCache[pkg]?.let { return it }
+        if (BuildConfig.BLOCK_ALL_BROWSERS && BrowserBlocklist.isBrowser(ctx, pkg)) {
+            guardedCache[pkg] = false
+            return false
+        }
         if (pkg in HARD_GUARDS || pkg == ctx.packageName) {
             guardedCache[pkg] = true
             return true
@@ -851,6 +860,10 @@ object WhitelistManager {
 
     fun isGuarded(ctx: Context, pkg: String): Boolean {
         guardedCache[pkg]?.let { return it }
+        if (BuildConfig.BLOCK_ALL_BROWSERS && BrowserBlocklist.isBrowser(ctx, pkg)) {
+            guardedCache[pkg] = false
+            return false
+        }
         if (pkg in HARD_GUARDS || pkg == ctx.packageName) {
             guardedCache[pkg] = true
             return true
@@ -915,6 +928,15 @@ object WhitelistManager {
     fun enforce(ctx: Context) {
         var state = checkAndPromotePendingRequests(ctx)
         if (!state.enabled) return
+
+        if (BuildConfig.BLOCK_ALL_BROWSERS) {
+            val browsersInAllowed = state.allowedPackages.filter { BrowserBlocklist.isBrowser(ctx, it) }.toSet()
+            if (browsersInAllowed.isNotEmpty()) {
+                state = state.copy(allowedPackages = state.allowedPackages - browsersInAllowed)
+                saveState(ctx, state)
+                Log.w(TAG, "Pruned browsers from whitelist on brother flavor: $browsersInAllowed")
+            }
+        }
 
         // 1. Un-hide / release any packages that are now allowed OR are system/guarded apps
         val hidden = loadHiddenState(ctx).toMutableSet()
@@ -1160,6 +1182,10 @@ object WhitelistManager {
         }
         val cleanPkg = sanitizePackageName(pkg)
         if (cleanPkg.isBlank()) return false
+        if (BuildConfig.BLOCK_ALL_BROWSERS && BrowserBlocklist.isBrowser(ctx, cleanPkg)) {
+            Log.w(TAG, "Refusing whitelist addition of browser $cleanPkg (BLOCK_ALL_BROWSERS active)")
+            return false
+        }
         if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
             return GuardianClient.requestAppAddition(cleanPkg)
         }
