@@ -127,7 +127,6 @@ object WhitelistManager {
         "com.shotguntheapp.android",
         "com.completude.professeur",
         "com.chyrpe.chyrpe",
-        "com.fabernovel.ratp",
         "com.google.android.keep",
         "com.english.progress.learn",
         "com.google.android.safetycore",
@@ -199,11 +198,11 @@ object WhitelistManager {
         val result = if (BuildConfig.WHITELIST_ADB_ONLY) {
             mutableSetOf<String>()
         } else {
-            INITIAL_ALLOWED_PACKAGES.filterNot { isGuarded(ctx, it) }.toMutableSet()
+            mutableSetOf<String>()
         }
         try {
             val pm = ctx.packageManager
-            val installed = pm.getInstalledPackages(0)
+            val installed = pm.getInstalledPackages(PackageManager.MATCH_UNINSTALLED_PACKAGES)
             for (info in installed) {
                 if (info.packageName == ctx.packageName) continue
                 if (isGuarded(ctx, info)) continue
@@ -983,7 +982,7 @@ object WhitelistManager {
 
         // 2b. Reconcile ghost packages: prune any 3rd-party allowed package that is no longer installed on the device
         val ghostAllowed = state.allowedPackages.filter {
-            it !in installedSet && !isGuarded(ctx, it) && it != ctx.packageName && it !in HARD_GUARDS && it !in INITIAL_ALLOWED_PACKAGES
+            it !in installedSet && !isGuarded(ctx, it) && it != ctx.packageName && it !in HARD_GUARDS
         }.toSet()
         if (ghostAllowed.isNotEmpty()) {
             val prunedAllowed = state.allowedPackages - ghostAllowed
@@ -1037,6 +1036,7 @@ object WhitelistManager {
     /**
      * Fast-path hook invoked from ACTION_PACKAGE_ADDED / ACTION_PACKAGE_REPLACED receiver.
      */
+    @Synchronized
     fun onPackageAdded(ctx: Context, pkg: String) {
         val state = loadState(ctx)
         if (!state.enabled) return
@@ -1062,10 +1062,13 @@ object WhitelistManager {
 
         Log.w(TAG, "🚨 UNAUTHORIZED APP INSTALLED: $pkg -> Neutralizing immediately!")
         EventLog.log(ctx, "WHITELIST", "Blocked on sight: $pkg installed without whitelist approval")
+        val currentHidden = loadHiddenState(ctx)
+        val wasAlreadyHidden = pkg in currentHidden
         neutralize(ctx, pkg)
-        val hidden = loadHiddenState(ctx) + pkg
-        saveHiddenState(ctx, hidden)
-        notifyAppQuarantined(ctx, pkg)
+        saveHiddenState(ctx, currentHidden + pkg)
+        if (!wasAlreadyHidden) {
+            notifyAppQuarantined(ctx, pkg)
+        }
     }
 
     /**

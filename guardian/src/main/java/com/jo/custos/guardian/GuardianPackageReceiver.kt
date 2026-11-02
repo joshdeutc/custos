@@ -23,10 +23,15 @@ class GuardianPackageReceiver : BroadcastReceiver() {
                 }
                 val state = GuardianEngine.getState(context)
                 if (state.enabled && pkg !in state.allowedPackages) {
-                    // Unauthorized app installed -> immediately quarantine
-                    GuardianEngine.setPackageSuspendedInternal(context, pkg, true)
-                    GuardianEngine.setPackageHiddenInternal(context, pkg, true)
-                    Log.w(TAG, "Guardian locked down newly installed unauthorized app: $pkg")
+                    if (state.quarantineDelayHours <= 0) {
+                        GuardianEngine.requestAppAddition(context, pkg)
+                        Log.i(TAG, "Quarantine delay is 0: Guardian auto-allowed newly installed app: $pkg")
+                    } else {
+                        // Unauthorized app installed -> immediately quarantine
+                        GuardianEngine.setPackageSuspendedInternal(context, pkg, true)
+                        GuardianEngine.setPackageHiddenInternal(context, pkg, true)
+                        Log.w(TAG, "Guardian locked down newly installed unauthorized app: $pkg")
+                    }
                 }
             }
             Intent.ACTION_PACKAGE_REMOVED, Intent.ACTION_PACKAGE_FULLY_REMOVED -> {

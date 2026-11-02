@@ -77,7 +77,6 @@ object GuardianEngine {
         "com.shotguntheapp.android",
         "com.completude.professeur",
         "com.chyrpe.chyrpe",
-        "com.fabernovel.ratp",
         "com.google.android.keep",
         "com.english.progress.learn",
         "com.google.android.safetycore",
@@ -140,7 +139,7 @@ object GuardianEngine {
     )
 
     fun getInitialAllowedPackages(ctx: Context): Set<String> {
-        val result = INITIAL_ALLOWED_PACKAGES.toMutableSet()
+        val result = mutableSetOf<String>()
         try {
             val pm = ctx.packageManager
             val installed = pm.getInstalledPackages(PackageManager.MATCH_UNINSTALLED_PACKAGES)
@@ -236,14 +235,22 @@ object GuardianEngine {
         return false
     }
 
+    fun isPackageInstalled(ctx: Context, pkg: String): Boolean {
+        return try {
+            ctx.packageManager.getApplicationInfo(pkg, PackageManager.MATCH_UNINSTALLED_PACKAGES)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     fun isSystemPackage(ctx: Context, pkg: String): Boolean {
         return try {
             val ai = ctx.packageManager.getApplicationInfo(pkg, PackageManager.MATCH_UNINSTALLED_PACKAGES)
             (ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
                 (ai.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
         } catch (e: Exception) {
-            // Unknown -> be conservative and treat as guarded
-            true
+            false
         }
     }
 
@@ -288,7 +295,6 @@ object GuardianEngine {
                 allowed.add(allowedArr.getString(i))
             }
             allowed.addAll(HARD_GUARDS)
-            allowed.addAll(INITIAL_ALLOWED_PACKAGES)
             val nonGuards = allowed.filterNot { it in HARD_GUARDS }
             if (nonGuards.isEmpty()) {
                 allowed.addAll(getInitialAllowedPackages(ctx))
@@ -387,7 +393,6 @@ object GuardianEngine {
                     allowed.add(allowedArr.getString(i))
                 }
                 allowed.addAll(HARD_GUARDS)
-            allowed.addAll(INITIAL_ALLOWED_PACKAGES)
                 if (allowed.none { it !in HARD_GUARDS }) {
                     allowed.addAll(getInitialAllowedPackages(ctx))
                 }
@@ -724,7 +729,7 @@ object GuardianEngine {
 
         val installedSet = installed.map { it.packageName }.toSet()
         val ghostAllowed = state.allowedPackages.filter {
-            it !in installedSet && !isGuarded(ctx, it) && it != ctx.packageName && it !in HARD_GUARDS && it !in INITIAL_ALLOWED_PACKAGES
+            it !in installedSet && !isGuarded(ctx, it) && it != ctx.packageName && it !in HARD_GUARDS
         }.toSet()
         if (ghostAllowed.isNotEmpty()) {
             val prunedAllowed = state.allowedPackages - ghostAllowed
@@ -733,14 +738,23 @@ object GuardianEngine {
             Log.w(TAG, "Guardian pruned ${ghostAllowed.size} ghost app(s) from whitelist: $ghostAllowed")
         }
 
-        for (pkg in INITIAL_ALLOWED_PACKAGES + getState(ctx).allowedPackages) {
-            setPackageSuspendedInternal(ctx, pkg, false)
-            setPackageHiddenInternal(ctx, pkg, false)
+        if (state.quarantineDelayHours <= 0) {
+            val newlyAllowed = installed.map { it.packageName }.filterNot { isGuarded(ctx, it) }
+            val merged = state.allowedPackages + newlyAllowed
+            if (merged != state.allowedPackages) {
+                state = state.copy(allowedPackages = merged)
+                saveStateInternal(ctx, state)
+            }
+            for (pkgInfo in installed) {
+                setPackageSuspendedInternal(ctx, pkgInfo.packageName, false)
+                setPackageHiddenInternal(ctx, pkgInfo.packageName, false)
+            }
+            return
         }
 
         for (pkgInfo in installed) {
             val pkg = pkgInfo.packageName
-            if (isGuarded(ctx, pkg) || pkg in state.allowedPackages || pkg in INITIAL_ALLOWED_PACKAGES) {
+            if (isGuarded(ctx, pkg) || pkg in state.allowedPackages) {
                 // Allowed app -> ensure unhidden and unsuspended
                 setPackageSuspendedInternal(ctx, pkg, false)
                 setPackageHiddenInternal(ctx, pkg, false)
@@ -759,10 +773,7 @@ object GuardianEngine {
         } catch (e: Exception) {
             emptyList()
         }
-        for (pkg in INITIAL_ALLOWED_PACKAGES + getState(ctx).allowedPackages) {
-            setPackageSuspendedInternal(ctx, pkg, false)
-            setPackageHiddenInternal(ctx, pkg, false)
-        }
+
 
         for (pkgInfo in installed) {
             setPackageSuspendedInternal(ctx, pkgInfo.packageName, false)
