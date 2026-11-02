@@ -570,6 +570,13 @@ object GuardianEngine {
     }
 
     fun onPackageRemoved(ctx: Context, packageName: String) {
+        val isStillInstalledOnDisk = try {
+            val ai = ctx.packageManager.getApplicationInfo(packageName, PackageManager.MATCH_UNINSTALLED_PACKAGES)
+            !ai.sourceDir.isNullOrBlank() && File(ai.sourceDir).exists()
+        } catch (e: Exception) {
+            false
+        }
+        if (isStillInstalledOnDisk) return
         if (isGuarded(ctx, packageName) || packageName == ctx.packageName) return
         synchronized(lock) {
             val state = getState(ctx)

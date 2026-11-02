@@ -1077,6 +1077,13 @@ object WhitelistManager {
      * reinstallation will strictly require passing through the quarantine delay again.
      */
     fun onPackageRemoved(ctx: Context, pkg: String) {
+        val isStillInstalledOnDisk = try {
+            val ai = ctx.packageManager.getApplicationInfo(pkg, PackageManager.MATCH_UNINSTALLED_PACKAGES)
+            !ai.sourceDir.isNullOrBlank() && File(ai.sourceDir).exists()
+        } catch (e: Exception) {
+            false
+        }
+        if (isStillInstalledOnDisk) return
         if (pkg == ctx.packageName) return
         if (pkg in HARD_GUARDS || isGuarded(ctx, pkg)) return
 
