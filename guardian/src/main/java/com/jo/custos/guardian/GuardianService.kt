@@ -185,10 +185,35 @@ class GuardianService : Service() {
         override fun requestConfigChange(candidateJson: String): Boolean {
             val newConfig = ConfigManager.fromJsonString(candidateJson) ?: return false
             DelayManager.applyPendingConfigsIfReady(applicationContext)
-            val currentConfig = ConfigManager.loadConfig(applicationContext)
+            var currentConfig = ConfigManager.loadConfig(applicationContext)
             if (candidateJson == ConfigManager.configToJsonString(currentConfig)) {
                 return true
             }
+
+            // Immediately merge newly added curfew rules (hardenings)
+            val currentCurfewSigs = currentConfig.periodBlocks.map { it.scheduleSignature() }.toSet()
+            val addedCurfewRules = newConfig.periodBlocks.filter { it.scheduleSignature() !in currentCurfewSigs }
+            if (addedCurfewRules.isNotEmpty()) {
+                currentConfig = currentConfig.copy(periodBlocks = currentConfig.periodBlocks + addedCurfewRules)
+                ConfigManager.saveConfig(applicationContext, currentConfig)
+                GuardianEngine.evaluateLimits(applicationContext)
+                Log.i(TAG, "Added ${addedCurfewRules.size} new curfew rule(s) immediately to Guardian")
+            }
+
+            // Immediately merge newly added app limits (hardenings)
+            val currentLimitPkgs = currentConfig.limits.map { it.packageName }.toSet()
+            val addedAppLimits = newConfig.limits.filter { it.packageName !in currentLimitPkgs }
+            if (addedAppLimits.isNotEmpty()) {
+                currentConfig = currentConfig.copy(limits = currentConfig.limits + addedAppLimits)
+                ConfigManager.saveConfig(applicationContext, currentConfig)
+                GuardianEngine.evaluateLimits(applicationContext)
+                Log.i(TAG, "Added ${addedAppLimits.size} new app limit(s) immediately to Guardian")
+            }
+
+            if (ConfigManager.configToJsonString(currentConfig) == ConfigManager.configToJsonString(newConfig)) {
+                return true
+            }
+
             val globalDelay = DelayManager.getCurrentEffectiveDelaySeconds(applicationContext)
             val defer = ConfigManager.requiredDefer(currentConfig, newConfig, globalDelay)
             val unlockApplies = !defer.fromExplicitTimer && DelayManager.isSettingsUnlocked(applicationContext)

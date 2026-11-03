@@ -266,7 +266,10 @@ class MainActivity : Activity() {
         curfewCircle = com.jo.selfcontrol.ultimate.ui.FeatureCircleView(this).apply {
             setFeatureTitle("Curfew")
             setSummaryText("Sleep hours")
-            onClickListener = { zoomCanvas.zoomInto(this) }
+            onClickListener = {
+                refreshPeriodBlocksUI()
+                zoomCanvas.zoomInto(this)
+            }
         }
         val curfewHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1627,6 +1630,7 @@ class MainActivity : Activity() {
 
         if (!mustDefer) {
             ConfigManager.saveConfig(this, newConfig)
+            refreshPeriodBlocksUI()
             refreshDashboard()
             refreshDelayUI()
             Toast.makeText(this, "Config updated.", Toast.LENGTH_SHORT).show()
@@ -1637,6 +1641,7 @@ class MainActivity : Activity() {
                 describeConfigChange(old, newConfig),
                 overrideDelaySeconds = requirement.seconds
             )
+            refreshPeriodBlocksUI()
             refreshDashboard()
             refreshDelayUI()
             val scope = if (requirement.fromExplicitTimer) "rule timer" else "global delay"
@@ -1652,7 +1657,30 @@ class MainActivity : Activity() {
     private fun refreshPeriodBlocksUI() {
         periodBlocksContainer.removeAllViews()
         val cfg = ConfigManager.loadConfig(this)
-        if (cfg.periodBlocks.isEmpty()) {
+        val activeSigs = cfg.periodBlocks.map { it.scheduleSignature() }.toSet()
+
+        val pendingUpdates = DelayManager.loadState(this).requestedConfigUpdates
+            .filter { it.executeAt > System.currentTimeMillis() }
+
+        val pendingNewRules = mutableListOf<Pair<ConfigManager.PeriodBlockRule, DelayManager.PendingConfigUpdate>>()
+        for (update in pendingUpdates) {
+            if (update.targetType == "CURFEW" && !update.isDelete && update.payloadJson.isNotEmpty()) {
+                val rule = runCatching { ConfigManager.parsePeriodBlockRule(JSONObject(update.payloadJson)) }.getOrNull()
+                if (rule != null && rule.scheduleSignature() !in activeSigs && pendingNewRules.none { it.first.scheduleSignature() == rule.scheduleSignature() }) {
+                    pendingNewRules.add(rule to update)
+                }
+            } else if (update.targetType == "FULL_CONFIG" && update.newLimitsJson.isNotEmpty()) {
+                val fullCfg = ConfigManager.fromJsonString(update.newLimitsJson)
+                fullCfg?.periodBlocks?.forEach { pendingRule ->
+                    if (pendingRule.scheduleSignature() !in activeSigs && pendingNewRules.none { it.first.scheduleSignature() == pendingRule.scheduleSignature() }) {
+                        pendingNewRules.add(pendingRule to update)
+                    }
+                }
+            }
+        }
+
+        val totalRules = cfg.periodBlocks.size + pendingNewRules.size
+        if (totalRules == 0) {
             curfewCircle.setSummaryText("No curfew")
             periodBlocksContainer.addView(TextView(this).apply {
                 text = "No curfew rules."
@@ -1672,6 +1700,8 @@ class MainActivity : Activity() {
 
         if (isNowActive) {
             curfewCircle.setSummaryText("Active now", Color.parseColor("#E53935"))
+        } else if (pendingNewRules.isNotEmpty()) {
+            curfewCircle.setSummaryText("${cfg.periodBlocks.size} active · ${pendingNewRules.size} en attente", Color.parseColor("#E65100"))
         } else {
             val r = cfg.periodBlocks[0]
             val start = "%02d:%02d".format(r.blockedStartMinutes / 60, r.blockedStartMinutes % 60)
@@ -1685,6 +1715,87 @@ class MainActivity : Activity() {
 
         cfg.periodBlocks.forEachIndexed { index, rule ->
             periodBlocksContainer.addView(buildPeriodRuleRow(rule, index))
+        }
+
+        pendingNewRules.forEach { (rule, update) ->
+            periodBlocksContainer.addView(buildPendingNewPeriodRuleRow(rule, update))
+        }
+    }
+
+    private fun buildPendingNewPeriodRuleRow(
+        rule: ConfigManager.PeriodBlockRule,
+        update: DelayManager.PendingConfigUpdate
+    ): LinearLayout {
+        val start = "%02d:%02d".format(
+            rule.blockedStartMinutes / 60,
+            rule.blockedStartMinutes % 60
+        )
+        val end = "%02d:%02d".format(
+            rule.blockedEndMinutes / 60,
+            rule.blockedEndMinutes % 60
+        )
+        val names = rule.packages.joinToString(", ") { getAppName(it) }
+        val days = formatDays(rule.allowedDays)
+        val rem = ((update.executeAt - System.currentTimeMillis()) / 1000).toInt().coerceAtLeast(0)
+
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            background = roundedBackground(Color.parseColor("#FFF3E0"))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(8) }
+
+            addView(TextView(this@MainActivity).apply {
+                text = "⏳ Ajout du couvre-feu en attente (${formatTime(rem)})"
+                setTextColor(Color.parseColor("#E65100"))
+                textSize = 12f
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(0, 0, 0, dp(4))
+            })
+
+            addView(TextView(this@MainActivity).apply {
+                text = "$days\n$start -> $end\n$names"
+                textSize = 14f
+                setTextColor(Color.BLACK)
+            })
+
+            rule.protectionDelaySec?.let { sec ->
+                addView(TextView(this@MainActivity).apply {
+                    text = "🔒 Protection configurée : ${formatLongDuration(sec)}"
+                    textSize = 12f
+                    setTextColor(Color.parseColor("#555555"))
+                    setPadding(0, dp(2), 0, 0)
+                })
+            }
+
+            val buttonRow = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(6) }
+            }
+
+            buttonRow.addView(Button(this@MainActivity).apply {
+                text = "Annuler l'ajout"
+                setTextColor(Color.WHITE)
+                background = roundedBackground(Color.parseColor("#D32F2F"))
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                setOnClickListener {
+                    DelayManager.cancelConfigUpdate(this@MainActivity, update.id)
+                    if (GuardianClient.isAvailable) {
+                        GuardianClient.cancelPendingConfigChange()
+                    }
+                    Toast.makeText(this@MainActivity, "Ajout de couvre-feu annulé.", Toast.LENGTH_SHORT).show()
+                    refreshPeriodBlocksUI()
+                    refreshDashboard()
+                    refreshDelayUI()
+                }
+            })
+            addView(buttonRow)
         }
     }
 
@@ -1836,21 +1947,42 @@ class MainActivity : Activity() {
                     }
                     setOnClickListener { showEditCurfewRuleDialog(index, rule) }
                 })
-                buttonRow.addView(Button(this@MainActivity).apply {
-                    text = "Delete"
-                    setTextColor(Color.WHITE)
-                    background = roundedBackground(Color.parseColor("#D32F2F"))
-                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                        marginStart = dp(4)
-                    }
-                    setOnClickListener {
-                        val cur = loadEditableConfig()
-                        val newList = cur.periodBlocks.toMutableList().also {
-                            if (index in it.indices) it.removeAt(index)
+                if (pendingCurfewUpdate != null && pendingCurfewUpdate.isDelete) {
+                    buttonRow.addView(Button(this@MainActivity).apply {
+                        text = "Annuler suppr."
+                        setTextColor(Color.WHITE)
+                        background = roundedBackground(Color.parseColor("#2E7D32"))
+                        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                            marginStart = dp(4)
                         }
-                        saveConfigWithDelay(ConfigManager.Config(cur.limits, newList, cur.installBlocks))
-                    }
-                })
+                        setOnClickListener {
+                            DelayManager.cancelConfigUpdate(this@MainActivity, pendingCurfewUpdate.id)
+                            if (GuardianClient.isAvailable) {
+                                GuardianClient.cancelPendingConfigChange()
+                            }
+                            Toast.makeText(this@MainActivity, "Suppression annulée.", Toast.LENGTH_SHORT).show()
+                            refreshPeriodBlocksUI()
+                            refreshDashboard()
+                            refreshDelayUI()
+                        }
+                    })
+                } else {
+                    buttonRow.addView(Button(this@MainActivity).apply {
+                        text = "Delete"
+                        setTextColor(Color.WHITE)
+                        background = roundedBackground(Color.parseColor("#D32F2F"))
+                        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                            marginStart = dp(4)
+                        }
+                        setOnClickListener {
+                            val cur = loadEditableConfig()
+                            val newList = cur.periodBlocks.toMutableList().also {
+                                if (index in it.indices) it.removeAt(index)
+                            }
+                            saveConfigWithDelay(ConfigManager.Config(cur.limits, newList, cur.installBlocks))
+                        }
+                    })
+                }
             }
             addView(buttonRow)
         }
@@ -3000,6 +3132,7 @@ class MainActivity : Activity() {
     // ──────────────────────────────────────
 
     private fun refreshDashboard() {
+        refreshPeriodBlocksUI()
         val usage = LimitService.getUsageData()
         val curConfig = ConfigManager.loadConfig(this)
         val configLimits = curConfig.limits.associateBy { it.packageName }

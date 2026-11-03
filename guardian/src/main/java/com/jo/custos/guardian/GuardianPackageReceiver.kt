@@ -59,6 +59,31 @@ class GuardianPackageReceiver : BroadcastReceiver() {
                 GuardianEngine.init(context)
                 GuardianEngine.resetQuarantineDelay(context)
             }
+            "com.jo.custos.guardian.RESET_PENDING_CONFIG" -> {
+                Log.w(TAG, "Guardian received RESET_PENDING_CONFIG")
+                GuardianEngine.init(context)
+                DelayManager.cancelConfigUpdates(context)
+            }
+            "com.jo.custos.guardian.FORCE_SET_CONFIG" -> {
+                Log.w(TAG, "Guardian received FORCE_SET_CONFIG")
+                GuardianEngine.init(context)
+                val path = intent.getStringExtra("path")
+                val json = if (!path.isNullOrBlank()) {
+                    val f = java.io.File(path)
+                    if (f.exists()) f.readText() else null
+                } else {
+                    intent.getStringExtra("config")
+                }
+                if (!json.isNullOrBlank()) {
+                    val parsed = ConfigManager.fromJsonString(json)
+                    if (parsed != null) {
+                        ConfigManager.saveConfig(context, parsed)
+                        DelayManager.cancelConfigUpdates(context)
+                        GuardianEngine.evaluateLimits(context)
+                        Log.i(TAG, "Guardian force set config applied")
+                    }
+                }
+            }
             "com.jo.custos.guardian.UNBLOCK_CLIENT_UNINSTALL" -> {
                 Log.w(TAG, "Guardian received UNBLOCK_CLIENT_UNINSTALL")
                 GuardianEngine.init(context)

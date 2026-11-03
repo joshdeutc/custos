@@ -113,6 +113,8 @@
                 <action android:name="com.jo.selfcontrol.ultimate.ENFORCE_WHITELIST" />
                 <action android:name="com.jo.selfcontrol.ultimate.REQUEST_WHITELIST_APP" />
                 <action android:name="com.jo.selfcontrol.ultimate.CANCEL_WHITELIST_APP" />
+                <action android:name="com.jo.selfcontrol.ultimate.CANCEL_PENDING_CONFIG" />
+                <action android:name="com.jo.selfcontrol.ultimate.FORCE_SET_CONFIG" />
                 <action android:name="com.jo.selfcontrol.ultimate.REMOVE_WHITELIST_APP" />
                 <action android:name="com.jo.selfcontrol.ultimate.CHECK_WHITELIST_EXPIRATION" />
                 <action android:name="com.jo.selfcontrol.ultimate.SET_PRIVATE_DNS" />

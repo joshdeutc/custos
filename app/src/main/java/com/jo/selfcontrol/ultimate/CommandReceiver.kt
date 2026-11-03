@@ -70,6 +70,8 @@ class CommandReceiver : BroadcastReceiver() {
             "com.jo.selfcontrol.ultimate.SET_APP_LIMIT" -> handleSetAppLimit(context, intent)
             "com.jo.selfcontrol.ultimate.REMOVE_CURFEW" -> handleRemoveCurfew(context, intent)
             "com.jo.selfcontrol.ultimate.SET_CURFEW" -> handleSetCurfew(context, intent)
+            "com.jo.selfcontrol.ultimate.CANCEL_PENDING_CONFIG" -> handleCancelPendingConfig(context)
+            "com.jo.selfcontrol.ultimate.FORCE_SET_CONFIG" -> handleForceSetConfig(context, intent)
             "com.jo.selfcontrol.ultimate.CHECK_WHITELIST_EXPIRATION" ->
                 WhitelistManager.checkAndPromotePendingRequests(context)
             "com.jo.selfcontrol.ultimate.SET_PRIVATE_DNS" -> handleSetPrivateDns(context, intent)
@@ -518,6 +520,32 @@ class CommandReceiver : BroadcastReceiver() {
                 pendingResult.finish()
             }
         }.start()
+    }
+
+    private fun handleCancelPendingConfig(context: Context) {
+        DelayManager.cancelConfigUpdates(context)
+        Log.w("SelfControl.Cmd", "=== CANCEL_PENDING_CONFIG: all pending config updates cancelled ===")
+        EventLog.log(context, "CMD", "Pending config updates cancelled via ADB")
+    }
+
+    private fun handleForceSetConfig(context: Context, intent: Intent) {
+        val path = intent.getStringExtra("path")
+        val json = if (!path.isNullOrBlank()) {
+            val f = java.io.File(path)
+            if (f.exists()) f.readText() else null
+        } else {
+            intent.getStringExtra("config")
+        }
+        if (!json.isNullOrBlank()) {
+            val parsed = ConfigManager.fromJsonString(json)
+            if (parsed != null) {
+                ConfigManager.saveConfig(context, parsed)
+                DelayManager.cancelConfigUpdates(context)
+                LimitService.notifyConfigChanged(context)
+                Log.w("SelfControl.Cmd", "=== FORCE_SET_CONFIG: config applied via ADB ===")
+                EventLog.log(context, "CMD", "Config force set via ADB")
+            }
+        }
     }
 
     private fun handleGetPrivateDns(context: Context) {
