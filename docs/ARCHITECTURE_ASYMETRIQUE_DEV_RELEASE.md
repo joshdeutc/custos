@@ -74,24 +74,14 @@ Pour concilier **inviolabilité de l'auto-discipline (Anti-Impulsion)** et **agi
 
 ---
 
-## 4. Transition et Dépannage ADB (Commandes de Secours)
+## 4. Mise à Jour et Robustesse ADB (Zéro Porte Dérobée)
 
-Comme Guardian applique `dpm.setUninstallBlocked(admin, "com.jo.selfcontrol.ultimate", true)`, Android refuserait une désinstallation normale de Custos UI. Si une réinstallation complète ou un changement de signature de l'UI est nécessaire, Guardian intègre des commandes d'administration ADB exclusives :
+Guardian applique `dpm.setUninstallBlocked(admin, "com.jo.selfcontrol.ultimate", true)`. Pour mettre à jour Custos UI en cours de dev, **aucune désinstallation n'est requise** : Android permet l'écrasement en place via `adb install -r -d -t`.
 
-```bash
-# 1. Débloquer temporairement la désinstallation de Custos UI
-adb shell am broadcast -p com.jo.custos.guardian -a com.jo.custos.guardian.UNBLOCK_CLIENT_UNINSTALL
-
-# 2. Désinstaller / Réinstaller Custos UI
-adb uninstall com.jo.selfcontrol.ultimate
-adb install -r -t -d app/build/outputs/apk/me/debug/app-me-debug.apk
-
-# 3. Re-verrouiller immédiatement la protection anti-désinstallation
-adb shell am broadcast -p com.jo.custos.guardian -a com.jo.custos.guardian.BLOCK_CLIENT_UNINSTALL
-
-# 4. En cas de délai de whitelist bloqué, forcer la remise à 0h
-adb shell am broadcast -p com.jo.custos.guardian -a com.jo.custos.guardian.RESET_WHITELIST_DELAY
-```
+Les anciennes commandes broadcast de secours (`UNBLOCK_CLIENT_UNINSTALL`, `RESET_WHITELIST_DELAY`, `FORCE_SET_CONFIG`) ont été **définitivement supprimées** lors de l'audit de sécurité :
+- Elles constituaient des portes dérobées applicatives contournant le Time-Lock.
+- Guardian est désormais hermétique : aucune commande broadcast ADB ne peut désactiver la protection ni altérer les délais.
+- Le seul moyen d'altérer la constitution de Guardian est de passer par le workflow GitHub Actions sous Time-Lock (2h).
 
 ---
 

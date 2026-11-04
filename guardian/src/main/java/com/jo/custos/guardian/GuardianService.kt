@@ -7,6 +7,9 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import android.os.Binder
+import android.os.Process
+import android.os.Parcel
 
 class GuardianService : Service() {
 
@@ -84,7 +87,22 @@ class GuardianService : Service() {
         Log.w(TAG, "GuardianService destroyed")
     }
 
+    private fun enforceCallingPermission() {
+        val uid = Binder.getCallingUid()
+        if (uid == Process.myUid()) return
+        val packages = packageManager.getPackagesForUid(uid)
+        if (packages == null || "com.jo.selfcontrol.ultimate" !in packages) {
+            Log.e(TAG, "Unauthorized AIDL call from UID $uid (${packages?.joinToString()})")
+            throw SecurityException("Access denied: UID $uid is not authorized to communicate with GuardianService")
+        }
+    }
+
     private val binder = object : IGuardianService.Stub() {
+
+        override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
+            enforceCallingPermission()
+            return super.onTransact(code, data, reply, flags)
+        }
 
         override fun getVersion(): Int = 2
 
@@ -161,10 +179,24 @@ class GuardianService : Service() {
         }
 
         override fun setPackageSuspended(packageName: String, suspended: Boolean) {
+            val state = GuardianEngine.getState(applicationContext)
+            if (!suspended && state.enabled && packageName !in state.allowedPackages) {
+                Log.w(TAG, "Rejected setPackageSuspended(false) for unauthorized app: $packageName")
+                return
+            }
+            if (!suspended && packageName in GuardianEngine.getBlockedApps()) {
+                Log.w(TAG, "Rejected setPackageSuspended(false) for limit-blocked app: $packageName")
+                return
+            }
             GuardianEngine.setPackageSuspendedInternal(applicationContext, packageName, suspended)
         }
 
         override fun setPackageHidden(packageName: String, hidden: Boolean) {
+            val state = GuardianEngine.getState(applicationContext)
+            if (!hidden && state.enabled && packageName !in state.allowedPackages) {
+                Log.w(TAG, "Rejected setPackageHidden(false) for unauthorized app: $packageName")
+                return
+            }
             GuardianEngine.setPackageHiddenInternal(applicationContext, packageName, hidden)
         }
 
@@ -311,6 +343,10 @@ class GuardianService : Service() {
 
         override fun saveDelayStateJson(json: String): Boolean {
             val file = java.io.File(applicationContext.filesDir, "delay_config.json")
+            if (file.exists() && file.length() > 5) {
+                Log.w(TAG, "Rejected saveDelayStateJson: Delay config is already initialized and protected!")
+                return false
+            }
             file.writeText(json)
             DelayManager.loadState(applicationContext)
             return true
@@ -353,6 +389,10 @@ class GuardianService : Service() {
         }
 
         override fun saveWhitelistStateJson(json: String): Boolean {
+            if (GuardianEngine.isWhitelistInitialized(applicationContext)) {
+                Log.w(TAG, "Rejected saveWhitelistStateJson: Guardian whitelist is already initialized and protected!")
+                return false
+            }
             return GuardianEngine.importWhitelistState(applicationContext, json)
         }
 

@@ -13,7 +13,7 @@ Nous avons validé de bout en bout la cohérence de la clé de release avec les 
 ### A. Empreintes du Keystore (`custos-release.jks`)
 * **Fichier** : `custos-release.jks`
 * **Alias** : `custos`
-* **Mot de passe** : `duxJLcbWga5Rf9wU8eNGOz1o`
+* **Mot de passe** : `[STOCKÉ DANS LES SECRETS GITHUB & CLÉ USB COLD STORAGE]`
 * **Propriétaire (DN)** : `CN=Custos, O=joshdeutc, C=FR`
 * **Validité** : Du 7 Juin 2026 au 23 Octobre 2053
 * **Empreinte SHA-256** :

@@ -36,6 +36,9 @@ object ScreenLearnSession {
     @Volatile
     private var step: Step = Step.IDLE
 
+    private val backgroundExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
     private var packageName: String = ""
     private var ruleName: String = ""
     private var targetIds: Set<String> = emptySet()
@@ -81,55 +84,66 @@ object ScreenLearnSession {
 
     /**
      * Read the screen twice, [STABILISE_MS] apart, and keep only what appeared in both.
-     *
-     * A single reading catches whatever happened to be on screen, including the tab the user just left:
-     * apps like WhatsApp keep adjacent pager fragments alive, so mid-swipe both are briefly visible and
-     * `isVisibleToUser` is true for both. That is how a first WhatsApp rule ended up keyed on
-     * `conversations_row_message_count` — a Chats element, captured while the Updates tab was still
-     * sliding in. Anything transient fails to survive the second reading.
+     * Runs completely on a background thread to prevent accessibility looper freezes.
      */
     private fun captureStable(svc: AppWatcherService, then: (Set<String>) -> Unit) {
-        val first = svc.visibleIdsFor(packageName)
-        Log.i(TAG, "captureStable: first reading = ${first.size} ids")
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+        backgroundExecutor.execute {
+            val first = svc.visibleIdsFor(packageName)
+            Log.i(TAG, "captureStable: first reading = ${first.size} ids")
+            try {
+                Thread.sleep(STABILISE_MS)
+            } catch (_: InterruptedException) {}
             val second = svc.visibleIdsFor(packageName)
             Log.i(TAG, "captureStable: second reading = ${second.size} ids")
             val common = first intersect second
             Log.i(TAG, "captureStable: common = ${common.size} ids")
             val finalIds = if (common.isNotEmpty()) common else second.ifEmpty { first }
-            then(finalIds)
-        }, STABILISE_MS)
+            mainHandler.post {
+                then(finalIds)
+            }
+        }
     }
 
     /** The overlay's primary button. Each press captures the current screen and advances. */
     fun onPrimary(svc: AppWatcherService) {
         when (step) {
-            Step.AWAIT_TARGET -> captureStable(svc) { ids ->
-                if (ids.isEmpty()) {
-                    toast(svc, "Nothing stable read here. Stay on the screen and retry.")
-                } else {
-                    targetIds = ids
-                    Log.i(TAG, "Target captured: ${ids.size} stable id(s)")
-                    step = Step.AWAIT_SCROLL
-                    render(svc)
+            Step.AWAIT_TARGET -> {
+                toast(svc, "Reading target screen...")
+                captureStable(svc) { ids ->
+                    if (ids.isEmpty()) {
+                        toast(svc, "Nothing stable read here. Stay on the screen and retry.")
+                    } else {
+                        targetIds = ids
+                        Log.i(TAG, "Target captured: ${ids.size} stable id(s)")
+                        step = Step.AWAIT_SCROLL
+                        render(svc)
+                    }
                 }
             }
 
-            Step.AWAIT_SCROLL -> captureStable(svc) { scrolled ->
-                onScrollCaptured(svc, scrolled)
+            Step.AWAIT_SCROLL -> {
+                toast(svc, "Checking scrolled screen...")
+                captureStable(svc) { scrolled ->
+                    onScrollCaptured(svc, scrolled)
+                }
             }
 
-            Step.AWAIT_ALLOWED -> captureStable(svc) { ids ->
-                if (ids.isEmpty()) {
-                    toast(svc, "Nothing stable read here.")
-                } else {
-                    allowedSets.add(ids)
-                    svc.selectedNavItem(packageName)?.let { (id, index) ->
-                        escapeTapId = id
-                        escapeTapIndex = index
-                        Log.i(TAG, "Escape target: $id [#$index]")
+            Step.AWAIT_ALLOWED -> {
+                toast(svc, "Saving rule, analyzing screens...")
+                captureStable(svc) { ids ->
+                    if (ids.isEmpty()) {
+                        toast(svc, "Nothing stable read here.")
+                    } else {
+                        allowedSets.add(ids)
+                        backgroundExecutor.execute {
+                            svc.selectedNavItem(packageName)?.let { (id, index) ->
+                                escapeTapId = id
+                                escapeTapIndex = index
+                                Log.i(TAG, "Escape target: $id [#$index]")
+                            }
+                            finishAsync(svc)
+                        }
                     }
-                    finish(svc)
                 }
             }
 
@@ -159,25 +173,22 @@ object ScreenLearnSession {
         render(svc)
     }
 
-    private fun finish(svc: AppWatcherService) {
+    private fun finishAsync(svc: AppWatcherService) {
         val markers = ScreenRuleManager.deriveMarkers(targetIds, allowedSets)
         if (markers.isEmpty()) {
-            // A real outcome, not an error to hide: some tabs share every id, and a rule built on
-            // those would fire on the screen the user asked to keep.
-            step = Step.IDLE
-            svc.hideLearnOverlay()
-            toast(svc, "These two screens are indistinguishable — no rule possible.")
-            EventLog.log(svc, "LEARN", "failed: no discriminating marker")
+            mainHandler.post {
+                step = Step.IDLE
+                svc.hideLearnOverlay()
+                toast(svc, "These two screens are indistinguishable — no rule possible.")
+                EventLog.log(svc, "LEARN", "failed: no discriminating marker")
+            }
             return
         }
 
         // Keep a handful: one is enough to fire, several give resilience when the app renames one.
         val chosen = markers.take(4)
 
-        // The destination markers need the *same* differential, in reverse. Saving the raw captured
-        // ids put WhatsApp's `action_bar_root`, `root_view` and `pager` in the allowed list — shells
-        // present on every screen of the app, Updates included. The veto would then match everywhere
-        // and nothing would ever be blocked.
+        // The destination markers need the *same* differential, in reverse.
         val allowedMarkers = ScreenRuleManager
             .deriveMarkers(allowedSets.flatten().toSet(), listOf(targetIds))
             .take(4)
@@ -193,11 +204,16 @@ object ScreenLearnSession {
             blockedHours = blockedHours?.takeIf { it.isNotBlank() && it != "*" }
         )
         val saved = ScreenRuleManager.upsert(svc, rule)
-        step = Step.DONE
-        svc.hideLearnOverlay()
-        val shortMarkers = chosen.joinToString(", ") { it.substringAfter(":id/") }
-        toast(svc, if (saved) "Rule saved: $shortMarkers" else "Save failed")
-        Log.w(TAG, "Learning finished: $shortMarkers")
+        if (saved) {
+            svc.invalidateScreenRules()
+        }
+        mainHandler.post {
+            step = Step.DONE
+            svc.hideLearnOverlay()
+            val shortMarkers = chosen.joinToString(", ") { it.substringAfter(":id/") }
+            toast(svc, if (saved) "Rule saved: $shortMarkers" else "Save failed")
+            Log.w(TAG, "Learning finished: $shortMarkers")
+        }
     }
 
     // ──────────────────────────────────────

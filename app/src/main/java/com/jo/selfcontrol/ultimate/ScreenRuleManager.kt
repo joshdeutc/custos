@@ -62,6 +62,59 @@ object ScreenRuleManager {
         "coordinator", "host", "window", "size", "calculator", "background", "placeholder"
     )
 
+    /** Common text markers that appear across many tabs/carousels (ads, recommendations, navigation). */
+    private val GENERIC_TEXT_PHRASES = setOf(
+        "sponsorisé", "sponsorise", "sponsored",
+        "recommandé pour vous", "recommande pour vous", "recommended for you",
+        "recommandations", "recommendations",
+        "outils et utilitaires", "suggestions", "suggestions pour vous",
+        "nouveautés", "nouveautes", "nouveautés et mises à jour", "news",
+        "en savoir plus", "learn more", "plus d'infos", "plus", "more",
+        "voir plus", "see more", "afficher plus",
+        "ok", "annuler", "cancel", "suivant", "next", "terminer", "finish",
+        "retour", "back", "oui", "non", "yes", "no",
+        "accueil", "home", "recherche", "search", "chargement", "loading",
+        // Personal pronouns & references that appear in avatars, headers, or member lists
+        "vous", "moi", "toi", "lui", "elle", "nous", "eux",
+        "you", "me", "us", "him", "her", "them",
+        // Generic status & dynamic chat markers
+        "en ligne", "online", "vu à", "last seen",
+        "message", "messages", "chat", "chats",
+        "photo", "photos", "vidéo", "video", "vidéos", "videos",
+        "audio", "vocal", "document", "documents",
+        "contact", "contacts", "profil", "profile", "compte", "account"
+    )
+
+    /** Patterns matching ephemeral or dynamic content (message counts, unread counters, timestamps). */
+    private val EPHEMERAL_PATTERNS = listOf(
+        Regex("""\b\d+\s*(statut|message|notification|appel|vue|abonné|like|commentaire|membre)s?\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(non lu|non lus|unread)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(il y a|ago)\s+\d+""", RegexOption.IGNORE_CASE),
+        Regex("""\b\d{1,2}:\d{2}\b"""),
+        Regex("""\b(hier|aujourd'hui|demain|yesterday|today|tomorrow)\b""", RegexOption.IGNORE_CASE)
+    )
+
+    fun normalizeText(s: CharSequence?): String {
+        if (s == null) return ""
+        return s.toString()
+            .replace('\u00A0', ' ')
+            .replace('\u202F', ' ')
+            .replace('\u200E', ' ')
+            .replace('\u200F', ' ')
+            .replace('\u202A', ' ')
+            .replace('\u202B', ' ')
+            .replace('\u202C', ' ')
+            .replace('\u202D', ' ')
+            .replace('\u202E', ' ')
+            .replace('\uFEFF', ' ')
+            .replace('«', '"')
+            .replace('»', '"')
+            .replace('“', '"')
+            .replace('”', '"')
+            .replace('’', '\'')
+            .trim()
+    }
+
     /**
      * Specific IDs from known apps that appear across multiple or all tabs,
      * such as global top headers or bottom navigation bar containers.
@@ -83,8 +136,15 @@ object ScreenRuleManager {
      * How many words of an id carry screen-specific meaning — `updates_list` scores 1 ("updates"),
      * `button_view` scores 0. Zero means the id is pure furniture and must not become a marker.
      */
-    private fun specificity(id: String): Int {
-        if (id.startsWith("text:")) return 10
+    fun specificity(id: String): Int {
+        if (id.startsWith("text:") || id.startsWith("desc:")) {
+            val raw = normalizeText(id.substringAfter(':')).lowercase()
+            if (raw.length < 3) return 0
+            if (raw in GENERIC_TEXT_PHRASES) return 0
+            if (raw.split(' ', '_', '-').all { it.lowercase() in GENERIC_WORDS }) return 0
+            if (EPHEMERAL_PATTERNS.any { it.containsMatchIn(raw) }) return 0
+            return 10
+        }
         return id.substringAfter(":id/")
             .split('_')
             .count { it.isNotBlank() && it.lowercase() !in GENERIC_WORDS }
@@ -199,31 +259,55 @@ object ScreenRuleManager {
 
     /** The whole file as a JSON object, or an empty one — the single reader both keys go through. */
     private fun readRoot(ctx: Context): JSONObject {
+        val file = File(ctx.filesDir, RULES_FILE)
+        val localObj = if (file.exists()) {
+            try { JSONObject(file.readText()) } catch (e: Exception) { null }
+        } else null
+
         if (GuardianClient.isAvailable) {
             val remoteJson = GuardianClient.getScreenRulesJson()
             if (!remoteJson.isNullOrEmpty() && remoteJson != "{}") {
                 try {
-                    return JSONObject(remoteJson)
+                    val remoteObj = JSONObject(remoteJson)
+                    if (localObj == null) {
+                        Log.i(TAG, "Local screen rules missing, restoring from Guardian")
+                        file.writeText(remoteObj.toString(2))
+                        return remoteObj
+                    }
+                    val localRules = localObj.optJSONArray("rules")
+                    val remoteRules = remoteObj.optJSONArray("rules")
+                    val localCount = localRules?.length() ?: 0
+                    val remoteCount = remoteRules?.length() ?: 0
+
+                    if (localCount >= remoteCount) {
+                        // Local has equal or more rules; treat local as source of truth and keep Guardian in sync
+                        if (localObj.toString() != remoteObj.toString()) {
+                            Log.i(TAG, "Syncing local screen rules ($localCount) to Guardian ($remoteCount)")
+                            GuardianClient.saveScreenRulesJson(localObj.toString())
+                        }
+                        return localObj
+                    } else {
+                        // Guardian has more rules than local (e.g. fresh reinstall)
+                        Log.i(TAG, "Restoring more rules from Guardian ($remoteCount > $localCount)")
+                        file.writeText(remoteObj.toString(2))
+                        return remoteObj
+                    }
                 } catch (e: Exception) {
                     Log.e(TAG, "Cannot parse Guardian screen rules: ${e.message}")
                 }
+            } else if (localObj != null && (localObj.optJSONArray("rules")?.length() ?: 0) > 0) {
+                Log.i(TAG, "Guardian screen rules empty, pushing local rules to Guardian")
+                GuardianClient.saveScreenRulesJson(localObj.toString())
             }
         }
-        val file = File(ctx.filesDir, RULES_FILE)
-        if (!file.exists()) return JSONObject()
-        return try {
-            JSONObject(file.readText())
-        } catch (e: Exception) {
-            Log.e(TAG, "Cannot read $RULES_FILE: ${e.message}")
-            JSONObject()
-        }
+        return localObj ?: JSONObject()
     }
 
     private fun writeRoot(ctx: Context, root: JSONObject): Boolean = try {
+        File(ctx.filesDir, RULES_FILE).writeText(root.toString(2))
         if (GuardianClient.isAvailable) {
             GuardianClient.saveScreenRulesJson(root.toString())
         }
-        File(ctx.filesDir, RULES_FILE).writeText(root.toString(2))
         true
     } catch (e: Exception) {
         Log.e(TAG, "Cannot write $RULES_FILE: ${e.message}")
@@ -543,20 +627,26 @@ object ScreenRuleManager {
     }
 
     private fun parseRule(o: JSONObject): ScreenRule? = try {
-        val blocked = o.optJSONArray("blocked_ids")?.let { a ->
-            (0 until a.length()).map { a.getString(it) }
+        val blockedRaw = o.optJSONArray("blocked_ids")?.let { a ->
+            (0 until a.length()).map { a.getString(it) }.filter { it.isNotBlank() }
         } ?: emptyList()
-        if (blocked.isEmpty()) {
-            Log.w(TAG, "Ignoring rule '${o.optString("name")}' — no blocked ids")
+        // Clean out generic furniture, personal pronouns, and ephemeral markers from blocked_ids
+        val cleanBlocked = blockedRaw.filter { specificity(it) > 0 }
+        if (cleanBlocked.isEmpty()) {
+            Log.w(TAG, "Ignoring rule '${o.optString("name")}' — no valid blocked ids")
             null
         } else {
+            val allowedRaw = o.optJSONArray("allowed_ids")?.let { a ->
+                (0 until a.length()).map { a.getString(it) }
+            } ?: emptyList()
+            // Clean out generic furniture words from allowedIds so they never act as false vetos
+            val cleanAllowed = allowedRaw.filter { specificity(it) > 0 }
+
             ScreenRule(
                 name = o.getString("name"),
                 packageName = o.getString("package"),
-                blockedIds = blocked,
-                allowedIds = o.optJSONArray("allowed_ids")?.let { a ->
-                    (0 until a.length()).map { a.getString(it) }
-                } ?: emptyList(),
+                blockedIds = cleanBlocked,
+                allowedIds = cleanAllowed,
                 escapeTapId = o.optString("escape_tap_id").ifBlank { null },
                 escapeTapIndex = o.optInt("escape_tap_index", 0),
                 escapeDeeplink = o.optString("escape_deeplink").ifBlank { null },

@@ -10,7 +10,8 @@ Bienvenue sur le projet **Custos** (anciennement *SelfControl Ultimate*). Ce doc
 
 ## 1. Vue d'Ensemble de l'Architecture (Modèle Asymétrique)
 
-👉 **Référence complète : [docs/ARCHITECTURE_ASYMETRIQUE_DEV_RELEASE.md](docs/ARCHITECTURE_ASYMETRIQUE_DEV_RELEASE.md)**
+👉 **Statut officiel du Verrouillage : [docs/STATUS_VERROUILLAGE_OFFICIEL_GITHUB.md](docs/STATUS_VERROUILLAGE_OFFICIEL_GITHUB.md)** (Clé release supprimée du PC, Time-Lock GitHub actif, Cold Storage USB)
+👉 **Référence architecturale : [docs/ARCHITECTURE_ASYMETRIQUE_DEV_RELEASE.md](docs/ARCHITECTURE_ASYMETRIQUE_DEV_RELEASE.md)**
 
 Custos repose sur une séparation asymétrique stricte :
 

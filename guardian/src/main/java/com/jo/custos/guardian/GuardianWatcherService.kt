@@ -67,13 +67,20 @@ class GuardianWatcherService : AccessibilityService() {
 
         // 2. Settings protection
         if (pkg in SETTINGS_PACKAGES && !DelayManager.isSettingsUnlocked(this)) {
-            val root = rootInActiveWindow ?: return
-            if (isProtectedScreen(root)) {
-                val now = System.currentTimeMillis()
-                if (now - lastHomeMs > HOME_COOLDOWN_MS) {
-                    lastHomeMs = now
-                    Log.w(TAG, "Sensitive settings opened -> forcing HOME")
-                    performGlobalAction(GLOBAL_ACTION_HOME)
+            val cls = event.className
+            if (isSensitiveSettingsScreen(cls)) {
+                val root = rootInActiveWindow ?: return
+                try {
+                    if (isProtectedScreen(root)) {
+                        val now = System.currentTimeMillis()
+                        if (now - lastHomeMs > HOME_COOLDOWN_MS) {
+                            lastHomeMs = now
+                            Log.w(TAG, "Sensitive settings opened -> forcing HOME (class=$cls)")
+                            performGlobalAction(GLOBAL_ACTION_HOME)
+                        }
+                    }
+                } finally {
+                    root.recycle()
                 }
             }
         }
@@ -108,7 +115,25 @@ class GuardianWatcherService : AccessibilityService() {
         }
     }
 
+    private fun isSensitiveSettingsScreen(className: CharSequence?): Boolean {
+        val cls = className?.toString() ?: return false
+        return cls.contains("AppInfo", ignoreCase = true)
+            || cls.contains("InstalledAppDetails", ignoreCase = true)
+            || cls.contains("ToggleAccessibilityService", ignoreCase = true)
+            || cls.contains("AccessibilityDetailsSettings", ignoreCase = true)
+            || cls.contains("InstalledAccessibilityService", ignoreCase = true)
+            || cls.contains("ToggleFeaturePreference", ignoreCase = true)
+            || cls.contains("UninstallerActivity", ignoreCase = true)
+            || cls.contains("UninstallUninstalling", ignoreCase = true)
+            || cls.contains("DeletePackageActivity", ignoreCase = true)
+            || cls.contains("DeviceAdminAdd", ignoreCase = true)
+            || cls.contains("DeviceAdminSettings", ignoreCase = true)
+            || cls.contains("Dialog", ignoreCase = true)
+            || cls.contains("Popup", ignoreCase = true)
+    }
+
     private fun isProtectedScreen(node: AccessibilityNodeInfo): Boolean {
+        if (node.packageName?.toString() == "com.android.systemui") return false
         val text = node.text?.toString() ?: ""
         val desc = node.contentDescription?.toString() ?: ""
 

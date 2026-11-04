@@ -65,9 +65,9 @@ Dans PowerShell :
 2. Cocher **Wait timer** et renseigner la durée (ex: `1440` minutes pour 24h, ou `2880` minutes pour 48h).
 3. Dans la section **Environment secrets**, ajouter :
    * `KEYSTORE_BASE64` : Contenu du fichier `keystore_base64.txt`.
-   * `KEYSTORE_PASSWORD` : Mot de passe du keystore (`duxJLcbWga5Rf9wU8eNGOz1o`).
+   * `KEYSTORE_PASSWORD` : Mot de passe du keystore (`[STOCKÉ DANS LES SECRETS GITHUB & CLÉ USB COLD STORAGE]`).
    * `KEY_ALIAS` : Alias de la clé (`custos`).
-   * `KEY_PASSWORD` : Mot de passe de la clé (`duxJLcbWga5Rf9wU8eNGOz1o`).
+   * `KEY_PASSWORD` : Mot de passe de la clé (`[STOCKÉ DANS LES SECRETS GITHUB & CLÉ USB COLD STORAGE]`).
 
 ### C. Sécurisation Locale Finale
 Une fois les APKs Release installés sur le téléphone et les secrets enregistrés sur GitHub :

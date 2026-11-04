@@ -1,1298 +1,1626 @@
-package com.jo.selfcontrol.ultimate
-
-import android.accessibilityservice.AccessibilityService
-import android.accessibilityservice.GestureDescription
-import android.content.Context
-import android.content.Intent
-import android.graphics.Color
-import android.graphics.Path
-import android.graphics.PixelFormat
-import android.graphics.Rect
-import android.net.Uri
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
-import android.os.Handler
-import android.os.Looper
-import android.provider.Settings
-import android.util.Log
-import android.util.TypedValue
-import android.view.Gravity
-import android.view.View
-import android.view.WindowManager
-import android.view.accessibility.AccessibilityEvent
-import android.view.accessibility.AccessibilityNodeInfo
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
-import java.io.File
-
-/**
- * Accessibility Service that:
- * 1. Detects in real-time which app is in the foreground
- * 2. Blocks access to the SelfControl page in Settings (anti force-stop/uninstall)
- */
-class AppWatcherService : AccessibilityService() {
-
-    companion object {
-        private const val TAG = "SelfControl.Watcher"
-
-        // Android Settings Packages
-        private val SETTINGS_PACKAGES = setOf(
-            "com.android.settings",
-            "com.samsung.android.settings",
-            "com.samsung.android.app.routines",
-            "com.samsung.android.sm",
-            "com.samsung.accessibility",
-            "com.miui.securitycenter",
-            "com.miui.securitycore",
-            "com.xiaomi.misettings"
-        )
-
-        // Packages that could trigger an uninstallation
-        private val UNINSTALL_PACKAGES = setOf(
-            "com.android.vending",                   // Play Store
-            "com.google.android.packageinstaller",   // Google package installer
-            "com.android.packageinstaller",          // AOSP package installer
-            "com.samsung.android.packageinstaller"   // Samsung package installer
-        )
-
-        // App names to protect
-        // Visible app-label variants used to detect our own App-info / Settings page.
-        // MUST include the current launcher label ("Custos") or the anti-uninstall /
-        // force-stop protection silently stops triggering after a rename.
-        private val TARGET_APP_NAMES = mutableSetOf("Custos", "custos", "SelfControl", "selfcontrol", "Self control", "Self Control")
-
-        // Cancel buttons to click
-        private val CANCEL_KEYWORDS = setOf("Cancel", "Annuler", "No", "Non")
-
-        // Danger keywords that trigger protection
-        private val DANGER_KEYWORDS = setOf(
-            "Disable", "Désactiver",
-            "Force stop", "Forcer l'arrêt",
-            "Uninstall", "Désinstaller",
-            "Remove", "Delete", "Supprimer"
-        )
-
-        // Cooldown to avoid HOME spamming loop
-        private const val HOME_COOLDOWN_MS = 500L
-
-        private const val SCREEN_RULE_SCAN_INTERVAL_MS = 80L
-        private const val SCREEN_RULE_REDIRECT_COOLDOWN_MS = 500L
-
-        const val INSTAGRAM_PACKAGE = "com.instagram.android"
-
-        private val INSTAGRAM_REDIRECT_IDS = listOf(
-            "com.instagram.android:id/main_feed_action_bar",          // home feed
-            "com.instagram.android:id/explore_action_bar",            // Explore grid
-            "com.instagram.android:id/action_bar_search_edit_text",   // people search
-            "com.instagram.android:id/clips_viewer_container",
-            "com.instagram.android:id/clips_viewer_view_pager",
-            "com.instagram.android:id/clips_expanded_touch_view",
-            "com.instagram.android:id/root_clips_layout",
-            "com.instagram.android:id/clips_swipe_refresh_container",
-            "com.instagram.android:id/clips_video_container"
-        )
-
-        private val INSTAGRAM_PREFER_DEEPLINK_IDS = setOf(
-            "com.instagram.android:id/explore_action_bar",
-            "com.instagram.android:id/action_bar_search_edit_text"
-        )
-
-        private val INSTAGRAM_INBOX_IDS = listOf(
-            "com.instagram.android:id/direct_inbox_action_bar",
-            "com.instagram.android:id/direct_thread_header"
-        )
-
-        private const val INSTAGRAM_SCAN_INTERVAL_MS = 80L
-        private const val INSTAGRAM_DIRECT_TAB_VIEW_ID = "com.instagram.android:id/direct_tab"
-
-        private val INSTAGRAM_TAB_VIEW_IDS = listOf(
-            "com.instagram.android:id/feed_tab",
-            "com.instagram.android:id/clips_tab",
-            INSTAGRAM_DIRECT_TAB_VIEW_ID,
-            "com.instagram.android:id/search_tab",
-            "com.instagram.android:id/profile_tab"
-        )
-
-        private val INSTAGRAM_REDIRECTED_TABS = setOf(
-            "com.instagram.android:id/feed_tab",
-            "com.instagram.android:id/clips_tab",
-            "com.instagram.android:id/search_tab"
-        )
-
-        private const val INSTAGRAM_INBOX_URI = "https://www.instagram.com/direct/inbox/"
-        private const val INSTAGRAM_REDIRECT_COOLDOWN_MS = 500L
-
-        @Volatile
-        var currentForegroundApp: String = "unknown"
-
-        /** Currently blocked apps — LimitService adds here, Watcher performs HOME spam */
-        val blockedApps = java.util.concurrent.ConcurrentSkipListSet<String>()
-
-        @Volatile
-        private var instance: AppWatcherService? = null
-
-        /** The live service, for callers that need to read the screen (screen learning). */
-        val serviceInstance: AppWatcherService? get() = instance
-
-        @Volatile
-        var isBound: Boolean = false
-            private set
-
-        @Volatile
-        var lastBoundTimestamp: Long = 0L
-            private set
-
-        /**
-         * Force HOME action if the current foreground app is blocked.
-         * Called by LimitService when it detects a limit has been reached,
-         * so the user is kicked out immediately without waiting for a window state change.
-         */
-        fun forceHomeIfBlocked() {
-            val inst = instance ?: return
-            val pkg = currentForegroundApp
-            if (pkg in blockedApps) {
-                inst.goHome("Forced: $pkg blocked")
-            }
-        }
-
-        /**
-         * Show/hide the floating session countdown over the current foreground app.
-         * Called by LimitService.enforceLimit every second with the up-to-date text,
-         * or null to hide. Uses TYPE_ACCESSIBILITY_OVERLAY so no SYSTEM_ALERT_WINDOW
-         * permission is needed.
-         */
-        fun updateSessionOverlay(text: String?) {
-            instance?.applySessionOverlay(text)
-        }
-
-        /**
-         * Re-check learned rules for [pkg] outside the event stream: a screen sitting
-         * still emits no accessibility events, so periodic checks keep enforcement active.
-         */
-        fun recheckScreenRules(pkg: String) {
-            if (ScreenLearnSession.isActive) return
-            instance?.enforceScreenRules(pkg)
-        }
-    }
-
-    private var appLabel: String = "Custos"
-
-    /**
-     * The keyboard's package, resolved once at connect.
-     *
-     * The IME raises its own window, which arrives as a window-state change and used to overwrite
-     * [currentForegroundApp] — so while typing in Instagram, Custos believed the foreground app was
-     * `com.google.android.inputmethod.latin`. That silently disabled the Instagram heartbeat, and it
-     * also meant time spent typing in a limited app was attributed to the keyboard, which has no
-     * limit. Treated as an overlay, exactly like `systemui` already is.
-     */
-    private var imePackage: String? = null
-    private var lastHomeActionTime = 0L
-    private var lastInstagramBackTime = 0L
-    private var lastInstagramScanTime = 0L
-    private var lastInstagramDiagTime = 0L
-
-    private var overlayView: TextView? = null
-    private val overlayHandler = Handler(Looper.getMainLooper())
-
-    override fun onServiceConnected() {
-        super.onServiceConnected()
-        instance = this
-        isBound = true
-        lastBoundTimestamp = System.currentTimeMillis()
-        CustosApplication.clearCrashFlag(this)
-        LimitService.dismissA11yAlert(this)
-        try {
-            val appInfo = packageManager.getApplicationInfo(packageName, 0)
-            appLabel = packageManager.getApplicationLabel(appInfo).toString()
-            TARGET_APP_NAMES.add(appLabel)
-        } catch (_: Exception) {}
-        imePackage = try {
-            Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
-                ?.substringBefore('/')
-                ?.takeIf { it.isNotBlank() }
-        } catch (e: Exception) {
-            null
-        }
-        try {
-            val info = serviceInfo ?: android.accessibilityservice.AccessibilityServiceInfo()
-            info.flags = (info.flags and android.accessibilityservice.AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS.inv()) or
-                android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
-                android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
-            serviceInfo = info
-            Log.i(TAG, "Configured serviceInfo flags with FLAG_REPORT_VIEW_IDS (lightweight tree)")
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to update serviceInfo flags: ${e.message}")
-        }
-        Log.i(TAG, "IME package treated as overlay: $imePackage")
-        Log.i(TAG, "✅ AccessibilityService connected — monitoring active (label: $appLabel)")
-    }
-
-    override fun onUnbind(intent: android.content.Intent?): Boolean {
-        isBound = false
-        if (instance === this) {
-            instance = null
-        }
-        Log.w(TAG, "⚠️ AccessibilityService UNBIND — protection inactive")
-        return super.onUnbind(intent)
-    }
-
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null) return
-
-        try {
-            val packageName = event.packageName?.toString() ?: return
-
-            when (event.eventType) {
-                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                    handleWindowChanged(packageName, event)
-                }
-                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
-                    handleContentChanged(packageName)
-                }
-                AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED -> {
-                    // Dismiss heads-up popup from muted apps.
-                    // GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE only collapses the shade,
-                    // it does NOT dismiss heads-up popups. We need both actions:
-                    // 1. Dismiss shade (in case it's open)
-                    // 2. Collapse the heads-up popup by sending it away
-                    if (packageName in SelfControlNotificationListener.mutedPackages
-                        && packageName != "com.jo.selfcontrol.ultimate") {
-                        // This collapses any heads-up popup that's currently showing
-                        performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
-                        // Also try to find and dismiss the heads-up notification node
-                        dismissHeadsUpNotification(packageName)
-                        Log.d(TAG, "Dismissed heads-up notification from muted app: $packageName")
-                    }
-                }
-            }
-        } catch (t: Throwable) {
-            Log.e(TAG, "Caught unexpected error in onAccessibilityEvent to prevent service kill", t)
-        }
-    }
-
-    /**
-     * Sends HOME with a cooldown to avoid event loops.
-     */
-    private fun goHome(reason: String): Boolean {
-        val now = System.currentTimeMillis()
-        if (now - lastHomeActionTime < HOME_COOLDOWN_MS) return false
-        lastHomeActionTime = now
-        Log.w(TAG, "🛡️ Protection activated: $reason — returning home")
-        EventLog.log(this, "HOME", "forced home: $reason (fg=$currentForegroundApp)")
-        performGlobalAction(GLOBAL_ACTION_HOME)
-        return true
-    }
-
-
-
-    private fun handleWindowChanged(packageName: String, event: AccessibilityEvent) {
-        if (packageName == "com.jo.selfcontrol.ultimate") return
-
-        val className = event.className?.toString() ?: ""
-
-        val isDialog = className.contains("Dialog", ignoreCase = true)
-            || className.contains("Popup", ignoreCase = true)
-        
-        if (isDialog && (packageName in SETTINGS_PACKAGES || packageName in UNINSTALL_PACKAGES || packageName == "android")) {
-            checkSettingsForSelfControl(requireDangerKeyword = true)
-        }
-
-        if (packageName.startsWith("com.android.systemui")) return
-        // The keyboard is an overlay over whatever app is really in front, not a foreground app.
-        if (packageName == imePackage) return
-
-        if (packageName != currentForegroundApp) {
-            val previousApp = currentForegroundApp
-            currentForegroundApp = packageName
-            Log.d(TAG, "🔄 $previousApp → $packageName")
-            EventLog.log(this, "FG", "$previousApp → $packageName (class=$className)")
-            // Hide the session overlay on app switch; LimitService re-shows within 1s
-            // if the new foreground app has an active session.
-            applySessionOverlay(null)
-        }
-
-        if (BuildConfig.BLOCK_ALL_BROWSERS && BrowserBlocklist.isBrowser(this, packageName)) {
-            goHome("Browser blocked on brother flavor: $packageName")
-            DeviceOwnerHelper.hideApp(this, packageName, true)
-            DeviceOwnerHelper.suspendApp(this, packageName)
-            return
-        }
-
-        if (BuildConfig.BLOCK_ALL_APP_INSTALLS) {
-            if (packageName == "com.android.vending") {
-                goHome("Play Store blocked on brother flavor")
-                DeviceOwnerHelper.hideApp(this, packageName, true)
-                return
-            }
-            if (packageName in UNINSTALL_PACKAGES && !InstallWindowManager.isOpen(this)) {
-                goHome("Package installer blocked on brother flavor: $packageName")
-                return
-            }
-        }
-
-        if (packageName in blockedApps) {
-            if (packageName in InstallWindowManager.INSTALLER_PACKAGES && InstallWindowManager.isOpen(this)) {
-                blockedApps.remove(packageName)
-            } else {
-                goHome("App blocked: $packageName (limit reached)")
-                return
-            }
-        }
-
-
-        // Learned rules never fire while a session is teaching one: the user is being asked to visit
-        // the very screen we would send them away from.
-        if (!ScreenLearnSession.isActive && enforceScreenRules(packageName)) {
-            return
-        }
-
-        val isAppInfoPage = className.contains("AppInfoBase")
-            || className.contains("InstalledAppDetails")
-            || className.contains("AppInfoDashboard")
-
-        val isUninstallerPage = className.contains("UninstallerActivity")
-            || className.contains("UninstallUninstalling")
-            || className.contains("UninstallAppProgress")
-
-        val isAccessibilityPage = className.contains("AccessibilitySettings")
-            || className.contains("AccessibilityDetailsSettings")
-            || className.contains("ToggleAccessibilityService")
-            || className.contains("InstalledAccessibilityService")
-            || className.contains("AccessibilityHomepageActivity")
-            || packageName == "com.samsung.accessibility"
-
-        if (isAccessibilityPage && packageName in SETTINGS_PACKAGES) {
-            checkSettingsForSelfControl(requireDangerKeyword = false)
-        }
-
-        if (isAppInfoPage || isUninstallerPage) {
-            checkSettingsForSelfControl(requireDangerKeyword = false)
-            return
-        }
-
-        if (packageName in UNINSTALL_PACKAGES) {
-            checkSettingsForSelfControl(requireDangerKeyword = true)
-            return
-        }
-
-        if (packageName in SETTINGS_PACKAGES) {
-            // Generic Settings screens are no longer blocked by default.
-            // We only trigger when dangerous actions are visible.
-            checkSettingsForSelfControl(requireDangerKeyword = true)
-        }
-    }
-
-    private fun handleContentChanged(packageName: String) {
-        // Learned rules: a tab switch inside a single-activity app is a content
-        // change and nothing else.
-        if (!ScreenLearnSession.isActive && enforceScreenRules(packageName)) {
-            return
-        }
-
-        if (packageName in UNINSTALL_PACKAGES) {
-            checkSettingsForSelfControl(requireDangerKeyword = true)
-            return
-        }
-
-        if (packageName in SETTINGS_PACKAGES || (packageName == "android" && (currentForegroundApp in SETTINGS_PACKAGES || currentForegroundApp in UNINSTALL_PACKAGES))) {
-            checkSettingsForSelfControl(requireDangerKeyword = true)
-        }
-    }
-
-    private fun checkSettingsForSelfControl(requireDangerKeyword: Boolean = false) {
-        val fg = currentForegroundApp
-        val inTargetScope = fg in SETTINGS_PACKAGES || fg in UNINSTALL_PACKAGES || fg == "android"
-        if (!inTargetScope) return
-
-        // If DelayManager says we requested settings unlock, bypass protection entirely
-        if (DelayManager.isSettingsUnlocked(this)) {
-            Log.d(TAG, "🔓 Settings bypassed: Delay unlock active.")
-            return
-        }
-
-        // If mandatory setup is not complete yet, allow user to freely access Settings to grant permissions
-        if (!PermissionHelper.isMandatorySetupComplete(this)) {
-            Log.d(TAG, "🔓 Settings bypassed: Mandatory setup is not complete.")
-            return
-        }
-
-        val rootNode = rootInActiveWindow ?: return
-
-        try {
-            var isOurAppOnScreen = false
-            for (appName in TARGET_APP_NAMES) {
-                val appNodes = rootNode.findAccessibilityNodeInfosByText(appName)
-                if (appNodes != null && appNodes.isNotEmpty()) {
-                    for (node in appNodes) {
-                        val text = node.text?.toString()?.trim() ?: ""
-                        val desc = node.contentDescription?.toString()?.trim() ?: ""
-                        val isMatch = text.equals(appName, ignoreCase = true) ||
-                                      desc.equals(appName, ignoreCase = true) ||
-                                      Regex("\\b${Regex.escape(appName)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) ||
-                                      Regex("\\b${Regex.escape(appName)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(desc)
-                        if (isMatch) {
-                            isOurAppOnScreen = true
-                            break
-                        }
-                    }
-                    appNodes.forEach { it.recycle() }
-                    if (isOurAppOnScreen) break
-                }
-            }
-            if (!isOurAppOnScreen) return
-
-            if (requireDangerKeyword) {
-                var dangerFound = false
-                for (danger in DANGER_KEYWORDS) {
-                    val dangerNodes = rootNode.findAccessibilityNodeInfosByText(danger)
-                    if (dangerNodes != null && dangerNodes.isNotEmpty()) {
-                        for (node in dangerNodes) {
-                            val text = node.text?.toString()?.trim() ?: ""
-                            val desc = node.contentDescription?.toString()?.trim() ?: ""
-                            val isMatch = text.equals(danger, ignoreCase = true) ||
-                                          desc.equals(danger, ignoreCase = true) ||
-                                          Regex("\\b${Regex.escape(danger)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) ||
-                                          Regex("\\b${Regex.escape(danger)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(desc)
-                            if (isMatch) {
-                                dangerFound = true
-                                break
-                            }
-                        }
-                        dangerNodes.forEach { it.recycle() }
-                        if (dangerFound) break
-                    }
-                }
-                if (!dangerFound) return
-            }
-
-            Log.w(TAG, "🛡️ SelfControl + danger detected! (strict=$requireDangerKeyword)")
-
-            var clickedCancel = false
-            for (cancel in CANCEL_KEYWORDS) {
-                val cancelNodes = rootNode.findAccessibilityNodeInfosByText(cancel)
-                if (cancelNodes != null && cancelNodes.isNotEmpty()) {
-                    for (node in cancelNodes) {
-                        val text = node.text?.toString()?.trim() ?: ""
-                        val desc = node.contentDescription?.toString()?.trim() ?: ""
-                        val isExact = text.equals(cancel, ignoreCase = true) || desc.equals(cancel, ignoreCase = true)
-                        if (isExact && node.isClickable) {
-                            node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                            Log.w(TAG, "🛡️ Clicked on '$cancel'")
-                            clickedCancel = true
-                            break
-                        }
-                    }
-                    cancelNodes.forEach { it.recycle() }
-                    if (clickedCancel) break
-                }
-            }
-
-            goHome("SelfControl detected on sensitive screen")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error during auto-click: ${e.message}")
-        } finally {
-            rootNode.recycle()
-        }
-    }
-
-    /**
-     * Try to dismiss a heads-up notification popup from a muted app.
-     * Heads-up popups are rendered by SystemUI as a floating window.
-     * We look for dismissible notification nodes and swipe them away.
-     */
-    private fun dismissHeadsUpNotification(fromPackage: String) {
-        try {
-            val rootNode = rootInActiveWindow ?: return
-            try {
-                // Find nodes that are dismissible (heads-up notifications are usually dismissible)
-                findAndDismissNotificationNodes(rootNode, fromPackage)
-            } finally {
-                rootNode.recycle()
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Error dismissing heads-up: ${e.message}")
-        }
-    }
-
-    private fun findAndDismissNotificationNodes(node: AccessibilityNodeInfo, targetPackage: String) {
-        // Check if this node is dismissible (heads-up notification)
-        if (node.isDismissable) {
-            try {
-                node.performAction(AccessibilityNodeInfo.ACTION_DISMISS)
-                Log.d(TAG, "Dismissed heads-up notification node for $targetPackage")
-                return
-            } catch (_: Exception) {}
-        }
-
-        // Recurse into children
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            try {
-                findAndDismissNotificationNodes(child, targetPackage)
-            } finally {
-                child.recycle()
-            }
-        }
-    }
-
-    override fun onInterrupt() {
-        Log.w(TAG, "⚠️ AccessibilityService interrupted")
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        isBound = false
-        instance = null
-        applySessionOverlay(null)
-        Log.w(TAG, "💀 AccessibilityService destroyed")
-        currentForegroundApp = "unknown"
-    }
-
-    // ──────────────────────────────────────
-    //  Learned screen rules — enforcement
-    // ──────────────────────────────────────
-
-    private var screenRules: List<ScreenRuleManager.ScreenRule> = emptyList()
-    private var screenRulesStamp = 0L
-    private var screenRulesCheckedAt = 0L
-    private var lastScreenRuleActionAt = 0L
-    private var lastScreenRuleScanAt = 0L
-
-    /**
-     * Apply the rules taught by [ScreenLearnSession] to [pkg], returning true if the user was moved.
-     *
-     * Deliberately mirrors the hand-written Instagram path rather than replacing it yet: that one is
-     * tuned by a long debugging session and works, so it keeps priority until this has proved itself on
-     * a second app.
-     *
-     * Every lookup is the framework's native id search over the target package's windows — no tree
-     * walking. The walk is what caused an ANR when it ran on every accessibility event, and this runs
-     * just as often.
-     */
-    internal fun enforceScreenRules(pkg: String): Boolean {
-        val now = System.currentTimeMillis()
-        if (now - lastScreenRuleActionAt < SCREEN_RULE_REDIRECT_COOLDOWN_MS) return false
-        if (now - lastScreenRuleScanAt < SCREEN_RULE_SCAN_INTERVAL_MS) return false
-        lastScreenRuleScanAt = now
-
-        reloadScreenRulesIfStale(now)
-        val rules = screenRules.filter { it.packageName == pkg }
-        if (rules.isEmpty()) return false
-
-        // Specialized handler for Instagram: if rules exist for Instagram and are active,
-        // use the tuned ViewPager/multi-window aware engine matching the specific rule blockedIds.
-        if (pkg == INSTAGRAM_PACKAGE) {
-            val activeIgRules = rules.filter { isRuleActiveNow(it) }
-            if (activeIgRules.isNotEmpty()) {
-                return enforceInstagramRestrictions(activeIgRules)
-            }
-            return false
-        }
-
-        for (rule in rules) {
-            // Check active hours schedule if defined
-            if (!isRuleActiveNow(rule)) continue
-            // Already where the rule wants the user — nothing to do, and never a loop.
-            if (rule.allowedIds.any { visibleIdPresent(pkg, it) }) continue
-            val hit = rule.blockedIds.firstOrNull { visibleIdPresent(pkg, it) } ?: continue
-
-            lastScreenRuleActionAt = now
-            performScreenEscape(rule, hit)
-            return true
-        }
-        return false
-    }
-
-    /**
-     * Specialized Instagram restriction handler that respects the specific rules defined
-     * (e.g. blocking ONLY Reels, or blocking feed, etc.), using the tuned Instagram
-     * tab detection and redirect mechanisms.
-     */
-    private fun enforceInstagramRestrictions(rules: List<ScreenRuleManager.ScreenRule>): Boolean {
-        val now = System.currentTimeMillis()
-        if (now - lastInstagramScanTime < INSTAGRAM_SCAN_INTERVAL_MS) return false
-        lastInstagramScanTime = now
-
-        val root = rootInActiveWindow
-        if (root == null) {
-            diagInstagram("root=null")
-            return false
-        }
-
-        val selectedTab = instagramSelectedTab(root)
-        if (selectedTab == INSTAGRAM_DIRECT_TAB_VIEW_ID) return false
-
-        // Match against active rules:
-        // A rule matches if:
-        // 1) Current selected tab is in rule.blockedIds
-        // 2) OR any of the rule's blockedIds is visible in root, and none of rule's allowedIds are visible
-        var targetRule: ScreenRuleManager.ScreenRule? = null
-        var hit: String? = null
-
-        for (rule in rules) {
-            // If any allowed id is present, this screen is allowed by this rule
-            if (rule.allowedIds.any { hasViewId(root, it) }) continue
-
-            // Check if selected tab is blocked
-            if (selectedTab != null && (selectedTab in rule.blockedIds || rule.blockedIds.any { selectedTab.endsWith(it) })) {
-                targetRule = rule
-                hit = selectedTab
-                break
-            }
-
-            // Check if any blocked id is visible in active window
-            val viewHit = rule.blockedIds.firstOrNull { hasViewId(root, it) }
-            if (viewHit != null) {
-                targetRule = rule
-                hit = viewHit
-                break
-            }
-        }
-
-        if (targetRule == null || hit == null) return false
-
-        if (now - lastInstagramBackTime < INSTAGRAM_REDIRECT_COOLDOWN_MS) {
-            return false
-        }
-        lastInstagramBackTime = now
-        val shortHit = hit.removePrefix("com.instagram.android:id/")
-        Log.w(TAG, "🛡️ Instagram ${targetRule.name} ($shortHit) → redirect to allowed screen")
-        EventLog.log(this, "IG_REDIRECT", "${targetRule.name} $shortHit (selectedTab=$selectedTab)")
-
-        // Custom escape from rule if specified
-        val escapeTapId = targetRule.escapeTapId
-        if (escapeTapId != null && tapNavItem(INSTAGRAM_PACKAGE, escapeTapId, targetRule.escapeTapIndex)) {
-            return true
-        }
-        val escapeDeeplink = targetRule.escapeDeeplink
-        if (escapeDeeplink != null && openDeeplink(INSTAGRAM_PACKAGE, escapeDeeplink)) {
-            return true
-        }
-
-        val preferredDeeplink = hit in INSTAGRAM_PREFER_DEEPLINK_IDS
-        if (preferredDeeplink && openInstagramInbox()) {
-            return true
-        }
-
-        if (tapInstagramDirectTab()) {
-            return true
-        }
-
-        if (openInstagramInbox()) {
-            return true
-        }
-
-        goHome("instagram_fallback")
-        return true
-    }
-
-    private fun openInstagramInbox(): Boolean = try {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(INSTAGRAM_INBOX_URI)).apply {
-            setPackage(INSTAGRAM_PACKAGE)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        startActivity(intent)
-        true
-    } catch (e: Exception) {
-        Log.w(TAG, "Instagram inbox deep link failed: ${e.message}")
-        false
-    }
-
-    private fun diagInstagram(detail: String) {
-        val now = System.currentTimeMillis()
-        if (now - lastInstagramDiagTime < 2_000L) return
-        lastInstagramDiagTime = now
-        Log.i(TAG, "IG diag: $detail")
-    }
-
-    private fun instagramSelectedTab(root: AccessibilityNodeInfo): String? {
-        for (id in INSTAGRAM_TAB_VIEW_IDS) {
-            val selected = try {
-                root.findAccessibilityNodeInfosByViewId(id)
-                    .any { it.isVisibleToUser && (it.isSelected || it.isChecked) }
-            } catch (e: Exception) {
-                false
-            }
-            if (selected) return id
-        }
-        return null
-    }
-
-    private fun tabStates(root: AccessibilityNodeInfo): String =
-        INSTAGRAM_TAB_VIEW_IDS.joinToString(" ") { id ->
-            val short = id.removePrefix("com.instagram.android:id/")
-            val nodes = try {
-                root.findAccessibilityNodeInfosByViewId(id)
-            } catch (e: Exception) {
-                emptyList()
-            }
-            if (nodes.isEmpty()) "$short=absent"
-            else nodes.joinToString(",") { "$short=s${it.isSelected}/c${it.isChecked}/v${it.isVisibleToUser}" }
-        }
-
-    private fun hasViewId(root: AccessibilityNodeInfo, viewId: String): Boolean = try {
-        root.findAccessibilityNodeInfosByViewId(viewId).any { it.isVisibleToUser }
-    } catch (e: Exception) {
-        false
-    }
-
-    private fun findNodeInAnyWindow(viewId: String): AccessibilityNodeInfo? {
-        try {
-            for (window in windows) {
-                val root = window.root ?: continue
-                root.findAccessibilityNodeInfosByViewId(viewId)
-                    .firstOrNull { it.isVisibleToUser }
-                    ?.let { return it }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "findNodeInAnyWindow($viewId) failed: ${e.message}")
-        }
-        return try {
-            rootInActiveWindow?.findAccessibilityNodeInfosByViewId(viewId)
-                ?.firstOrNull { it.isVisibleToUser }
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    private fun tapInstagramDirectTab(): Boolean = try {
-        val icon = findNodeInAnyWindow(INSTAGRAM_DIRECT_TAB_VIEW_ID)
-        if (icon == null) {
-            false
-        } else {
-            val bounds = Rect()
-            icon.getBoundsInScreen(bounds)
-            if (bounds.isEmpty) {
-                false
-            } else {
-                Log.i(TAG, "Instagram DM tab bounds=$bounds → tap ${bounds.exactCenterX()},${bounds.exactCenterY()}")
-                val path = Path().apply { moveTo(bounds.exactCenterX(), bounds.exactCenterY()) }
-                val gesture = GestureDescription.Builder()
-                    .addStroke(GestureDescription.StrokeDescription(path, 0L, 10L))
-                    .build()
-                dispatchGesture(gesture, null, null)
-            }
-        }
-    } catch (e: Exception) {
-        Log.w(TAG, "Instagram DM tab tap failed: ${e.message}")
-        false
-    }
-
-    private fun isRuleActiveNow(rule: ScreenRuleManager.ScreenRule): Boolean {
-        val hours = rule.blockedHours ?: return true
-        if (hours == "*" || hours.isBlank()) return true
-        val parts = hours.split("-")
-        if (parts.size != 2) return true
-        return try {
-            val start = ConfigManager.parseTimeToMinutes(parts[0])
-            val end = ConfigManager.parseTimeToMinutes(parts[1])
-            val cal = java.util.Calendar.getInstance()
-            val nowMin = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
-            ConfigManager.isInBlockedWindow(nowMin, start, end)
-        } catch (e: Exception) {
-            true
-        }
-    }
-
-    /** Reload rules only when the file actually changed, and at most every few seconds. */
-    private fun reloadScreenRulesIfStale(now: Long) {
-        if (now - screenRulesCheckedAt < 3_000L) return
-        screenRulesCheckedAt = now
-        val stamp = try {
-            java.io.File(filesDir, "screen_rules.json").lastModified()
-        } catch (e: Exception) {
-            0L
-        }
-        if (stamp == screenRulesStamp) return
-        screenRulesStamp = stamp
-        screenRules = ScreenRuleManager.load(this)
-        Log.i(TAG, "Screen rules reloaded: ${screenRules.size}")
-    }
-
-    /** Whether [viewId] (or text marker `text:...`, or desc marker `desc:...`) is on screen right now, in one of [pkg]'s windows. */
-    private fun visibleIdPresent(pkg: String, viewId: String): Boolean {
-        // Fast-path: check rootInActiveWindow first to avoid expensive windows iteration
-        try {
-            val activeRoot = rootInActiveWindow
-            if (activeRoot != null) {
-                try {
-                    if (activeRoot.packageName == pkg && checkNodeMatch(activeRoot, viewId)) {
-                        return true
-                    }
-                } finally {
-                    activeRoot.recycle()
-                }
-            }
-        } catch (_: Exception) {}
-
-        // Fallback: iterate windows safely with proper node recycling
-        try {
-            val currentWindows = windows ?: return false
-            for (window in currentWindows) {
-                val root = window.root ?: continue
-                try {
-                    if (root.packageName == pkg && checkNodeMatch(root, viewId)) {
-                        return true
-                    }
-                } finally {
-                    root.recycle()
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "visibleIdPresent($viewId) failed: ${e.message}")
-        }
-        return false
-    }
-
-    private fun checkNodeMatch(root: AccessibilityNodeInfo, viewId: String): Boolean {
-        return when {
-            viewId.startsWith("text:") -> {
-                val txt = viewId.removePrefix("text:")
-                val nodes = root.findAccessibilityNodeInfosByText(txt) ?: return false
-                val match = nodes.any { it.isVisibleToUser && it.text?.toString().equals(txt, ignoreCase = true) }
-                nodes.forEach { it.recycle() }
-                match
-            }
-            viewId.startsWith("desc:") -> {
-                val desc = viewId.removePrefix("desc:")
-                val nodes = root.findAccessibilityNodeInfosByText(desc) ?: return false
-                val match = nodes.any { it.isVisibleToUser && it.contentDescription?.toString().equals(desc, ignoreCase = true) }
-                nodes.forEach { it.recycle() }
-                match
-            }
-            else -> {
-                val nodes = root.findAccessibilityNodeInfosByViewId(viewId) ?: return false
-                val match = nodes.any { it.isVisibleToUser }
-                nodes.forEach { it.recycle() }
-                match
-            }
-        }
-    }
-
-    /**
-     * Leave the blocked screen, then **check 900 ms later whether it worked**.
-     *
-     * The check is the point. Until now a redirect only reported that an action had been *emitted*, and
-     * that hid a real failure for days: tapping the messages tab from Instagram's search dismissed the
-     * search and landed on the feed, which looked like success in the log. Verifying the destination
-     * turns each real use into a test, so a rule that stops working shows up as failures instead of
-     * silence — and the counters say which action to prefer next time.
-     */
-    private fun performScreenEscape(rule: ScreenRuleManager.ScreenRule, hit: String) {
-        val pkg = rule.packageName
-        val escapeTapId = rule.escapeTapId ?: if (pkg == "com.snapchat.android") {
-            "com.snapchat.android:id/ngs_chat_icon_container"
-        } else null
-
-        val how = when {
-            escapeTapId != null &&
-                tapNavItem(pkg, escapeTapId, rule.escapeTapIndex) -> "tap"
-            rule.escapeDeeplink != null && openDeeplink(pkg, rule.escapeDeeplink) -> "deeplink"
-            pkg == "com.snapchat.android" && tapSnapchatChat() -> "snapchat_chat_coords"
-            performGlobalAction(GLOBAL_ACTION_BACK) -> "back"
-            else -> "failed"
-        }
-        val shortHit = hit.substringAfter(":id/")
-        Log.w(TAG, "🛡️ ${rule.name}: $shortHit → escape ($how)")
-
-        overlayHandler.postDelayed({
-            val reached = rule.allowedIds.any { visibleIdPresent(pkg, it) }
-            ScreenRuleManager.recordOutcome(this, rule.name, reached)
-            Log.w(TAG, "   ${rule.name}: destination ${if (reached) "atteinte" else "NON atteinte"}")
-            EventLog.log(
-                this, "SCREEN_RULE",
-                "${rule.name} $shortHit → $how, reached=$reached"
-            )
-        }, 900L)
-    }
-
-    /** Fallback coordinate tap on the Snapchat bottom nav Chat icon (approx 31.6% width, 90.9% height). */
-    private fun tapSnapchatChat(): Boolean = try {
-        val dm = resources.displayMetrics
-        val x = dm.widthPixels * 0.316f
-        val y = dm.heightPixels * 0.909f
-        val path = Path().apply { moveTo(x, y) }
-        dispatchGesture(
-            GestureDescription.Builder()
-                .addStroke(GestureDescription.StrokeDescription(path, 0L, 10L))
-                .build(),
-            null, null
-        )
-    } catch (e: Exception) {
-        Log.w(TAG, "tapSnapchatChat failed: ${e.message}")
-        false
-    }
-
-    /** Open [uri] inside [pkg]. Pinned to the package so a URL can never fall through to a browser. */
-    private fun openDeeplink(pkg: String, uri: String): Boolean = try {
-        startActivity(
-            Intent(Intent.ACTION_VIEW, Uri.parse(uri)).apply {
-                setPackage(pkg)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-        )
-        true
-    } catch (e: Exception) {
-        Log.w(TAG, "deeplink $uri failed: ${e.message}")
-        false
-    }
-
-    // ──────────────────────────────────────
-    //  Screen learning — guidance overlay
-    // ──────────────────────────────────────
-
-    private var learnOverlay: View? = null
-
-    /**
-     * A floating panel with an instruction and two buttons, shown over the app being learned.
-     *
-     * Same `TYPE_ACCESSIBILITY_OVERLAY` as the session label — no `SYSTEM_ALERT_WINDOW` needed — but
-     * without `FLAG_NOT_TOUCHABLE` so the buttons work, and *with* `FLAG_NOT_FOCUSABLE` so the app
-     * underneath keeps input focus. Taking focus would change the very screen we are about to read.
-     *
-     * Anchored to the top on purpose: the flow asks the user to switch tabs, and those live at the
-     * bottom of every app this is meant for.
-     */
-    internal fun showLearnOverlay(
-        text: String,
-        primaryLabel: String,
-        onPrimary: () -> Unit,
-        onCancel: () -> Unit
-    ) {
-        overlayHandler.post {
-            try {
-                hideLearnOverlayInternal()
-                val density = resources.displayMetrics.density
-                fun dp(v: Int) = (v * density).toInt()
-
-                val panel = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(dp(16), dp(12), dp(16), dp(12))
-                    background = GradientDrawable().apply {
-                        setColor(Color.parseColor("#F21B1B2E"))
-                        cornerRadius = dp(16).toFloat()
-                    }
-                }
-                panel.addView(
-                    TextView(this).apply {
-                        this.text = text
-                        setTextColor(Color.WHITE)
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                        typeface = Typeface.DEFAULT_BOLD
-                    }
-                )
-                val row = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    setPadding(0, dp(8), 0, 0)
-                }
-                row.addView(
-                    Button(this).apply {
-                        this.text = primaryLabel
-                        setOnClickListener { onPrimary() }
-                    }
-                )
-                row.addView(
-                    Button(this).apply {
-                        this.text = "Cancel"
-                        setOnClickListener { onCancel() }
-                    }
-                )
-                panel.addView(row)
-
-                val params = WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.WRAP_CONTENT,
-                    WindowManager.LayoutParams.WRAP_CONTENT,
-                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                    PixelFormat.TRANSLUCENT
-                ).apply {
-                    gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                    y = dp(48)
-                }
-                (getSystemService(Context.WINDOW_SERVICE) as WindowManager).addView(panel, params)
-                learnOverlay = panel
-            } catch (e: Exception) {
-                Log.e(TAG, "learn overlay failed: ${e.message}")
-            }
-        }
-    }
-
-    internal fun hideLearnOverlay() {
-        overlayHandler.post { hideLearnOverlayInternal() }
-    }
-
-    private fun hideLearnOverlayInternal() {
-        val v = learnOverlay ?: return
-        learnOverlay = null
-        try {
-            (getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(v)
-        } catch (_: Exception) {}
-    }
-
-    // ──────────────────────────────────────
-    //  Screen learning — capture primitives
-    // ──────────────────────────────────────
-
-    /**
-     * Every **visible** view id belonging to [pkg], across all its windows.
-     *
-     * This walks the tree, which is exactly what caused an ANR when the redirect check did it on every
-     * accessibility event. It is safe here because it runs only when the user taps "capture" during a
-     * learning session — a handful of times, never in a loop. The node budget is a guard against a
-     * pathological tree, not a performance tuning.
-     *
-     * Windows are filtered by package so the reading is unaffected by our own overlay, the keyboard, or
-     * a pulled-down notification shade being the active window.
-     */
-    internal fun visibleIdsFor(pkg: String): Set<String> {
-        val ids = LinkedHashSet<String>()
-        val prefix = "$pkg:id/"
-        var budget = 4_000
-
-        val dm = resources.displayMetrics
-        val screenBounds = Rect()
-        fun walk(node: AccessibilityNodeInfo?) {
-            if (node == null || budget <= 0) return
-            budget--
-            val id = node.viewIdResourceName
-            node.getBoundsInScreen(screenBounds)
-            val onScreen = node.isVisibleToUser || (screenBounds.width() > 0 && screenBounds.height() > 0 &&
-                    screenBounds.intersects(0, 0, dm.widthPixels, dm.heightPixels))
-
-            if (onScreen) {
-                if (id != null && id.startsWith(prefix)) {
-                    ids.add(id)
-                }
-                val txt = node.text?.toString()?.trim()
-                if (!txt.isNullOrEmpty() && txt.length in 3..25 && !txt.all { it.isDigit() || it == ':' || it == ' ' }) {
-                    ids.add("text:$txt")
-                }
-            }
-            for (i in 0 until node.childCount) walk(node.getChild(i))
-        }
-
-        try {
-            var foundInWindows = false
-            for (window in windows) {
-                val root = window.root ?: continue
-                if (root.packageName?.toString() == pkg) {
-                    foundInWindows = true
-                    walk(root)
-                }
-            }
-            if (!foundInWindows) {
-                rootInActiveWindow?.let { root ->
-                    if (root.packageName?.toString() == pkg) {
-                        walk(root)
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "visibleIdsFor($pkg) failed: ${e.message}")
-        }
-        Log.i(TAG, "visibleIdsFor($pkg) returning ${ids.size} ids")
-        return ids
-    }
-
-    /**
-     * The view id of the currently selected navigation item in [pkg], plus its index among the nodes
-     * sharing that id — or null when nothing reports itself selected.
-     *
-     * The index carries the meaning for apps like WhatsApp, whose bottom bar is a Material
-     * `BottomNavigationView`: all five tabs carry the same view id, so the position is the only thing
-     * that names the tab. Instagram gives each tab a distinct id and the index is 0.
-     */
-    internal fun selectedNavItem(pkg: String): Pair<String, Int>? {
-        if (pkg == "com.snapchat.android") {
-            // Snapchat's custom bottom bar items do not set isSelected or isChecked.
-            // Discriminate active tab by visible screen markers:
-            if (visibleIdPresent(pkg, "com.snapchat.android:id/ff_item") || visibleIdPresent(pkg, "text:Chat")) {
-                return "com.snapchat.android:id/ngs_chat_icon_container" to 0
-            }
-            if (visibleIdPresent(pkg, "com.snapchat.android:id/camera_page") || visibleIdPresent(pkg, "com.snapchat.android:id/camera_capture_button")) {
-                return "com.snapchat.android:id/ngs_camera_icon_container" to 0
-            }
-            if (visibleIdPresent(pkg, "com.snapchat.android:id/df_large_story") || visibleIdPresent(pkg, "com.snapchat.android:id/friend_card_frame") || visibleIdPresent(pkg, "text:Stories")) {
-                return "com.snapchat.android:id/ngs_community_icon_container" to 0
-            }
-            if (visibleIdPresent(pkg, "com.snapchat.android:id/spotlight_container") || visibleIdPresent(pkg, "text:Spotlight")) {
-                return "com.snapchat.android:id/ngs_spotlight_icon_container" to 0
-            }
-            return "com.snapchat.android:id/ngs_chat_icon_container" to 0
-        }
-
-        val prefix = "$pkg:id/"
-        val byId = LinkedHashMap<String, MutableList<Boolean>>()
-        var budget = 3_000
-
-        fun walk(node: AccessibilityNodeInfo?) {
-            if (node == null || budget <= 0) return
-            budget--
-            val id = node.viewIdResourceName
-            if (id != null && id.startsWith(prefix) && node.isVisibleToUser) {
-                byId.getOrPut(id) { mutableListOf() }.add(node.isSelected || node.isChecked)
-            }
-            for (i in 0 until node.childCount) walk(node.getChild(i))
-        }
-
-        try {
-            var found = false
-            for (window in windows) {
-                val root = window.root ?: continue
-                if (root.packageName?.toString() == pkg) {
-                    found = true
-                    walk(root)
-                }
-            }
-            if (!found) {
-                rootInActiveWindow?.let { root ->
-                    if (root.packageName?.toString() == pkg) walk(root)
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "selectedNavItem($pkg) failed: ${e.message}")
-            return null
-        }
-
-        // Prefer an id with several instances where exactly one is selected — that is the shape of a
-        // tab bar, and it rules out unrelated one-off selected widgets such as a checked list row.
-        val tabLike = byId.entries
-            .filter { it.value.size in 2..8 && it.value.count { sel -> sel } == 1 }
-            .minByOrNull { it.value.size }
-        if (tabLike != null) {
-            return tabLike.key to tabLike.value.indexOfFirst { it }
-        }
-        val single = byId.entries.firstOrNull { it.value.size == 1 && it.value[0] }
-        return single?.let { it.key to 0 }
-    }
-
-    /** Tap the centre of the [index]-th visible node carrying [viewId] in [pkg]. */
-    internal fun tapNavItem(pkg: String, viewId: String, index: Int): Boolean {
-        val matches = mutableListOf<AccessibilityNodeInfo>()
-
-        try {
-            var found = false
-            for (window in windows) {
-                val root = window.root ?: continue
-                if (root.packageName?.toString() == pkg) {
-                    found = true
-                    matches.addAll(root.findAccessibilityNodeInfosByViewId(viewId) ?: emptyList())
-                }
-            }
-            if (!found) {
-                rootInActiveWindow?.let { root ->
-                    if (root.packageName?.toString() == pkg) {
-                        matches.addAll(root.findAccessibilityNodeInfosByViewId(viewId) ?: emptyList())
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "tapNavItem lookup failed: ${e.message}")
-            return false
-        }
-
-        val node = matches.getOrNull(index) ?: run {
-            Log.w(TAG, "tapNavItem: no match at index $index (found ${matches.size} total for $viewId)")
-            return false
-        }
-        Log.i(TAG, "tapNavItem: found target node at index $index for $viewId")
-
-        // 1. Try direct accessibility action click on node or its ancestors
-        var curr: AccessibilityNodeInfo? = node
-        var clicked = false
-        while (curr != null) {
-            if (curr.isClickable) {
-                clicked = curr.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                Log.i(TAG, "tapNavItem: ACTION_CLICK returned $clicked on ${curr.viewIdResourceName ?: curr.className}")
-                if (clicked) break
-            }
-            curr = curr.parent
-        }
-
-        // 2. Also dispatch physical tap gesture on center coordinates
-        val bounds = Rect().also { node.getBoundsInScreen(it) }
-        var gestured = false
-        if (!bounds.isEmpty) {
-            try {
-                val path = Path().apply { moveTo(bounds.exactCenterX(), bounds.exactCenterY()) }
-                gestured = dispatchGesture(
-                    GestureDescription.Builder()
-                        .addStroke(GestureDescription.StrokeDescription(path, 0L, 10L))
-                        .build(),
-                    null, null
-                )
-                Log.i(TAG, "tapNavItem: dispatchGesture returned $gestured at (${bounds.centerX()}, ${bounds.centerY()})")
-            } catch (e: Exception) {
-                Log.w(TAG, "tapNavItem gesture failed: ${e.message}")
-            }
-        }
-        return clicked || gestured
-    }
-
-    // ──────────────────────────────────────
-    //  Session overlay
-    // ──────────────────────────────────────
-
-    private fun applySessionOverlay(text: String?) {
-        overlayHandler.post {
-            try {
-                if (text == null) {
-                    removeOverlayView()
-                } else {
-                    ensureOverlayView()
-                    overlayView?.text = text
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "session overlay update failed: ${e.message}")
-            }
-        }
-    }
-
-    private fun ensureOverlayView() {
-        if (overlayView != null) return
-        val density = resources.displayMetrics.density
-        fun dp(v: Int) = (v * density).toInt()
-        val bg = GradientDrawable().apply {
-            setColor(Color.parseColor("#CC000000"))
-            cornerRadius = dp(18).toFloat()
-        }
-        val tv = TextView(this).apply {
-            background = bg
-            setTextColor(Color.parseColor("#80CBC4"))
-            setPadding(dp(16), dp(8), dp(16), dp(8))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            typeface = Typeface.DEFAULT_BOLD
-            text = ""
-        }
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            y = dp(40)  // below the status bar
-        }
-        val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        try {
-            wm.addView(tv, params)
-            overlayView = tv
-        } catch (e: Exception) {
-            Log.e(TAG, "session overlay addView failed: ${e.message}")
-        }
-    }
-
-    private fun removeOverlayView() {
-        val v = overlayView ?: return
-        overlayView = null
-        try {
-            val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            wm.removeView(v)
-        } catch (_: Exception) {}
-    }
-}
+package com.jo.selfcontrol.ultimate
+
+import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.content.Context
+import android.content.Intent
+import android.graphics.Color
+import android.graphics.Path
+import android.graphics.PixelFormat
+import android.graphics.Rect
+import android.net.Uri
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
+import android.util.Log
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.View
+import android.view.WindowManager
+import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.TextView
+import java.io.File
+
+/**
+ * Accessibility Service that:
+ * 1. Detects in real-time which app is in the foreground
+ * 2. Blocks access to the SelfControl page in Settings (anti force-stop/uninstall)
+ */
+class AppWatcherService : AccessibilityService() {
+
+    @Volatile private var isCurrentScreenSensitive: Boolean = false
+
+    companion object {
+        private const val TAG = "SelfControl.Watcher"
+
+        // Android Settings Packages
+        private val SETTINGS_PACKAGES = setOf(
+            "com.android.settings",
+            "com.samsung.android.settings",
+            "com.samsung.android.app.routines",
+            "com.samsung.android.sm",
+            "com.samsung.accessibility",
+            "com.miui.securitycenter",
+            "com.miui.securitycore",
+            "com.xiaomi.misettings"
+        )
+
+        // Packages that could trigger an uninstallation (Play Store excluded to avoid false positives)
+        private val UNINSTALL_PACKAGES = setOf(
+            "com.google.android.packageinstaller",   // Google package installer
+            "com.android.packageinstaller",          // AOSP package installer
+            "com.samsung.android.packageinstaller"   // Samsung package installer
+        )
+
+        // App names to protect
+        // Visible app-label variants used to detect our own App-info / Settings page.
+        // MUST include the current launcher label ("Custos") or the anti-uninstall /
+        // force-stop protection silently stops triggering after a rename.
+        private val TARGET_APP_NAMES = mutableSetOf(
+            "Custos", "custos", "SelfControl", "selfcontrol", "Self control", "Self Control",
+            "Guardian", "guardian", "Custos Guardian",
+            "com.jo.selfcontrol.ultimate", "com.jo.custos.guardian"
+        )
+
+        // Cancel buttons to click
+        private val CANCEL_KEYWORDS = setOf("Cancel", "Annuler", "No", "Non")
+
+        // Danger keywords that trigger protection (specific to avoiding false positives on WiFi/BT deletions)
+        private val DANGER_KEYWORDS = setOf(
+            "Disable", "Désactiver",
+            "Force stop", "Forcer l'arrêt",
+            "Uninstall", "Désinstaller",
+            "Clear data", "Clear storage",
+            "Supprimer les données", "Effacer les données", "Effacer le stockage",
+            "Désactiver cette application", "Désactiver l'administrateur", "Deactivate"
+        )
+
+        // Cooldown to avoid HOME spamming loop
+        private const val HOME_COOLDOWN_MS = 500L
+
+        private const val SCREEN_RULE_SCAN_INTERVAL_MS = 80L
+        private const val SCREEN_RULE_REDIRECT_COOLDOWN_MS = 500L
+
+        const val INSTAGRAM_PACKAGE = "com.instagram.android"
+
+        private val INSTAGRAM_REDIRECT_IDS = listOf(
+            "com.instagram.android:id/main_feed_action_bar",          // home feed
+            "com.instagram.android:id/explore_action_bar",            // Explore grid
+            "com.instagram.android:id/action_bar_search_edit_text",   // people search
+            "com.instagram.android:id/clips_viewer_container",
+            "com.instagram.android:id/clips_viewer_view_pager",
+            "com.instagram.android:id/clips_expanded_touch_view",
+            "com.instagram.android:id/root_clips_layout",
+            "com.instagram.android:id/clips_swipe_refresh_container",
+            "com.instagram.android:id/clips_video_container"
+        )
+
+        private val INSTAGRAM_PREFER_DEEPLINK_IDS = setOf(
+            "com.instagram.android:id/explore_action_bar",
+            "com.instagram.android:id/action_bar_search_edit_text"
+        )
+
+        private val INSTAGRAM_INBOX_IDS = listOf(
+            "com.instagram.android:id/direct_inbox_action_bar",
+            "com.instagram.android:id/direct_thread_header"
+        )
+
+        private const val INSTAGRAM_SCAN_INTERVAL_MS = 80L
+        private const val INSTAGRAM_DIRECT_TAB_VIEW_ID = "com.instagram.android:id/direct_tab"
+
+        private val INSTAGRAM_TAB_VIEW_IDS = listOf(
+            "com.instagram.android:id/feed_tab",
+            "com.instagram.android:id/clips_tab",
+            INSTAGRAM_DIRECT_TAB_VIEW_ID,
+            "com.instagram.android:id/search_tab",
+            "com.instagram.android:id/profile_tab"
+        )
+
+        private val INSTAGRAM_REDIRECTED_TABS = setOf(
+            "com.instagram.android:id/feed_tab",
+            "com.instagram.android:id/clips_tab",
+            "com.instagram.android:id/search_tab"
+        )
+
+        private const val INSTAGRAM_INBOX_URI = "https://www.instagram.com/direct/inbox/"
+        private const val INSTAGRAM_REDIRECT_COOLDOWN_MS = 500L
+
+        @Volatile
+        var currentForegroundApp: String = "unknown"
+
+        /** Currently blocked apps — LimitService adds here, Watcher performs HOME spam */
+        val blockedApps = java.util.concurrent.ConcurrentSkipListSet<String>()
+
+        @Volatile
+        private var instance: AppWatcherService? = null
+
+        /** The live service, for callers that need to read the screen (screen learning). */
+        val serviceInstance: AppWatcherService? get() = instance
+
+        @Volatile
+        var isBound: Boolean = false
+            private set
+
+        @Volatile
+        var lastBoundTimestamp: Long = 0L
+            private set
+
+        /**
+         * Force HOME action if the current foreground app is blocked.
+         * Called by LimitService when it detects a limit has been reached,
+         * so the user is kicked out immediately without waiting for a window state change.
+         */
+        fun forceHomeIfBlocked() {
+            val inst = instance ?: return
+            val pkg = currentForegroundApp
+            if (pkg in blockedApps) {
+                inst.goHome("Forced: $pkg blocked")
+            }
+        }
+
+        /**
+         * Show/hide the floating session countdown over the current foreground app.
+         * Called by LimitService.enforceLimit every second with the up-to-date text,
+         * or null to hide. Uses TYPE_ACCESSIBILITY_OVERLAY so no SYSTEM_ALERT_WINDOW
+         * permission is needed.
+         */
+        fun updateSessionOverlay(text: String?) {
+            instance?.applySessionOverlay(text)
+        }
+
+        /**
+         * Re-check learned rules for [pkg] outside the event stream: a screen sitting
+         * still emits no accessibility events, so periodic checks keep enforcement active.
+         */
+        fun recheckScreenRules(pkg: String) {
+            if (ScreenLearnSession.isActive) return
+            instance?.enforceScreenRules(pkg)
+        }
+    }
+
+    private var appLabel: String = "Custos"
+
+    /**
+     * The keyboard's package, resolved once at connect.
+     *
+     * The IME raises its own window, which arrives as a window-state change and used to overwrite
+     * [currentForegroundApp] — so while typing in Instagram, Custos believed the foreground app was
+     * `com.google.android.inputmethod.latin`. That silently disabled the Instagram heartbeat, and it
+     * also meant time spent typing in a limited app was attributed to the keyboard, which has no
+     * limit. Treated as an overlay, exactly like `systemui` already is.
+     */
+    private var imePackage: String? = null
+    private var lastHomeActionTime = 0L
+    private var lastInstagramBackTime = 0L
+    private var lastInstagramScanTime = 0L
+    private var lastInstagramDiagTime = 0L
+
+    private var overlayView: TextView? = null
+    private val overlayHandler = Handler(Looper.getMainLooper())
+
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        instance = this
+        isBound = true
+        lastBoundTimestamp = System.currentTimeMillis()
+        CustosApplication.clearCrashFlag(this)
+        LimitService.dismissA11yAlert(this)
+        try {
+            val appInfo = packageManager.getApplicationInfo(packageName, 0)
+            appLabel = packageManager.getApplicationLabel(appInfo).toString()
+            TARGET_APP_NAMES.add(appLabel)
+        } catch (_: Exception) {}
+        imePackage = try {
+            Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+                ?.substringBefore('/')
+                ?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            null
+        }
+        try {
+            val info = serviceInfo ?: android.accessibilityservice.AccessibilityServiceInfo()
+            info.flags = info.flags or
+                android.accessibilityservice.AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or
+                android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+                android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+            serviceInfo = info
+            Log.i(TAG, "Configured serviceInfo flags with FLAG_REPORT_VIEW_IDS (lightweight tree)")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to update serviceInfo flags: ${e.message}")
+        }
+        Log.i(TAG, "IME package treated as overlay: $imePackage")
+        Log.i(TAG, "✅ AccessibilityService connected — monitoring active (label: $appLabel)")
+    }
+
+    override fun onUnbind(intent: android.content.Intent?): Boolean {
+        isBound = false
+        if (instance === this) {
+            instance = null
+        }
+        Log.w(TAG, "⚠️ AccessibilityService UNBIND — protection inactive")
+        return super.onUnbind(intent)
+    }
+
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event == null) return
+
+        try {
+            val packageName = event.packageName?.toString() ?: return
+
+            when (event.eventType) {
+                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
+                    handleWindowChanged(packageName, event)
+                }
+                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
+                    handleContentChanged(packageName)
+                }
+                AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED -> {
+                    // Dismiss heads-up popup from muted apps.
+                    // GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE only collapses the shade,
+                    // it does NOT dismiss heads-up popups. We need both actions:
+                    // 1. Dismiss shade (in case it's open)
+                    // 2. Collapse the heads-up popup by sending it away
+                    if (packageName in SelfControlNotificationListener.mutedPackages
+                        && packageName != "com.jo.selfcontrol.ultimate") {
+                        // This collapses any heads-up popup that's currently showing
+                        performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+                        // Also try to find and dismiss the heads-up notification node
+                        dismissHeadsUpNotification(packageName)
+                        Log.d(TAG, "Dismissed heads-up notification from muted app: $packageName")
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "Caught unexpected error in onAccessibilityEvent to prevent service kill", t)
+        }
+    }
+
+    /**
+     * Sends HOME with a cooldown to avoid event loops.
+     */
+    private fun goHome(reason: String): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - lastHomeActionTime < HOME_COOLDOWN_MS) return false
+        lastHomeActionTime = now
+        Log.w(TAG, "🛡️ Protection activated: $reason — returning home")
+        EventLog.log(this, "HOME", "forced home: $reason (fg=$currentForegroundApp)")
+        performGlobalAction(GLOBAL_ACTION_HOME)
+        return true
+    }
+
+
+
+    private fun handleWindowChanged(packageName: String, event: AccessibilityEvent) {
+        if (packageName == "com.jo.selfcontrol.ultimate") return
+
+        val className = event.className?.toString() ?: ""
+
+        val isDialog = className.contains("Dialog", ignoreCase = true)
+            || className.contains("Popup", ignoreCase = true)
+            || className.contains("AlertDialog", ignoreCase = true)
+
+        val isAppInfoPage = className.contains("AppInfoBase", ignoreCase = true)
+            || className.contains("InstalledAppDetails", ignoreCase = true)
+            || className.contains("AppInfoDashboard", ignoreCase = true)
+
+        val isUninstallerPage = className.contains("UninstallerActivity", ignoreCase = true)
+            || className.contains("UninstallUninstalling", ignoreCase = true)
+            || className.contains("UninstallAppProgress", ignoreCase = true)
+            || className.contains("DeletePackageActivity", ignoreCase = true)
+
+        val isAccessibilityTogglePage = className.contains("AccessibilityDetailsSettings", ignoreCase = true)
+            || className.contains("ToggleAccessibilityService", ignoreCase = true)
+            || className.contains("InstalledAccessibilityService", ignoreCase = true)
+            || className.contains("ToggleFeaturePreference", ignoreCase = true)
+
+        val isSpecialAccessPage = className.contains("DeviceAdminAdd", ignoreCase = true)
+            || className.contains("DeviceAdminSettings", ignoreCase = true)
+            || className.contains("ToggleUsageAccess", ignoreCase = true)
+            || className.contains("ToggleNotificationAccess", ignoreCase = true)
+
+        isCurrentScreenSensitive = isDialog || isAppInfoPage || isUninstallerPage || isAccessibilityTogglePage || isSpecialAccessPage
+
+        if (isDialog && (packageName in SETTINGS_PACKAGES || packageName in UNINSTALL_PACKAGES || packageName == "android")) {
+            checkSettingsForSelfControl(requireDangerKeyword = true)
+        }
+
+        if (packageName.startsWith("com.android.systemui")) return
+        // The keyboard is an overlay over whatever app is really in front, not a foreground app.
+        if (packageName == imePackage) return
+
+        if (packageName != currentForegroundApp) {
+            val previousApp = currentForegroundApp
+            currentForegroundApp = packageName
+            Log.d(TAG, "🔄 $previousApp → $packageName")
+            EventLog.log(this, "FG", "$previousApp → $packageName (class=$className)")
+            // Hide the session overlay on app switch; LimitService re-shows within 1s
+            // if the new foreground app has an active session.
+            applySessionOverlay(null)
+        }
+
+        if (BuildConfig.BLOCK_ALL_BROWSERS && BrowserBlocklist.isBrowser(this, packageName)) {
+            goHome("Browser blocked on brother flavor: $packageName")
+            DeviceOwnerHelper.hideApp(this, packageName, true)
+            DeviceOwnerHelper.suspendApp(this, packageName)
+            return
+        }
+
+        if (BuildConfig.BLOCK_ALL_APP_INSTALLS) {
+            if (packageName == "com.android.vending") {
+                goHome("Play Store blocked on brother flavor")
+                DeviceOwnerHelper.hideApp(this, packageName, true)
+                return
+            }
+            if (packageName in UNINSTALL_PACKAGES && !InstallWindowManager.isOpen(this)) {
+                goHome("Package installer blocked on brother flavor: $packageName")
+                return
+            }
+        }
+
+        if (packageName in blockedApps) {
+            if (packageName in InstallWindowManager.INSTALLER_PACKAGES && InstallWindowManager.isOpen(this)) {
+                blockedApps.remove(packageName)
+            } else {
+                goHome("App blocked: $packageName (limit reached)")
+                return
+            }
+        }
+
+
+        // Learned rules never fire while a session is teaching one: the user is being asked to visit
+        // the very screen we would send them away from.
+        if (!ScreenLearnSession.isActive && enforceScreenRules(packageName)) {
+            return
+        }
+
+        if (isAccessibilityTogglePage && (packageName in SETTINGS_PACKAGES || packageName == "com.samsung.accessibility")) {
+            checkSettingsForSelfControl(requireDangerKeyword = false)
+            return
+        }
+
+        if (isAppInfoPage || isUninstallerPage || isSpecialAccessPage) {
+            checkSettingsForSelfControl(requireDangerKeyword = false)
+            return
+        }
+
+        if (packageName in UNINSTALL_PACKAGES) {
+            checkSettingsForSelfControl(requireDangerKeyword = true)
+            return
+        }
+
+        // Generic settings pages (WiFi, Bluetooth, QS tiles, root Accessibility menu, Homepage, etc.)
+        // are SAFE and NEVER kicked.
+    }
+
+    private fun handleContentChanged(packageName: String) {
+        // Learned rules: a tab switch inside a single-activity app is a content
+        // change and nothing else.
+        if (!ScreenLearnSession.isActive && enforceScreenRules(packageName)) {
+            return
+        }
+
+        if (packageName in UNINSTALL_PACKAGES) {
+            checkSettingsForSelfControl(requireDangerKeyword = true)
+            return
+        }
+
+        // Only scan on content change if we are already in a sensitive settings screen or dialog
+        if (isCurrentScreenSensitive && (packageName in SETTINGS_PACKAGES || (packageName == "android" && (currentForegroundApp in SETTINGS_PACKAGES || currentForegroundApp in UNINSTALL_PACKAGES)))) {
+            checkSettingsForSelfControl(requireDangerKeyword = true)
+        }
+    }
+
+    private fun checkSettingsForSelfControl(requireDangerKeyword: Boolean = false) {
+        val fg = currentForegroundApp
+        val inTargetScope = fg in SETTINGS_PACKAGES || fg in UNINSTALL_PACKAGES || fg == "android"
+        if (!inTargetScope) return
+
+        // If DelayManager says we requested settings unlock, bypass protection entirely
+        if (DelayManager.isSettingsUnlocked(this)) {
+            Log.d(TAG, "🔓 Settings bypassed: Delay unlock active.")
+            return
+        }
+
+        // If mandatory setup is not complete yet, allow user to freely access Settings to grant permissions
+        if (!PermissionHelper.isMandatorySetupComplete(this)) {
+            Log.d(TAG, "🔓 Settings bypassed: Mandatory setup is not complete.")
+            return
+        }
+
+        val rootNode = rootInActiveWindow ?: return
+
+        try {
+            var isOurAppOnScreen = false
+            for (appName in TARGET_APP_NAMES) {
+                val appNodes = rootNode.findAccessibilityNodeInfosByText(appName)
+                if (appNodes != null && appNodes.isNotEmpty()) {
+                    for (node in appNodes) {
+                        // CRITICAL: Ignore any nodes belonging to SystemUI (e.g. notifications in shade, status bar)
+                        val nodePkg = node.packageName?.toString() ?: ""
+                        if (nodePkg == "com.android.systemui") continue
+
+                        val text = node.text?.toString()?.trim() ?: ""
+                        val desc = node.contentDescription?.toString()?.trim() ?: ""
+                        val isMatch = text.equals(appName, ignoreCase = true) ||
+                                      desc.equals(appName, ignoreCase = true) ||
+                                      Regex("\\b${Regex.escape(appName)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) ||
+                                      Regex("\\b${Regex.escape(appName)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(desc)
+                        if (isMatch) {
+                            isOurAppOnScreen = true
+                            break
+                        }
+                    }
+                    appNodes.forEach { it.recycle() }
+                    if (isOurAppOnScreen) break
+                }
+            }
+            if (!isOurAppOnScreen) return
+
+            if (requireDangerKeyword) {
+                var dangerFound = false
+                for (danger in DANGER_KEYWORDS) {
+                    val dangerNodes = rootNode.findAccessibilityNodeInfosByText(danger)
+                    if (dangerNodes != null && dangerNodes.isNotEmpty()) {
+                        for (node in dangerNodes) {
+                            // CRITICAL: Ignore any nodes from SystemUI
+                            val nodePkg = node.packageName?.toString() ?: ""
+                            if (nodePkg == "com.android.systemui") continue
+
+                            val text = node.text?.toString()?.trim() ?: ""
+                            val desc = node.contentDescription?.toString()?.trim() ?: ""
+                            val isMatch = text.equals(danger, ignoreCase = true) ||
+                                          desc.equals(danger, ignoreCase = true) ||
+                                          Regex("\\b${Regex.escape(danger)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) ||
+                                          Regex("\\b${Regex.escape(danger)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(desc)
+                            if (isMatch) {
+                                dangerFound = true
+                                break
+                            }
+                        }
+                        dangerNodes.forEach { it.recycle() }
+                        if (dangerFound) break
+                    }
+                }
+                if (!dangerFound) return
+            }
+
+            Log.w(TAG, "🛡️ SelfControl + danger detected! (strict=$requireDangerKeyword)")
+
+            var clickedCancel = false
+            for (cancel in CANCEL_KEYWORDS) {
+                val cancelNodes = rootNode.findAccessibilityNodeInfosByText(cancel)
+                if (cancelNodes != null && cancelNodes.isNotEmpty()) {
+                    for (node in cancelNodes) {
+                        val text = node.text?.toString()?.trim() ?: ""
+                        val desc = node.contentDescription?.toString()?.trim() ?: ""
+                        val isExact = text.equals(cancel, ignoreCase = true) || desc.equals(cancel, ignoreCase = true)
+                        if (isExact && node.isClickable) {
+                            node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                            Log.w(TAG, "🛡️ Clicked on '$cancel'")
+                            clickedCancel = true
+                            break
+                        }
+                    }
+                    cancelNodes.forEach { it.recycle() }
+                    if (clickedCancel) break
+                }
+            }
+
+            goHome("SelfControl detected on sensitive screen")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during auto-click: ${e.message}")
+        } finally {
+            rootNode.recycle()
+        }
+    }
+
+    /**
+     * Try to dismiss a heads-up notification popup from a muted app.
+     * Heads-up popups are rendered by SystemUI as a floating window.
+     * We look for dismissible notification nodes and swipe them away.
+     */
+    private fun dismissHeadsUpNotification(fromPackage: String) {
+        try {
+            val rootNode = rootInActiveWindow ?: return
+            try {
+                // Find nodes that are dismissible (heads-up notifications are usually dismissible)
+                findAndDismissNotificationNodes(rootNode, fromPackage)
+            } finally {
+                rootNode.recycle()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error dismissing heads-up: ${e.message}")
+        }
+    }
+
+    private fun findAndDismissNotificationNodes(node: AccessibilityNodeInfo, targetPackage: String) {
+        // Check if this node is dismissible (heads-up notification)
+        if (node.isDismissable) {
+            try {
+                node.performAction(AccessibilityNodeInfo.ACTION_DISMISS)
+                Log.d(TAG, "Dismissed heads-up notification node for $targetPackage")
+                return
+            } catch (_: Exception) {}
+        }
+
+        // Recurse into children
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            try {
+                findAndDismissNotificationNodes(child, targetPackage)
+            } finally {
+                child.recycle()
+            }
+        }
+    }
+
+    override fun onInterrupt() {
+        Log.w(TAG, "⚠️ AccessibilityService interrupted")
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        isBound = false
+        instance = null
+        applySessionOverlay(null)
+        Log.w(TAG, "💀 AccessibilityService destroyed")
+        currentForegroundApp = "unknown"
+    }
+
+    // ──────────────────────────────────────
+    //  Learned screen rules — enforcement
+    // ──────────────────────────────────────
+
+    private var screenRules: List<ScreenRuleManager.ScreenRule> = emptyList()
+    private var screenRulesStamp = 0L
+    private var screenRulesCheckedAt = 0L
+    private var lastScreenRuleActionAt = 0L
+    private var lastScreenRuleScanAt = 0L
+
+    /**
+     * Apply the rules taught by [ScreenLearnSession] to [pkg], returning true if the user was moved.
+     *
+     * Deliberately mirrors the hand-written Instagram path rather than replacing it yet: that one is
+     * tuned by a long debugging session and works, so it keeps priority until this has proved itself on
+     * a second app.
+     *
+     * Every lookup is the framework's native id search over the target package's windows — no tree
+     * walking. The walk is what caused an ANR when it ran on every accessibility event, and this runs
+     * just as often.
+     */
+    internal fun enforceScreenRules(pkg: String): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - lastScreenRuleActionAt < SCREEN_RULE_REDIRECT_COOLDOWN_MS) return false
+        if (now - lastScreenRuleScanAt < SCREEN_RULE_SCAN_INTERVAL_MS) return false
+        lastScreenRuleScanAt = now
+
+        reloadScreenRulesIfStale(now)
+        val rules = screenRules.filter { it.packageName == pkg }
+        if (rules.isEmpty()) return false
+
+        // Specialized handler for Instagram: if rules exist for Instagram and are active,
+        // use the tuned ViewPager/multi-window aware engine matching the specific rule blockedIds.
+        if (pkg == INSTAGRAM_PACKAGE) {
+            val activeIgRules = rules.filter { isRuleActiveNow(it) }
+            if (activeIgRules.isNotEmpty()) {
+                return enforceInstagramRestrictions(activeIgRules)
+            }
+            return false
+        }
+
+        val activeRules = rules.filter { isRuleActiveNow(it) }
+        if (activeRules.isEmpty()) return false
+
+        for (rule in activeRules) {
+            // Veto: if any allowed id is present on screen, the user is on an allowed screen
+            if (rule.allowedIds.isNotEmpty() && rule.allowedIds.any { visibleIdPresent(pkg, it) }) {
+                continue
+            }
+            val hit = rule.blockedIds.firstOrNull { marker ->
+                val present = visibleIdPresent(pkg, marker)
+                if (present) {
+                    Log.i(TAG, "🛡️ Rule '${rule.name}': detected blocked marker '$marker'")
+                }
+                present
+            } ?: continue
+
+            lastScreenRuleActionAt = now
+            Log.w(TAG, "🚨 Enforcing rule '${rule.name}' for $pkg (hit=$hit)")
+            performScreenEscape(rule, hit)
+            return true
+        }
+        return false
+    }
+
+    /**
+     * Specialized Instagram restriction handler that respects the specific rules defined
+     * (e.g. blocking ONLY Reels, or blocking feed, etc.), using the tuned Instagram
+     * tab detection and redirect mechanisms.
+     */
+    private fun enforceInstagramRestrictions(rules: List<ScreenRuleManager.ScreenRule>): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - lastInstagramScanTime < INSTAGRAM_SCAN_INTERVAL_MS) return false
+        lastInstagramScanTime = now
+
+        val root = rootInActiveWindow
+        if (root == null) {
+            diagInstagram("root=null")
+            return false
+        }
+
+        val selectedTab = instagramSelectedTab(root)
+        if (selectedTab == INSTAGRAM_DIRECT_TAB_VIEW_ID) return false
+
+        // Match against active rules:
+        // A rule matches if:
+        // 1) Current selected tab is in rule.blockedIds
+        // 2) OR any of the rule's blockedIds is visible in root, and none of rule's allowedIds are visible
+        var targetRule: ScreenRuleManager.ScreenRule? = null
+        var hit: String? = null
+
+        for (rule in rules) {
+            // If any allowed id is present, this screen is allowed by this rule
+            if (rule.allowedIds.any { hasViewId(root, it) }) continue
+
+            // Check if selected tab is blocked
+            if (selectedTab != null && (selectedTab in rule.blockedIds || rule.blockedIds.any { selectedTab.endsWith(it) })) {
+                targetRule = rule
+                hit = selectedTab
+                break
+            }
+
+            // Check if any blocked id is visible in active window
+            val viewHit = rule.blockedIds.firstOrNull { hasViewId(root, it) }
+            if (viewHit != null) {
+                targetRule = rule
+                hit = viewHit
+                break
+            }
+        }
+
+        if (targetRule == null || hit == null) return false
+
+        if (now - lastInstagramBackTime < INSTAGRAM_REDIRECT_COOLDOWN_MS) {
+            return false
+        }
+        lastInstagramBackTime = now
+        val shortHit = hit.removePrefix("com.instagram.android:id/")
+        Log.w(TAG, "🛡️ Instagram ${targetRule.name} ($shortHit) → redirect to allowed screen")
+        EventLog.log(this, "IG_REDIRECT", "${targetRule.name} $shortHit (selectedTab=$selectedTab)")
+
+        // Custom escape from rule if specified
+        val escapeTapId = targetRule.escapeTapId
+        if (escapeTapId != null && tapNavItem(INSTAGRAM_PACKAGE, escapeTapId, targetRule.escapeTapIndex)) {
+            return true
+        }
+        val escapeDeeplink = targetRule.escapeDeeplink
+        if (escapeDeeplink != null && openDeeplink(INSTAGRAM_PACKAGE, escapeDeeplink)) {
+            return true
+        }
+
+        val preferredDeeplink = hit in INSTAGRAM_PREFER_DEEPLINK_IDS
+        if (preferredDeeplink && openInstagramInbox()) {
+            return true
+        }
+
+        if (tapInstagramDirectTab()) {
+            return true
+        }
+
+        if (openInstagramInbox()) {
+            return true
+        }
+
+        goHome("instagram_fallback")
+        return true
+    }
+
+    private fun openInstagramInbox(): Boolean = try {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(INSTAGRAM_INBOX_URI)).apply {
+            setPackage(INSTAGRAM_PACKAGE)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
+        true
+    } catch (e: Exception) {
+        Log.w(TAG, "Instagram inbox deep link failed: ${e.message}")
+        false
+    }
+
+    private fun diagInstagram(detail: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastInstagramDiagTime < 2_000L) return
+        lastInstagramDiagTime = now
+        Log.i(TAG, "IG diag: $detail")
+    }
+
+    private fun instagramSelectedTab(root: AccessibilityNodeInfo): String? {
+        for (id in INSTAGRAM_TAB_VIEW_IDS) {
+            val selected = try {
+                root.findAccessibilityNodeInfosByViewId(id)
+                    .any { it.isVisibleToUser && (it.isSelected || it.isChecked) }
+            } catch (e: Exception) {
+                false
+            }
+            if (selected) return id
+        }
+        return null
+    }
+
+    private fun tabStates(root: AccessibilityNodeInfo): String =
+        INSTAGRAM_TAB_VIEW_IDS.joinToString(" ") { id ->
+            val short = id.removePrefix("com.instagram.android:id/")
+            val nodes = try {
+                root.findAccessibilityNodeInfosByViewId(id)
+            } catch (e: Exception) {
+                emptyList()
+            }
+            if (nodes.isEmpty()) "$short=absent"
+            else nodes.joinToString(",") { "$short=s${it.isSelected}/c${it.isChecked}/v${it.isVisibleToUser}" }
+        }
+
+    private fun hasViewId(root: AccessibilityNodeInfo, viewId: String): Boolean = try {
+        root.findAccessibilityNodeInfosByViewId(viewId).any { it.isVisibleToUser }
+    } catch (e: Exception) {
+        false
+    }
+
+    private fun findNodeInAnyWindow(viewId: String): AccessibilityNodeInfo? {
+        try {
+            for (window in windows) {
+                val root = window.root ?: continue
+                root.findAccessibilityNodeInfosByViewId(viewId)
+                    .firstOrNull { it.isVisibleToUser }
+                    ?.let { return it }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "findNodeInAnyWindow($viewId) failed: ${e.message}")
+        }
+        return try {
+            rootInActiveWindow?.findAccessibilityNodeInfosByViewId(viewId)
+                ?.firstOrNull { it.isVisibleToUser }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun tapInstagramDirectTab(): Boolean = try {
+        val icon = findNodeInAnyWindow(INSTAGRAM_DIRECT_TAB_VIEW_ID)
+        if (icon == null) {
+            false
+        } else {
+            val bounds = Rect()
+            icon.getBoundsInScreen(bounds)
+            if (bounds.isEmpty) {
+                false
+            } else {
+                Log.i(TAG, "Instagram DM tab bounds=$bounds → tap ${bounds.exactCenterX()},${bounds.exactCenterY()}")
+                val path = Path().apply { moveTo(bounds.exactCenterX(), bounds.exactCenterY()) }
+                val gesture = GestureDescription.Builder()
+                    .addStroke(GestureDescription.StrokeDescription(path, 0L, 10L))
+                    .build()
+                dispatchGesture(gesture, null, null)
+            }
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "Instagram DM tab tap failed: ${e.message}")
+        false
+    }
+
+    private fun isRuleActiveNow(rule: ScreenRuleManager.ScreenRule): Boolean {
+        val hours = rule.blockedHours ?: return true
+        if (hours == "*" || hours.isBlank()) return true
+        val parts = hours.split("-")
+        if (parts.size != 2) return true
+        return try {
+            val start = ConfigManager.parseTimeToMinutes(parts[0])
+            val end = ConfigManager.parseTimeToMinutes(parts[1])
+            val cal = java.util.Calendar.getInstance()
+            val nowMin = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
+            ConfigManager.isInBlockedWindow(nowMin, start, end)
+        } catch (e: Exception) {
+            true
+        }
+    }
+
+    /** Reload rules only when the file actually changed, and at most every few seconds. */
+    private fun reloadScreenRulesIfStale(now: Long) {
+        if (now - screenRulesCheckedAt < 3_000L) return
+        screenRulesCheckedAt = now
+        val stamp = try {
+            java.io.File(filesDir, "screen_rules.json").lastModified()
+        } catch (e: Exception) {
+            0L
+        }
+        if (stamp == screenRulesStamp) return
+        screenRulesStamp = stamp
+        screenRules = ScreenRuleManager.load(this)
+        Log.i(TAG, "Screen rules reloaded: ${screenRules.size}")
+    }
+
+    internal fun invalidateScreenRules() {
+        screenRulesCheckedAt = 0L
+        screenRulesStamp = 0L
+        screenRules = ScreenRuleManager.load(this)
+        Log.i(TAG, "Screen rules immediately reloaded: ${screenRules.size}")
+    }
+
+    private fun normalizeText(s: CharSequence?): String {
+        return ScreenRuleManager.normalizeText(s)
+    }
+
+    /** Whether [viewId] (or text marker `text:...`, or desc marker `desc:...`) is on screen right now, in one of [pkg]'s windows. */
+    private fun visibleIdPresent(pkg: String, viewId: String): Boolean {
+        // Fast-path: check rootInActiveWindow first
+        try {
+            val activeRoot = rootInActiveWindow
+            if (activeRoot != null) {
+                try {
+                    val rootPkg = activeRoot.packageName?.toString()
+                    if (rootPkg == pkg && checkNodeMatch(activeRoot, viewId)) {
+                        return true
+                    }
+                } finally {
+                    activeRoot.recycle()
+                }
+            }
+        } catch (_: Exception) {}
+
+        // Fallback: iterate windows safely with proper node recycling
+        try {
+            val currentWindows = windows ?: return false
+            for (window in currentWindows) {
+                val root = window.root ?: continue
+                try {
+                    val rootPkg = root.packageName?.toString()
+                    if (rootPkg == pkg && checkNodeMatch(root, viewId)) {
+                        return true
+                    }
+                } finally {
+                    root.recycle()
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "visibleIdPresent($viewId) failed: ${e.message}")
+        }
+        return false
+    }
+
+    private fun checkNodeMatch(root: AccessibilityNodeInfo, targetId: String): Boolean {
+        val dm = resources.displayMetrics
+        val screenBounds = Rect()
+        var budget = 400
+
+        val isText = targetId.startsWith("text:")
+        val isDesc = targetId.startsWith("desc:")
+        val isId = !isText && !isDesc
+
+        val targetVal = when {
+            isText -> normalizeText(targetId.removePrefix("text:"))
+            isDesc -> normalizeText(targetId.removePrefix("desc:"))
+            else -> targetId
+        }
+        val cleanWord = targetVal.filter { it.isLetterOrDigit() || it == ' ' }.trim()
+
+        fun isNodeOnScreen(node: AccessibilityNodeInfo): Boolean {
+            if (node.isVisibleToUser) return true
+            node.getBoundsInScreen(screenBounds)
+            return screenBounds.width() > 0 && screenBounds.height() > 0 &&
+                    screenBounds.intersects(0, 0, dm.widthPixels, dm.heightPixels)
+        }
+
+        fun matchesNode(node: AccessibilityNodeInfo): Boolean {
+            if (!isNodeOnScreen(node)) return false
+            if (isId) {
+                return node.viewIdResourceName == targetVal
+            }
+            val nodeText = normalizeText(node.text)
+            val nodeDesc = normalizeText(node.contentDescription)
+            val maxLen = kotlin.math.max(50, targetVal.length * 3)
+            val textLenOk = nodeText.length <= maxLen
+            val descLenOk = nodeDesc.length <= maxLen
+
+            if (isText) {
+                if (nodeText.equals(targetVal, ignoreCase = true) || nodeDesc.equals(targetVal, ignoreCase = true)) return true
+                if (textLenOk && nodeText.contains(targetVal, ignoreCase = true)) return true
+                if (descLenOk && nodeDesc.contains(targetVal, ignoreCase = true)) return true
+                if (cleanWord.length >= 4) {
+                    if (textLenOk && nodeText.contains(cleanWord, ignoreCase = true)) return true
+                    if (descLenOk && nodeDesc.contains(cleanWord, ignoreCase = true)) return true
+                }
+            } else if (isDesc) {
+                if (nodeDesc.equals(targetVal, ignoreCase = true) || nodeText.equals(targetVal, ignoreCase = true)) return true
+                if (descLenOk && nodeDesc.contains(targetVal, ignoreCase = true)) return true
+                if (textLenOk && nodeText.contains(targetVal, ignoreCase = true)) return true
+                if (cleanWord.length >= 4) {
+                    if (descLenOk && nodeDesc.contains(cleanWord, ignoreCase = true)) return true
+                    if (textLenOk && nodeText.contains(cleanWord, ignoreCase = true)) return true
+                }
+            }
+            return false
+        }
+
+        fun dfs(node: AccessibilityNodeInfo): Boolean {
+            if (budget <= 0) return false
+            budget--
+            if (matchesNode(node)) return true
+
+            val count = node.childCount
+            for (i in 0 until count) {
+                if (budget <= 0) break
+                val child = try { node.getChild(i) } catch (_: Exception) { null } ?: continue
+                try {
+                    if (dfs(child)) return true
+                } finally {
+                    child.recycle()
+                }
+            }
+            return false
+        }
+
+        // 1. Fast native lookup
+        try {
+            if (isId) {
+                val nodes = root.findAccessibilityNodeInfosByViewId(targetVal)
+                if (!nodes.isNullOrEmpty()) {
+                    val hit = nodes.any { isNodeOnScreen(it) }
+                    nodes.forEach { it.recycle() }
+                    if (hit) return true
+                }
+            } else {
+                val searchWord = if (cleanWord.length >= 3) cleanWord else targetVal
+                val nodes = root.findAccessibilityNodeInfosByText(searchWord)
+                if (!nodes.isNullOrEmpty()) {
+                    val hit = nodes.any { matchesNode(it) }
+                    nodes.forEach { it.recycle() }
+                    if (hit) return true
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 2. Direct tree walk fallback (catches Jetpack Compose and custom views that don't index text)
+        return dfs(root)
+    }
+
+    /**
+     * Leave the blocked screen, then **check 900 ms later whether it worked**.
+     *
+     * The check is the point. Until now a redirect only reported that an action had been *emitted*, and
+     * that hid a real failure for days: tapping the messages tab from Instagram's search dismissed the
+     * search and landed on the feed, which looked like success in the log. Verifying the destination
+     * turns each real use into a test, so a rule that stops working shows up as failures instead of
+     * silence — and the counters say which action to prefer next time.
+     */
+    private fun performScreenEscape(rule: ScreenRuleManager.ScreenRule, hit: String) {
+        val pkg = rule.packageName
+        val escapeTapId = rule.escapeTapId ?: if (pkg == "com.snapchat.android") {
+            "com.snapchat.android:id/ngs_chat_icon_container"
+        } else null
+
+        var how = "failed"
+        if (escapeTapId != null && tapNavItem(pkg, escapeTapId, rule.escapeTapIndex)) {
+            how = "tap"
+        } else if (rule.escapeDeeplink != null && openDeeplink(pkg, rule.escapeDeeplink)) {
+            how = "deeplink"
+        } else if (pkg == "com.snapchat.android" && tapSnapchatChat()) {
+            how = "snapchat_chat_coords"
+        } else {
+            // Fallback for known packages
+            val fallbackTapped = when (pkg) {
+                "com.android.vending" -> {
+                    tapNavItem(pkg, "text:Jeux", 0) ||
+                    tapNavItem(pkg, "desc:Jeux", 0) ||
+                    tapNavItem(pkg, "text:Applis", 0) ||
+                    tapNavItem(pkg, "desc:Applis", 0)
+                }
+                else -> false
+            }
+
+            if (fallbackTapped) {
+                how = "fallback_nav_tap"
+            } else {
+                val navAllowed = rule.allowedIds.firstOrNull { it.startsWith("text:") || it.startsWith("desc:") }
+                if (navAllowed != null && tapNavItem(pkg, navAllowed, 0)) {
+                    how = "allowed_marker_tap"
+                } else if (performGlobalAction(GLOBAL_ACTION_BACK)) {
+                    how = "back"
+                } else {
+                    val launchIntent = packageManager.getLaunchIntentForPackage(pkg)?.apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    }
+                    if (launchIntent != null) {
+                        startActivity(launchIntent)
+                        how = "clear_top_relaunch"
+                    } else {
+                        goHome("screen_escape_fallback")
+                        how = "home_fallback"
+                    }
+                }
+            }
+        }
+        val shortHit = hit.substringAfter(":id/")
+        Log.w(TAG, "🛡️ ${rule.name}: $shortHit → escape ($how)")
+
+        overlayHandler.postDelayed({
+            val stillBlocked = rule.blockedIds.any { visibleIdPresent(pkg, it) }
+            val reached = !stillBlocked && (rule.allowedIds.isEmpty() || rule.allowedIds.any { visibleIdPresent(pkg, it) })
+            ScreenRuleManager.recordOutcome(this, rule.name, reached)
+            Log.w(TAG, "   ${rule.name}: destination ${if (reached) "atteinte" else "NON atteinte"}")
+            EventLog.log(
+                this, "SCREEN_RULE",
+                "${rule.name} $shortHit → $how, reached=$reached"
+            )
+
+            // If still blocked after 900ms, force app relaunch with CLEAR_TOP or go home
+            if (stillBlocked) {
+                Log.w(TAG, "   ${rule.name}: Still on blocked screen after $how! Enforcing exit.")
+                val launchIntent = packageManager.getLaunchIntentForPackage(pkg)?.apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
+                if (launchIntent != null) {
+                    startActivity(launchIntent)
+                } else {
+                    goHome("screen_escape_stuck")
+                }
+            }
+        }, 900L)
+    }
+
+    /** Fallback coordinate tap on the Snapchat bottom nav Chat icon (approx 31.6% width, 90.9% height). */
+    private fun tapSnapchatChat(): Boolean = try {
+        val dm = resources.displayMetrics
+        val x = dm.widthPixels * 0.316f
+        val y = dm.heightPixels * 0.909f
+        val path = Path().apply { moveTo(x, y) }
+        dispatchGesture(
+            GestureDescription.Builder()
+                .addStroke(GestureDescription.StrokeDescription(path, 0L, 10L))
+                .build(),
+            null, null
+        )
+    } catch (e: Exception) {
+        Log.w(TAG, "tapSnapchatChat failed: ${e.message}")
+        false
+    }
+
+    /** Open [uri] inside [pkg]. Pinned to the package so a URL can never fall through to a browser. */
+    private fun openDeeplink(pkg: String, uri: String): Boolean = try {
+        startActivity(
+            Intent(Intent.ACTION_VIEW, Uri.parse(uri)).apply {
+                setPackage(pkg)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        )
+        true
+    } catch (e: Exception) {
+        Log.w(TAG, "deeplink $uri failed: ${e.message}")
+        false
+    }
+
+    // ──────────────────────────────────────
+    //  Screen learning — guidance overlay
+    // ──────────────────────────────────────
+
+    private var learnOverlay: View? = null
+
+    /**
+     * A floating panel with an instruction and two buttons, shown over the app being learned.
+     *
+     * Same `TYPE_ACCESSIBILITY_OVERLAY` as the session label — no `SYSTEM_ALERT_WINDOW` needed — but
+     * without `FLAG_NOT_TOUCHABLE` so the buttons work, and *with* `FLAG_NOT_FOCUSABLE` so the app
+     * underneath keeps input focus. Taking focus would change the very screen we are about to read.
+     *
+     * Anchored to the top on purpose: the flow asks the user to switch tabs, and those live at the
+     * bottom of every app this is meant for.
+     */
+    internal fun showLearnOverlay(
+        text: String,
+        primaryLabel: String,
+        onPrimary: () -> Unit,
+        onCancel: () -> Unit
+    ) {
+        overlayHandler.post {
+            try {
+                hideLearnOverlayInternal()
+                val density = resources.displayMetrics.density
+                fun dp(v: Int) = (v * density).toInt()
+
+                val panel = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(16), dp(12), dp(16), dp(12))
+                    background = GradientDrawable().apply {
+                        setColor(Color.parseColor("#F21B1B2E"))
+                        cornerRadius = dp(16).toFloat()
+                    }
+                }
+                panel.addView(
+                    TextView(this).apply {
+                        this.text = text
+                        setTextColor(Color.WHITE)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                        typeface = Typeface.DEFAULT_BOLD
+                    }
+                )
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(0, dp(8), 0, 0)
+                }
+                row.addView(
+                    Button(this).apply {
+                        this.text = primaryLabel
+                        setOnClickListener { onPrimary() }
+                    }
+                )
+                row.addView(
+                    Button(this).apply {
+                        this.text = "Cancel"
+                        setOnClickListener { onCancel() }
+                    }
+                )
+                panel.addView(row)
+
+                val params = WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                    PixelFormat.TRANSLUCENT
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                    y = dp(48)
+                }
+                (getSystemService(Context.WINDOW_SERVICE) as WindowManager).addView(panel, params)
+                learnOverlay = panel
+            } catch (e: Exception) {
+                Log.e(TAG, "learn overlay failed: ${e.message}")
+            }
+        }
+    }
+
+    internal fun hideLearnOverlay() {
+        overlayHandler.post { hideLearnOverlayInternal() }
+    }
+
+    private fun hideLearnOverlayInternal() {
+        val v = learnOverlay ?: return
+        learnOverlay = null
+        try {
+            (getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(v)
+        } catch (_: Exception) {}
+    }
+
+    // ──────────────────────────────────────
+    //  Screen learning — capture primitives
+    // ──────────────────────────────────────
+
+    /**
+     * Every **visible** view id belonging to [pkg], across all its windows.
+     *
+     * This walks the tree, which is exactly what caused an ANR when the redirect check did it on every
+     * accessibility event. It is safe here because it runs only when the user taps "capture" during a
+     * learning session — a handful of times, never in a loop. The node budget is a guard against a
+     * pathological tree, not a performance tuning.
+     *
+     * Windows are filtered by package so the reading is unaffected by our own overlay, the keyboard, or
+     * a pulled-down notification shade being the active window.
+     */
+    internal fun visibleIdsFor(pkg: String): Set<String> {
+        val ids = LinkedHashSet<String>()
+        val prefix = "$pkg:id/"
+        var budget = 800
+
+        val dm = resources.displayMetrics
+        val screenBounds = Rect()
+        fun walk(node: AccessibilityNodeInfo?) {
+            if (node == null || budget <= 0) return
+            budget--
+            val id = node.viewIdResourceName
+            node.getBoundsInScreen(screenBounds)
+            val onScreen = node.isVisibleToUser || (screenBounds.width() > 0 && screenBounds.height() > 0 &&
+                    screenBounds.intersects(0, 0, dm.widthPixels, dm.heightPixels))
+
+            if (onScreen) {
+                if (id != null && id.startsWith(prefix)) {
+                    ids.add(id)
+                }
+                val txt = normalizeText(node.text)
+                if (txt.length in 3..35 && !txt.all { it.isDigit() || it == ':' || it == ' ' }) {
+                    ids.add("text:$txt")
+                }
+                val desc = normalizeText(node.contentDescription)
+                if (desc.length in 3..40 && !desc.all { it.isDigit() || it == ':' || it == ' ' } && desc != txt) {
+                    ids.add("desc:$desc")
+                }
+            }
+            val count = node.childCount
+            for (i in 0 until count) {
+                if (budget <= 0) break
+                val child = try { node.getChild(i) } catch (_: Exception) { null } ?: continue
+                try {
+                    walk(child)
+                } finally {
+                    child.recycle()
+                }
+            }
+        }
+
+        try {
+            var foundInWindows = false
+            for (window in windows) {
+                val root = window.root ?: continue
+                if (root.packageName?.toString() == pkg) {
+                    foundInWindows = true
+                    try {
+                        walk(root)
+                    } finally {
+                        root.recycle()
+                    }
+                }
+            }
+            if (!foundInWindows) {
+                rootInActiveWindow?.let { root ->
+                    try {
+                        if (root.packageName?.toString() == pkg) {
+                            walk(root)
+                        }
+                    } finally {
+                        root.recycle()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "visibleIdsFor($pkg) failed: ${e.message}")
+        }
+        Log.i(TAG, "visibleIdsFor($pkg) returning ${ids.size} ids")
+        return ids
+    }
+
+    /**
+     * The view id of the currently selected navigation item in [pkg], plus its index among the nodes
+     * sharing that id — or null when nothing reports itself selected.
+     *
+     * Supports both classic resource-id based tabs (WhatsApp, Instagram) and text/content-description
+     * based bottom navigation tabs (Google Play Store, Compose apps).
+     */
+    internal fun selectedNavItem(pkg: String): Pair<String, Int>? {
+        if (pkg == "com.snapchat.android") {
+            if (visibleIdPresent(pkg, "com.snapchat.android:id/ff_item") || visibleIdPresent(pkg, "text:Chat")) {
+                return "com.snapchat.android:id/ngs_chat_icon_container" to 0
+            }
+            if (visibleIdPresent(pkg, "com.snapchat.android:id/camera_page") || visibleIdPresent(pkg, "com.snapchat.android:id/camera_capture_button")) {
+                return "com.snapchat.android:id/ngs_camera_icon_container" to 0
+            }
+            if (visibleIdPresent(pkg, "com.snapchat.android:id/df_large_story") || visibleIdPresent(pkg, "com.snapchat.android:id/friend_card_frame") || visibleIdPresent(pkg, "text:Stories")) {
+                return "com.snapchat.android:id/ngs_community_icon_container" to 0
+            }
+            if (visibleIdPresent(pkg, "com.snapchat.android:id/spotlight_container") || visibleIdPresent(pkg, "text:Spotlight")) {
+                return "com.snapchat.android:id/ngs_spotlight_icon_container" to 0
+            }
+            return "com.snapchat.android:id/ngs_chat_icon_container" to 0
+        }
+
+        val prefix = "$pkg:id/"
+        val byId = LinkedHashMap<String, MutableList<Boolean>>()
+        var budget = 800
+        val dm = resources.displayMetrics
+        val screenBounds = Rect()
+        var selectedItemTarget: String? = null
+
+        fun walk(node: AccessibilityNodeInfo?) {
+            if (node == null || budget <= 0) return
+            budget--
+            val id = node.viewIdResourceName
+            val isSel = node.isSelected || node.isChecked
+            node.getBoundsInScreen(screenBounds)
+            val isBottomBar = screenBounds.bottom >= dm.heightPixels * 0.70f
+
+            if (id != null && id.startsWith(prefix) && node.isVisibleToUser) {
+                byId.getOrPut(id) { mutableListOf() }.add(isSel)
+            }
+
+            // Also check for selected tab items in bottom area (Material, Compose, or custom tabs)
+            if (isSel && isBottomBar && selectedItemTarget == null) {
+                val txt = normalizeText(node.text)
+                val desc = normalizeText(node.contentDescription)
+                when {
+                    txt.isNotBlank() && txt.length in 2..25 -> selectedItemTarget = "text:$txt"
+                    desc.isNotBlank() && desc.length in 2..35 -> selectedItemTarget = "desc:$desc"
+                    id != null && id.startsWith(prefix) -> selectedItemTarget = id
+                }
+            }
+
+            val count = node.childCount
+            for (i in 0 until count) {
+                if (budget <= 0) break
+                val child = try { node.getChild(i) } catch (_: Exception) { null } ?: continue
+                try {
+                    walk(child)
+                } finally {
+                    child.recycle()
+                }
+            }
+        }
+
+        try {
+            var found = false
+            for (window in windows) {
+                val root = window.root ?: continue
+                if (root.packageName?.toString() == pkg) {
+                    found = true
+                    try {
+                        walk(root)
+                    } finally {
+                        root.recycle()
+                    }
+                }
+            }
+            if (!found) {
+                rootInActiveWindow?.let { root ->
+                    try {
+                        if (root.packageName?.toString() == pkg) walk(root)
+                    } finally {
+                        root.recycle()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "selectedNavItem($pkg) failed: ${e.message}")
+            return null
+        }
+
+        // Prefer an id with several instances where exactly one is selected — that is the shape of a
+        // tab bar, and it rules out unrelated one-off selected widgets such as a checked list row.
+        val tabLike = byId.entries
+            .filter { it.value.size in 2..8 && it.value.count { sel -> sel } == 1 }
+            .minByOrNull { it.value.size }
+        if (tabLike != null) {
+            return tabLike.key to tabLike.value.indexOfFirst { it }
+        }
+        val single = byId.entries.firstOrNull { it.value.size == 1 && it.value[0] }
+        if (single != null) {
+            return single.key to 0
+        }
+        // Fallback: selected item target captured by text/desc in bottom navigation bar
+        val target = selectedItemTarget
+        if (target != null) {
+            return target to 0
+        }
+        return null
+    }
+
+    /** Tap the centre of the [index]-th visible node carrying [viewId] (or text/desc marker) in [pkg]. */
+    internal fun tapNavItem(pkg: String, viewId: String, index: Int): Boolean {
+        val matches = mutableListOf<AccessibilityNodeInfo>()
+        val dm = resources.displayMetrics
+        val screenBounds = Rect()
+
+        fun isNodeOnScreen(node: AccessibilityNodeInfo): Boolean {
+            if (node.isVisibleToUser) return true
+            node.getBoundsInScreen(screenBounds)
+            return screenBounds.width() > 0 && screenBounds.height() > 0 &&
+                    screenBounds.intersects(0, 0, dm.widthPixels, dm.heightPixels)
+        }
+
+        fun findInRoot(root: AccessibilityNodeInfo) {
+            val isText = viewId.startsWith("text:")
+            val isDesc = viewId.startsWith("desc:")
+            val isId = !isText && !isDesc
+
+            val targetVal = when {
+                isText -> normalizeText(viewId.removePrefix("text:"))
+                isDesc -> normalizeText(viewId.removePrefix("desc:"))
+                else -> viewId
+            }
+            val cleanWord = targetVal.filter { it.isLetterOrDigit() || it == ' ' }.trim()
+
+            fun matchesNode(node: AccessibilityNodeInfo): Boolean {
+                if (!isNodeOnScreen(node)) return false
+                if (isId) return node.viewIdResourceName == targetVal
+                val nodeText = normalizeText(node.text)
+                val nodeDesc = normalizeText(node.contentDescription)
+                val maxLen = kotlin.math.max(50, targetVal.length * 3)
+                val textLenOk = nodeText.length <= maxLen
+                val descLenOk = nodeDesc.length <= maxLen
+
+                if (isText) {
+                    if (nodeText.equals(targetVal, ignoreCase = true) || nodeDesc.equals(targetVal, ignoreCase = true)) return true
+                    if (textLenOk && nodeText.contains(targetVal, ignoreCase = true)) return true
+                    if (descLenOk && nodeDesc.contains(targetVal, ignoreCase = true)) return true
+                    if (cleanWord.length >= 4) {
+                        if (textLenOk && nodeText.contains(cleanWord, ignoreCase = true)) return true
+                        if (descLenOk && nodeDesc.contains(cleanWord, ignoreCase = true)) return true
+                    }
+                } else if (isDesc) {
+                    if (nodeDesc.equals(targetVal, ignoreCase = true) || nodeText.equals(targetVal, ignoreCase = true)) return true
+                    if (descLenOk && nodeDesc.contains(targetVal, ignoreCase = true)) return true
+                    if (textLenOk && nodeText.contains(targetVal, ignoreCase = true)) return true
+                    if (cleanWord.length >= 4) {
+                        if (descLenOk && nodeDesc.contains(cleanWord, ignoreCase = true)) return true
+                        if (textLenOk && nodeText.contains(cleanWord, ignoreCase = true)) return true
+                    }
+                }
+                return false
+            }
+
+            // 1. Try native lookup
+            try {
+                if (isId) {
+                    val nodes = root.findAccessibilityNodeInfosByViewId(targetVal)
+                    if (nodes != null) {
+                        for (node in nodes) {
+                            if (isNodeOnScreen(node)) matches.add(node) else node.recycle()
+                        }
+                    }
+                } else {
+                    val searchWord = if (cleanWord.length >= 3) cleanWord else targetVal
+                    val nodes = root.findAccessibilityNodeInfosByText(searchWord)
+                    if (nodes != null) {
+                        for (node in nodes) {
+                            if (matchesNode(node)) matches.add(node) else node.recycle()
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+
+            // 2. Direct tree walk fallback if native lookup found nothing
+            if (matches.isEmpty()) {
+                var budget = 400
+                fun dfs(node: AccessibilityNodeInfo) {
+                    if (budget <= 0) return
+                    budget--
+                    if (matchesNode(node)) {
+                        matches.add(node)
+                        return
+                    }
+                    val count = node.childCount
+                    for (i in 0 until count) {
+                        if (budget <= 0 || matches.isNotEmpty()) break
+                        val child = try { node.getChild(i) } catch (_: Exception) { null } ?: continue
+                        dfs(child)
+                        if (!matches.contains(child)) child.recycle()
+                    }
+                }
+                dfs(root)
+            }
+        }
+
+        try {
+            var found = false
+            for (window in windows) {
+                val root = window.root ?: continue
+                if (root.packageName?.toString() == pkg) {
+                    found = true
+                    try {
+                        findInRoot(root)
+                    } finally {
+                        root.recycle()
+                    }
+                }
+            }
+            if (!found) {
+                rootInActiveWindow?.let { root ->
+                    try {
+                        if (root.packageName?.toString() == pkg) findInRoot(root)
+                    } finally {
+                        root.recycle()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "tapNavItem lookup failed: ${e.message}")
+            matches.forEach { it.recycle() }
+            return false
+        }
+
+        val node = matches.getOrNull(index) ?: matches.firstOrNull() ?: run {
+            Log.w(TAG, "tapNavItem: no match at index $index (found ${matches.size} total for $viewId)")
+            matches.forEach { it.recycle() }
+            return false
+        }
+        Log.i(TAG, "tapNavItem: found target node for $viewId")
+
+        // 1. Try direct accessibility action click on node or its ancestors
+        var curr: AccessibilityNodeInfo? = node
+        var clicked = false
+        while (curr != null) {
+            if (curr.isClickable) {
+                clicked = curr.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                Log.i(TAG, "tapNavItem: ACTION_CLICK returned $clicked on ${curr.viewIdResourceName ?: curr.className}")
+                if (clicked) break
+            }
+            val parent = curr.parent
+            if (curr != node) curr.recycle()
+            curr = parent
+        }
+
+        // 2. Also dispatch physical tap gesture on center coordinates
+        val bounds = Rect().also { node.getBoundsInScreen(it) }
+        var gestured = false
+        if (!bounds.isEmpty) {
+            try {
+                val path = Path().apply { moveTo(bounds.exactCenterX(), bounds.exactCenterY()) }
+                gestured = dispatchGesture(
+                    GestureDescription.Builder()
+                        .addStroke(GestureDescription.StrokeDescription(path, 0L, 10L))
+                        .build(),
+                    null, null
+                )
+                Log.i(TAG, "tapNavItem: dispatchGesture returned $gestured at (${bounds.centerX()}, ${bounds.centerY()})")
+            } catch (e: Exception) {
+                Log.w(TAG, "tapNavItem gesture failed: ${e.message}")
+            }
+        }
+        matches.forEach { it.recycle() }
+        return clicked || gestured
+    }
+
+    // ──────────────────────────────────────
+    //  Session overlay
+    // ──────────────────────────────────────
+
+    private fun applySessionOverlay(text: String?) {
+        overlayHandler.post {
+            try {
+                if (text == null) {
+                    removeOverlayView()
+                } else {
+                    ensureOverlayView()
+                    overlayView?.text = text
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "session overlay update failed: ${e.message}")
+            }
+        }
+    }
+
+    private fun ensureOverlayView() {
+        if (overlayView != null) return
+        val density = resources.displayMetrics.density
+        fun dp(v: Int) = (v * density).toInt()
+        val bg = GradientDrawable().apply {
+            setColor(Color.parseColor("#CC000000"))
+            cornerRadius = dp(18).toFloat()
+        }
+        val tv = TextView(this).apply {
+            background = bg
+            setTextColor(Color.parseColor("#80CBC4"))
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            typeface = Typeface.DEFAULT_BOLD
+            text = ""
+        }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            y = dp(40)  // below the status bar
+        }
+        val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        try {
+            wm.addView(tv, params)
+            overlayView = tv
+        } catch (e: Exception) {
+            Log.e(TAG, "session overlay addView failed: ${e.message}")
+        }
+    }
+
+    private fun removeOverlayView() {
+        val v = overlayView ?: return
+        overlayView = null
+        try {
+            val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            wm.removeView(v)
+        } catch (_: Exception) {}
+    }
+}

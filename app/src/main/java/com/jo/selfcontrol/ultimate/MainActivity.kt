@@ -169,6 +169,7 @@ class MainActivity : Activity() {
         super.onResume()
         cachedLaunchableApps = null
         refreshPermissions()
+        refreshPartialAccessUI(force = true)
         if (::zoomCanvas.isInitialized) {
             zoomCanvas.startFloatingAnimation()
         }
@@ -392,7 +393,10 @@ class MainActivity : Activity() {
         partialAccessCircle = com.jo.selfcontrol.ultimate.ui.FeatureCircleView(this).apply {
             setFeatureTitle("Partial Access")
             setSummaryText("In-app channels")
-            onClickListener = { zoomCanvas.zoomInto(this) }
+            onClickListener = {
+                refreshPartialAccessUI(force = true)
+                zoomCanvas.zoomInto(this)
+            }
         }
         val partialAccessHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -4682,23 +4686,39 @@ class MainActivity : Activity() {
     // ==========================================
     //  PARTIAL ACCESS (SCREEN RULES)
     // ==========================================
-    private fun refreshPartialAccessUI() {
+    private var lastRenderedPartialAccessSig: String = ""
+
+    private fun refreshPartialAccessUI(force: Boolean = false) {
         if (!::partialAccessContainer.isInitialized) return
-        partialAccessContainer.removeAllViews()
         val rules = ScreenRuleManager.load(this)
         if (rules.isEmpty()) {
             partialAccessCircle.setSummaryText("0 rules")
-            partialAccessContainer.addView(TextView(this).apply {
-                text = "No partial access rules configured."
-                setTextColor(Color.GRAY)
-                setPadding(dp(8), dp(8), dp(8), dp(8))
-            })
+            if (lastRenderedPartialAccessSig != "empty" || force) {
+                lastRenderedPartialAccessSig = "empty"
+                partialAccessContainer.removeAllViews()
+                partialAccessContainer.addView(TextView(this).apply {
+                    text = "No partial access rules configured."
+                    setTextColor(Color.GRAY)
+                    setPadding(dp(8), dp(8), dp(8), dp(8))
+                })
+            }
             return
         } else if (rules.size == 1) {
             partialAccessCircle.setSummaryText(rules[0].name)
         } else {
             partialAccessCircle.setSummaryText("${rules.size} rules")
         }
+
+        val hasPending = rules.any {
+            ScreenRuleManager.pendingTimerChange(this, it.name) != null ||
+            ScreenRuleManager.pendingRemovalRemainingMs(this, it.name) != null
+        }
+        val sig = rules.joinToString(";") { "${it.name}:${it.successes}:${it.failures}:${it.blockedHours}:${it.protectionDelaySec}" }
+        if (!force && !hasPending && sig == lastRenderedPartialAccessSig) {
+            return
+        }
+        lastRenderedPartialAccessSig = sig
+        partialAccessContainer.removeAllViews()
 
         for (rule in rules) {
             val label = try {

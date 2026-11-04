@@ -224,6 +224,13 @@ object GuardianEngine {
         }
     }
 
+    fun isWhitelistInitialized(ctx: Context): Boolean {
+        synchronized(lock) {
+            val state = getState(ctx)
+            return state.allowedPackages.any { it !in HARD_GUARDS }
+        }
+    }
+
     fun isGuarded(ctx: Context, pkg: String): Boolean {
         if (pkg in HARD_GUARDS) return true
         if (pkg == ctx.packageName) return true
@@ -661,29 +668,6 @@ object GuardianEngine {
             scheduleNextUnlockAlarm(ctx)
             return true
         }
-    }
-
-    fun resetQuarantineDelay(ctx: Context) {
-        synchronized(lock) {
-            val state = getState(ctx)
-            saveStateInternal(ctx, state.copy(
-                quarantineDelayHours = 0,
-                pendingDelayHours = null,
-                pendingDelayExecuteAt = 0L
-            ))
-            Log.w(TAG, "Quarantine delay forcefully reset to 0 via admin action")
-            scheduleNextUnlockAlarm(ctx)
-        }
-    }
-
-    fun setClientUninstallBlocked(ctx: Context, blocked: Boolean) {
-        if (!isDeviceOwner(ctx)) return
-        val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
-        val admin = getAdminComponent(ctx)
-        runCatching {
-            dpm.setUninstallBlocked(admin, "com.jo.selfcontrol.ultimate", blocked)
-            Log.w(TAG, "Client uninstall blocked set to $blocked")
-        }.onFailure { Log.e(TAG, "Failed to set client uninstall blocked ($blocked): ${it.message}") }
     }
 
     fun setWhitelistEnabled(ctx: Context, enabled: Boolean): Boolean {
