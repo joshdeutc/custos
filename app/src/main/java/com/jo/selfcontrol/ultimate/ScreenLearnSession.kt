@@ -204,9 +204,6 @@ object ScreenLearnSession {
             blockedHours = blockedHours?.takeIf { it.isNotBlank() && it != "*" }
         )
         val saved = ScreenRuleManager.upsert(svc, rule)
-        if (saved) {
-            svc.invalidateScreenRules()
-        }
         mainHandler.post {
             step = Step.DONE
             svc.hideLearnOverlay()
@@ -240,9 +237,10 @@ object ScreenLearnSession {
 
     private fun toast(ctx: Context, msg: String) {
         Log.w(TAG, msg)
-        AppWatcherService.updateSessionOverlay(msg)
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            AppWatcherService.updateSessionOverlay(null)
-        }, 4_000)
+        mainHandler.post {
+            runCatching {
+                android.widget.Toast.makeText(ctx.applicationContext, msg, android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 }

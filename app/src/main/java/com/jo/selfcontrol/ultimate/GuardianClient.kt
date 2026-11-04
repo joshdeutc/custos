@@ -485,4 +485,14 @@ object GuardianClient {
             false
         }
     }
+
+    fun getSessionStateJson(): String? {
+        val s = service ?: return null
+        return try {
+            s.sessionStateJson
+        } catch (e: Exception) {
+            Log.e(TAG, "IPC error getSessionStateJson", e)
+            null
+        }
+    }
 }

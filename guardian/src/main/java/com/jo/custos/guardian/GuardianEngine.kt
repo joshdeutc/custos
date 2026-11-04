@@ -917,8 +917,51 @@ object GuardianEngine {
         return cal.timeInMillis
     }
 
+    private var lastA11yHealMs = 0L
+
+    fun ensureAccessibilityServicesEnabled(ctx: Context) {
+        if (!isDeviceOwner(ctx)) return
+        val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
+        val admin = getAdminComponent(ctx)
+        val guardianSvc = "com.jo.custos.guardian/com.jo.custos.guardian.GuardianWatcherService"
+        val guardianShort = "com.jo.custos.guardian/.GuardianWatcherService"
+        val uiSvc = "com.jo.selfcontrol.ultimate/com.jo.selfcontrol.ultimate.AppWatcherService"
+        val uiShort = "com.jo.selfcontrol.ultimate/.AppWatcherService"
+
+        runCatching {
+            val current = android.provider.Settings.Secure.getString(
+                ctx.contentResolver,
+                android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            ) ?: ""
+            val entries = current.split(':').filter { it.isNotBlank() }.toMutableList()
+            var changed = false
+            if (entries.none { it == guardianSvc || it == guardianShort }) {
+                entries.add(guardianSvc)
+                changed = true
+            }
+            if (isPackageInstalled(ctx, "com.jo.selfcontrol.ultimate") &&
+                entries.none { it == uiSvc || it == uiShort }
+            ) {
+                entries.add(uiSvc)
+                changed = true
+            }
+            if (changed) {
+                val merged = entries.joinToString(":")
+                dpm.setSecureSetting(admin, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, merged)
+                dpm.setSecureSetting(admin, android.provider.Settings.Secure.ACCESSIBILITY_ENABLED, "1")
+                Log.w(TAG, "Auto-healed AccessibilityServices via Device Owner: $merged")
+            }
+        }
+    }
+
     fun evaluateLimits(ctx: Context) {
         synchronized(lock) {
+            val nowMs = System.currentTimeMillis()
+            if (nowMs - lastA11yHealMs >= 5_000L) {
+                lastA11yHealMs = nowMs
+                ensureAccessibilityServicesEnabled(ctx)
+            }
+
             val config = ConfigManager.loadConfig(ctx)
             val now = java.util.Calendar.getInstance()
             val dayOfWeek = now.get(java.util.Calendar.DAY_OF_WEEK) - 1 // 0=Dimanche, 1=Lundi, ..., 6=Samedi
@@ -929,6 +972,25 @@ object GuardianEngine {
                 add(java.util.Calendar.HOUR_OF_DAY, -2)
             }
             val quotaDayOfWeek = calQuota.get(java.util.Calendar.DAY_OF_WEEK) - 1
+            val logicalDayId = calQuota.get(java.util.Calendar.YEAR) * 1000 + calQuota.get(java.util.Calendar.DAY_OF_YEAR)
+            SessionManager.resetDayIfNeeded(ctx, logicalDayId)
+
+            val currentApp = GuardianWatcherService.currentForegroundApp
+            val limitsByPkg = config.limits.associateBy { it.packageName }
+
+            // End active sessions ONLY when the user has returned to the launcher / home screen
+            if (currentApp.isNotBlank() && currentApp in launcherPackages(ctx)) {
+                val activeSessions = SessionManager.activePackages(ctx)
+                for (pkg in activeSessions) {
+                    val sessionCfg = limitsByPkg[pkg]?.session ?: continue
+                    SessionManager.endSessionIfActive(ctx, pkg, sessionCfg, nowMs)
+                }
+                GuardianWatcherService.updateSessionOverlay(null)
+            }
+
+            if (currentApp.isNotBlank() && currentApp != "unknown") {
+                GuardianWatcherService.recheckScreenRules(currentApp)
+            }
 
             val newlyBlocked = mutableSetOf<String>()
 
@@ -941,7 +1003,9 @@ object GuardianEngine {
                 }
             }
 
-            // 2. Daily Quota Limits
+            var activeOverlayText: String? = null
+
+            // 2. Daily Quota & Session Limits
             for (limit in config.limits) {
                 val pkg = limit.packageName
                 if (pkg in newlyBlocked) continue
@@ -965,14 +1029,42 @@ object GuardianEngine {
                 if (maxSec == 0) {
                     // Quota 0 min/sec = completely blocked 24/7
                     newlyBlocked.add(pkg)
+                    continue
                 } else if (maxSec > 0) {
                     val dayStart = dayStartMillis()
-                    val usedSec = UsageQuery.foregroundSeconds(ctx, pkg, dayStart, System.currentTimeMillis())
+                    val usedSec = UsageQuery.foregroundSeconds(ctx, pkg, dayStart, nowMs)
                     if (usedSec >= maxSec) {
+                        newlyBlocked.add(pkg)
+                        continue
+                    }
+                }
+
+                // 3. Session Limit (Discord-style per-unlock session & cooldown)
+                val session = limit.session
+                if (session != null) {
+                    if (pkg == currentApp) {
+                        when (SessionManager.evaluate(ctx, pkg, session, nowMs)) {
+                            SessionManager.Result.BLOCKED_COOLDOWN,
+                            SessionManager.Result.BLOCKED_DAILY -> {
+                                newlyBlocked.add(pkg)
+                            }
+                            SessionManager.Result.IN_SESSION,
+                            SessionManager.Result.STARTED_SESSION -> {
+                                val st = SessionManager.statusOf(ctx, pkg, session, nowMs)
+                                if (st.state == SessionManager.Status.State.ACTIVE) {
+                                    val sm = st.sessionRemainingSec / 60
+                                    val ss = st.sessionRemainingSec % 60
+                                    activeOverlayText = "⏱ ${sm}m${"%02d".format(ss)}s · ${st.sessionsUsed}/${st.maxSessionsPerDay}"
+                                }
+                            }
+                        }
+                    } else if (SessionManager.shouldStayBlocked(ctx, pkg, session, nowMs)) {
                         newlyBlocked.add(pkg)
                     }
                 }
             }
+
+            GuardianWatcherService.updateSessionOverlay(activeOverlayText)
 
             // Apply newly blocked / unblocked transitions
             val toBlock = newlyBlocked - activeBlockedApps
@@ -985,14 +1077,17 @@ object GuardianEngine {
                 if (mute) {
                     BlockedNotificationManager.applyNotificationMute(ctx, pkg, true)
                 }
-                Log.w(TAG, "Quota reached / Curfew active -> Blocked & Suspended: $pkg")
+                if (pkg == currentApp) {
+                    GuardianWatcherService.forceHomeIfBlocked()
+                }
+                Log.w(TAG, "Quota/Session/Curfew reached -> Blocked & Suspended: $pkg")
             }
 
             for (pkg in toUnblock) {
                 activeBlockedApps.remove(pkg)
                 setPackageSuspendedInternal(ctx, pkg, false)
                 BlockedNotificationManager.applyNotificationMute(ctx, pkg, false)
-                Log.i(TAG, "Quota reset / Curfew lifted -> Unblocked & Unsuspended: $pkg")
+                Log.i(TAG, "Quota/Session/Curfew lifted -> Unblocked & Unsuspended: $pkg")
             }
         }
     }

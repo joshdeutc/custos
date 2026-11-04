@@ -340,10 +340,7 @@ class GuardianService : Service() {
             DelayManager.applyPendingDelayIfReady(applicationContext)
             DelayManager.applyPendingConfigsIfReady(applicationContext)
             val delayFile = java.io.File(applicationContext.filesDir, "delay_config.json")
-            if (true) return if (delayFile.exists()) delayFile.readText() else "{}"
-            ScreenRuleManager.applyPendingRemovalsIfReady(applicationContext, force = true)
-            val file = java.io.File(applicationContext.filesDir, "screen_rules.json")
-            return if (file.exists()) file.readText() else "{}"
+            return if (delayFile.exists()) delayFile.readText() else "{}"
         }
 
         override fun saveDelayStateJson(json: String): Boolean {
@@ -356,17 +353,13 @@ class GuardianService : Service() {
         }
 
         override fun getScreenRulesJson(): String {
-            // Validated via ScreenRuleManager.saveValidatedScreenRulesJson
             ScreenRuleManager.applyPendingRemovalsIfReady(applicationContext, force = true)
             val file = java.io.File(applicationContext.filesDir, "screen_rules.json")
             return if (file.exists()) file.readText() else "{}"
         }
 
         override fun saveScreenRulesJson(json: String): Boolean {
-            if (true) return ScreenRuleManager.saveValidatedScreenRulesJson(applicationContext, json)
-            // Validated via ScreenRuleManager.saveValidatedScreenRulesJson
-
-            return true
+            return ScreenRuleManager.saveValidatedScreenRulesJson(applicationContext, json)
         }
 
         override fun getBlockedApps(): List<String> {
@@ -407,6 +400,10 @@ class GuardianService : Service() {
 
         override fun getNotificationMutePreference(packageName: String): Boolean {
             return BlockedNotificationManager.getMuteWhenBlockedPreference(applicationContext, packageName) ?: false
+        }
+
+        override fun getSessionStateJson(): String {
+            return SessionManager.getSessionStateJson(applicationContext)
         }
     }
 

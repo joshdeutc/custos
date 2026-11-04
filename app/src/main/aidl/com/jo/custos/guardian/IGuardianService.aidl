@@ -50,4 +50,7 @@ interface IGuardianService {
 
     // --- Delay State Persistence (appended at end for ABI stability) ---
     boolean saveDelayStateJson(String json);
+
+    // --- Session State Read-Only Snapshot (Guardian-owned) ---
+    String getSessionStateJson();
 }

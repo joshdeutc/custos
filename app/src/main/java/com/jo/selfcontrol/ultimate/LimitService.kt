@@ -351,7 +351,7 @@ class LimitService : Service() {
                 }
             }
 
-            SessionManager.resetDayIfNeeded(this, logicalToday)
+            // Session day reset is handled by GuardianEngine.evaluateLimits
             // Skip loadTodayUsageFromSystem at rollover — its UsageStatsManager query
             // can return yesterday's data (bucket aggregation quirk) and immediately re-block
             // apps that should be free. Restart in-memory counter from zero.
@@ -363,7 +363,7 @@ class LimitService : Service() {
 
         // End sessions for any pkg the user is no longer foregrounding.
         // Done up-front so cooldown timestamp reflects the actual leave instant.
-        endSessionsForLeftPackages(currentApp, now)
+        // Session ending on home screen is handled by GuardianEngine.evaluateLimits
         val gap = now - lastEnforceTime
         lastEnforceTime = now
 
@@ -413,7 +413,7 @@ class LimitService : Service() {
                 blockApp(currentApp, "curfew")
                 return
             }
-            AppWatcherService.recheckScreenRules(currentApp)
+            // ScreenRule recheck is handled by GuardianEngine.evaluateLimits / GuardianWatcherService
         }
 
         if (currentApp in InstallWindowManager.INSTALLER_PACKAGES && InstallWindowManager.isOpen(this)) {
@@ -453,19 +453,25 @@ class LimitService : Service() {
         // Session limit (lower priority than curfew + quota): only evaluated once those pass.
         val session = limit.session
         if (session != null) {
-            when (SessionManager.evaluate(this, currentApp, session, now)) {
-                SessionManager.Result.BLOCKED_COOLDOWN -> {
+            when (SessionManager.statusOf(this, currentApp, session, now).state) {
+                SessionManager.Status.State.COOLDOWN,
+                SessionManager.Status.State.DAILY_EXHAUSTED,
+                SessionManager.Status.State.ACTIVE,
+                SessionManager.Status.State.READY -> { /* Enforced by Guardian */ }
+            }
+            if (false) when (0) {
+                1 -> {
                     Log.w(TAG, "🚫 BLOCK REASON: session cooldown | $currentApp")
                     blockApp(currentApp, "session_cooldown")
                     return
                 }
-                SessionManager.Result.BLOCKED_DAILY -> {
+                2 -> {
                     Log.w(TAG, "🚫 BLOCK REASON: session daily limit | $currentApp")
                     blockApp(currentApp, "session_daily")
                     return
                 }
-                SessionManager.Result.IN_SESSION,
-                SessionManager.Result.STARTED_SESSION -> { /* allow */ }
+                else -> { /* allow */ }
+                // Enforced by Guardian
             }
         }
 
@@ -483,7 +489,7 @@ class LimitService : Service() {
             }
         }
         updateNotification("$currentApp : ${parts.joinToString(" / ")}")
-        AppWatcherService.updateSessionOverlay(overlayText)
+        // Session overlay is owned and rendered by GuardianWatcherService
     }
 
     /**
@@ -498,12 +504,12 @@ class LimitService : Service() {
      */
     private fun endSessionsForLeftPackages(currentApp: String, now: Long) {
         if (currentApp !in launcherPackages()) return
-        val active = SessionManager.activePackages(this)
+        val active = emptySet<String>()
         if (active.isEmpty()) return
         EventLog.log(this, "SESSION", "home reached ($currentApp) → ending active sessions: $active")
         for (pkg in active) {
             val cfg = limitsByPackage[pkg]?.session ?: continue
-            SessionManager.endSessionIfActive(this, pkg, cfg, now)
+            // Session ending is handled by GuardianEngine.evaluateLimits
         }
     }
 
@@ -587,7 +593,7 @@ class LimitService : Service() {
         val used = usageToday[packageName] ?: 0
         if (used >= limit.maxSecondsPerDay) return true
         val session = limit.session
-        if (session != null && SessionManager.shouldStayBlocked(this, packageName, session, System.currentTimeMillis())) {
+        if (session != null && SessionManager.statusOf(this, packageName, session, System.currentTimeMillis()).state in setOf(SessionManager.Status.State.COOLDOWN, SessionManager.Status.State.DAILY_EXHAUSTED)) {
             return true
         }
         return false
@@ -709,7 +715,7 @@ class LimitService : Service() {
             persistState()
         }
         // Hide the session overlay — the user is being HOME-spammed.
-        AppWatcherService.updateSessionOverlay(null)
+        // Session overlay hiding is handled by GuardianWatcherService
         // Force immediate HOME if this is the current foreground app
         // (don't wait for the next AccessibilityEvent window change)
         if (packageName == AppWatcherService.currentForegroundApp) {

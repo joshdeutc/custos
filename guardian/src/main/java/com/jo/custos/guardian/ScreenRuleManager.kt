@@ -83,6 +83,27 @@ object ScreenRuleManager {
      * How many words of an id carry screen-specific meaning — `updates_list` scores 1 ("updates"),
      * `button_view` scores 0. Zero means the id is pure furniture and must not become a marker.
      */
+    fun normalizeText(s: CharSequence?): String {
+        if (s == null) return ""
+        return s.toString()
+            .replace('\u00A0', ' ')
+            .replace('\u202F', ' ')
+            .replace('\u200E', ' ')
+            .replace('\u200F', ' ')
+            .replace('\u202A', ' ')
+            .replace('\u202B', ' ')
+            .replace('\u202C', ' ')
+            .replace('\u202D', ' ')
+            .replace('\u202E', ' ')
+            .replace('\uFEFF', ' ')
+            .replace('«', '"')
+            .replace('»', '"')
+            .replace('“', '"')
+            .replace('”', '"')
+            .replace('’', '\'')
+            .trim()
+    }
+
     private fun specificity(id: String): Int {
         if (id.startsWith("text:")) return 10
         return id.substringAfter(":id/")
