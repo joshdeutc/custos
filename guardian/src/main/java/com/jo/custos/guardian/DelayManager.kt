@@ -974,4 +974,174 @@ object DelayManager {
         saveState(context, state.copy(requestedConfigUpdates = remaining))
         Log.i(TAG, "Applied ${readyUpdates.size} pending config updates.")
     }
+
+    private fun parseStateFromJson(jsonStr: String): DelayState? {
+        return try {
+            val json = JSONObject(jsonStr)
+            val delay = json.optInt("global_delay_seconds", 0).coerceAtLeast(0)
+            val unlockTime = json.optLong("unlock_time", 0L).coerceAtLeast(0L)
+            val execAt = json.optLong("pending_delay_execute_at", 0L).coerceAtLeast(0L)
+            val pendingSec = if (execAt > 0L && json.has("pending_delay_seconds")) {
+                json.getInt("pending_delay_seconds").coerceAtLeast(0)
+            } else null
+
+            val pendingArray = json.optJSONArray("pending_configs")
+            val pendingList = mutableListOf<PendingConfigUpdate>()
+            if (pendingArray != null) {
+                for (i in 0 until pendingArray.length()) {
+                    val obj = pendingArray.getJSONObject(i)
+                    pendingList.add(
+                        PendingConfigUpdate(
+                            id = obj.optString("id", UUID.randomUUID().toString()),
+                            description = obj.optString("description", "Config change"),
+                            newLimitsJson = obj.optString("config", ""),
+                            executeAt = obj.getLong("execute_at"),
+                            targetType = obj.optString("target_type", "FULL_CONFIG"),
+                            targetKey = obj.optString("target_key", ""),
+                            isDelete = obj.optBoolean("is_delete", false),
+                            payloadJson = obj.optString("payload", obj.optString("config", ""))
+                        )
+                    )
+                }
+            }
+
+            val scheduleArray = json.optJSONArray("delay_schedule")
+            val schedule = mutableListOf<DelayScheduleRule>()
+            if (scheduleArray != null) {
+                for (i in 0 until scheduleArray.length()) {
+                    val obj = scheduleArray.getJSONObject(i)
+                    val days = mutableListOf<Int>()
+                    val daysRaw = obj.opt("allowed_days")
+                    if (daysRaw is String && daysRaw == "*") {
+                        days.addAll(0..6)
+                    } else {
+                        val arr = obj.optJSONArray("allowed_days")
+                        if (arr != null) {
+                            for (d in 0 until arr.length()) {
+                                days.add(arr.getInt(d))
+                            }
+                        }
+                    }
+                    if (days.isEmpty()) {
+                        days.addAll(0..6)
+                    }
+                    schedule.add(
+                        DelayScheduleRule(
+                            id = obj.optString("id", UUID.randomUUID().toString()),
+                            startMinutes = obj.optInt("start_minutes", 0).coerceIn(0, 1439),
+                            endMinutes = obj.optInt("end_minutes", 1440).coerceIn(0, 1440),
+                            delaySeconds = obj.optInt("delay_seconds", 0).coerceAtLeast(0),
+                            allowedDays = days.distinct().sorted()
+                        )
+                    )
+                }
+            }
+
+            DelayState(delay, unlockTime, pendingList, schedule, pendingSec, execAt)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing candidate delay JSON: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Constitutional transition validator for Delay State JSON received via AIDL from Custos UI.
+     * Prevents immediate lowering of global delay or deletion of schedule rules when a delay is active,
+     * and clamps all pending execution timestamps so timers cannot be bypassed or accelerated.
+     */
+    @Synchronized
+    fun saveValidatedDelayStateJson(context: Context, candidateJson: String): Boolean {
+        applyPendingDelayIfReady(context)
+        applyPendingConfigsIfReady(context)
+
+        val candState = parseStateFromJson(candidateJson) ?: return false
+        val oldState = loadState(context)
+        val now = System.currentTimeMillis()
+        val toleranceMs = 5_000L
+        val effectiveDelaySec = getEffectiveDelaySeconds(oldState, now)
+        val unlocked = isSettingsUnlocked(context)
+        val isProtected = effectiveDelaySec > 0 && !unlocked
+
+        val safeGlobalDelay = if (isProtected && candState.globalDelaySeconds < oldState.globalDelaySeconds) {
+            Log.w(TAG, "Constitutional Guard: Blocked immediate lowering of global_delay_seconds (${oldState.globalDelaySeconds}s -> ${candState.globalDelaySeconds}s)")
+            oldState.globalDelaySeconds
+        } else {
+            candState.globalDelaySeconds
+        }
+
+        val safeSchedule = if (isProtected) {
+            val candById = candState.delaySchedule.associateBy { it.id }.toMutableMap()
+            val merged = mutableListOf<DelayScheduleRule>()
+            for (oldRule in oldState.delaySchedule) {
+                val candRule = candById.remove(oldRule.id)
+                if (candRule == null) {
+                    Log.w(TAG, "Constitutional Guard: Blocked immediate deletion of delay_schedule rule ${oldRule.id}")
+                    merged.add(oldRule)
+                } else {
+                    val safeDays = (oldRule.allowedDays + candRule.allowedDays).distinct().sorted()
+                    val safeRuleDelay = kotlin.math.max(oldRule.delaySeconds, candRule.delaySeconds)
+                    merged.add(
+                        oldRule.copy(
+                            delaySeconds = safeRuleDelay,
+                            allowedDays = safeDays
+                        )
+                    )
+                }
+            }
+            merged.addAll(candById.values)
+            merged
+        } else {
+            candState.delaySchedule
+        }
+
+        val minWaitMs = if (isProtected) (effectiveDelaySec * 1000L - toleranceMs).coerceAtLeast(0L) else 0L
+
+        val (safePendingSec, safePendingExecAt) = if (candState.pendingDelaySeconds != null && candState.pendingDelayExecuteAt > 0L) {
+            val minExecAt = if (oldState.pendingDelayExecuteAt > 0L) {
+                oldState.pendingDelayExecuteAt
+            } else {
+                now + minWaitMs
+            }
+            candState.pendingDelaySeconds to kotlin.math.max(candState.pendingDelayExecuteAt, minExecAt)
+        } else {
+            null to 0L
+        }
+
+        val safeUnlockTime = if (candState.unlockSettingsUnlockTime > 0L) {
+            if (oldState.unlockSettingsUnlockTime > 0L) {
+                kotlin.math.max(candState.unlockSettingsUnlockTime, oldState.unlockSettingsUnlockTime)
+            } else {
+                val (eligible, reason) = checkUninstallEligibility(context)
+                if (!eligible) {
+                    Log.w(TAG, "Constitutional Guard: Rejected unlock_time in saveValidatedDelayStateJson ($reason)")
+                    0L
+                } else {
+                    kotlin.math.max(candState.unlockSettingsUnlockTime, now + minWaitMs)
+                }
+            }
+        } else {
+            0L
+        }
+
+        val safePendingConfigs = candState.requestedConfigUpdates.map { candUpd ->
+            val oldMatch = oldState.requestedConfigUpdates.firstOrNull {
+                it.id == candUpd.id || (it.targetType == candUpd.targetType && it.targetKey == candUpd.targetKey && it.targetKey.isNotEmpty())
+            }
+            val minExecAt = oldMatch?.executeAt ?: (now + minWaitMs)
+            candUpd.copy(executeAt = kotlin.math.max(candUpd.executeAt, minExecAt))
+        }
+
+        val validated = DelayState(
+            globalDelaySeconds = safeGlobalDelay,
+            unlockSettingsUnlockTime = safeUnlockTime,
+            requestedConfigUpdates = safePendingConfigs,
+            delaySchedule = safeSchedule,
+            pendingDelaySeconds = safePendingSec,
+            pendingDelayExecuteAt = safePendingExecAt
+        )
+        saveState(context, validated)
+        applyPendingDelayIfReady(context)
+        applyPendingConfigsIfReady(context)
+        return true
+    }
 }

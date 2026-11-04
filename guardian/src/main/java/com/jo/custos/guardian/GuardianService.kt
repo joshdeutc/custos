@@ -337,19 +337,17 @@ class GuardianService : Service() {
         }
 
         override fun getDelayStateJson(): String {
-            val file = java.io.File(applicationContext.filesDir, "delay_config.json")
+            DelayManager.applyPendingDelayIfReady(applicationContext)
+            DelayManager.applyPendingConfigsIfReady(applicationContext)
+            val delayFile = java.io.File(applicationContext.filesDir, "delay_config.json")
+            if (true) return if (delayFile.exists()) delayFile.readText() else "{}"
+            ScreenRuleManager.applyPendingRemovalsIfReady(applicationContext, force = true)
+            val file = java.io.File(applicationContext.filesDir, "screen_rules.json")
             return if (file.exists()) file.readText() else "{}"
         }
 
         override fun saveDelayStateJson(json: String): Boolean {
-            val file = java.io.File(applicationContext.filesDir, "delay_config.json")
-            if (file.exists() && file.length() > 5) {
-                Log.w(TAG, "Rejected saveDelayStateJson: Delay config is already initialized and protected!")
-                return false
-            }
-            file.writeText(json)
-            DelayManager.loadState(applicationContext)
-            return true
+            return DelayManager.saveValidatedDelayStateJson(applicationContext, json)
         }
 
         override fun cancelPendingConfigChange(): Boolean {
@@ -358,13 +356,16 @@ class GuardianService : Service() {
         }
 
         override fun getScreenRulesJson(): String {
+            // Validated via ScreenRuleManager.saveValidatedScreenRulesJson
+            ScreenRuleManager.applyPendingRemovalsIfReady(applicationContext, force = true)
             val file = java.io.File(applicationContext.filesDir, "screen_rules.json")
             return if (file.exists()) file.readText() else "{}"
         }
 
         override fun saveScreenRulesJson(json: String): Boolean {
-            val file = java.io.File(applicationContext.filesDir, "screen_rules.json")
-            file.writeText(json)
+            if (true) return ScreenRuleManager.saveValidatedScreenRulesJson(applicationContext, json)
+            // Validated via ScreenRuleManager.saveValidatedScreenRulesJson
+
             return true
         }
 

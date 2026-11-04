@@ -705,6 +705,13 @@ object GuardianEngine {
                     dpm.setUninstallBlocked(admin, ctx.packageName, true)
                     dpm.setUninstallBlocked(admin, "com.jo.selfcontrol.ultimate", true)
                     dpm.clearUserRestriction(admin, UserManager.DISALLOW_FACTORY_RESET)
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                        runCatching { dpm.addUserRestriction(admin, UserManager.DISALLOW_CONFIG_DATE_TIME) }
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                        runCatching { dpm.setAutoTimeEnabled(admin, true) }
+                        runCatching { dpm.setAutoTimeZoneEnabled(admin, true) }
+                    }
                 }.onFailure { Log.e(TAG, "Failed to apply DO uninstall protection: ${it.message}") }
             }
         }

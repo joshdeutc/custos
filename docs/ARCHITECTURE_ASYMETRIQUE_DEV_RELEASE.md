@@ -81,6 +81,8 @@ Guardian applique `dpm.setUninstallBlocked(admin, "com.jo.selfcontrol.ultimate",
 Les anciennes commandes broadcast de secours (`UNBLOCK_CLIENT_UNINSTALL`, `RESET_WHITELIST_DELAY`, `FORCE_SET_CONFIG`) ont été **définitivement supprimées** lors de l'audit de sécurité :
 - Elles constituaient des portes dérobées applicatives contournant le Time-Lock.
 - Guardian est désormais hermétique : aucune commande broadcast ADB ne peut désactiver la protection ni altérer les délais.
+- **Verrouillage de l'Horloge Système (`DISALLOW_CONFIG_DATE_TIME`)** : Guardian active automatiquement `UserManager.DISALLOW_CONFIG_DATE_TIME`, `setAutoTimeEnabled(true)` et `setAutoTimeZoneEnabled(true)` dans `GuardianEngine.enforceLockdown()` pour empêcher toute avance rapide de l'horloge système visant à faire expirer prématurément les délais (`System.currentTimeMillis()`).
+- **Validation Constitutionnelle des Transitions AIDL (`saveValidatedDelayStateJson` & `saveValidatedScreenRulesJson`)** : Toute synchronisation JSON envoyée par `com.jo.selfcontrol.ultimate` (`:app` en debug) vers Guardian est inspectée différentiellement : les durcissements (ajout de règles, augmentation de délais, annulation de suppressions en attente) sont appliqués immédiatement, tandis que toute suppression immédiate, réduction de délai ou accélération de timestamp (`execute_at`) est rejetée ou bornée au délai de protection actif.
 - Le seul moyen d'altérer la constitution de Guardian est de passer par le workflow GitHub Actions sous Time-Lock (2h).
 
 ---

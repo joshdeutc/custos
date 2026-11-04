@@ -356,10 +356,10 @@ object ScreenRuleManager {
      * Apply every queued removal and timer change whose timer has elapsed. Called from the service
      * tick, so it is throttled to a few seconds and is a no-op on the permanent flavor.
      */
-    fun applyPendingRemovalsIfReady(ctx: Context) {
+    fun applyPendingRemovalsIfReady(ctx: Context, force: Boolean = false) {
         if (PERMANENT_ON_THIS_FLAVOR) return
         val now = System.currentTimeMillis()
-        if (now - lastRemovalSweep < 5_000L) return
+        if (!force && now - lastRemovalSweep < 5_000L) return
         lastRemovalSweep = now
 
         // 1. Pending removals
@@ -564,5 +564,138 @@ object ScreenRuleManager {
      */
     fun updateProtectionDelay(ctx: Context, name: String, newDelaySec: Int?): Boolean {
         return requestUpdateProtectionDelay(ctx, name, newDelaySec) !is TimerChangeOutcome.NotFound
+    }
+
+    /**
+     * Constitutional transition validator for Screen Rules JSON received via AIDL from Custos UI.
+     * Allows immediate hardenings (adding rules, increasing protection delays, cancelling pending removals),
+     * blocks immediate deletion or weakening of protected rules, and clamps pending removal/timer timestamps.
+     */
+    @Synchronized
+    fun saveValidatedScreenRulesJson(ctx: Context, candidateJson: String): Boolean {
+        applyPendingRemovalsIfReady(ctx, force = true)
+        val candRoot = try {
+            JSONObject(candidateJson)
+        } catch (e: Exception) {
+            Log.e(TAG, "Invalid JSON in saveValidatedScreenRulesJson: ${e.message}")
+            return false
+        }
+
+        val oldRules = load(ctx)
+        val oldPending = loadPending(ctx)
+        val oldTimers = loadPendingTimerChanges(ctx)
+
+        val candRulesArr = candRoot.optJSONArray("rules")
+        val candRules = if (candRulesArr != null) {
+            (0 until candRulesArr.length()).mapNotNull { i ->
+                candRulesArr.optJSONObject(i)?.let { parseRule(it) }
+            }
+        } else emptyList()
+
+        val candPendingArr = candRoot.optJSONArray("pending_removals")
+        val candPending = if (candPendingArr != null) {
+            (0 until candPendingArr.length()).mapNotNull { i ->
+                val o = candPendingArr.optJSONObject(i) ?: return@mapNotNull null
+                val n = o.optString("name").ifBlank { return@mapNotNull null }
+                n to o.optLong("execute_at", 0L)
+            }
+        } else emptyList()
+
+        val candTimersArr = candRoot.optJSONArray("pending_timer_changes")
+        val candTimers = if (candTimersArr != null) {
+            (0 until candTimersArr.length()).mapNotNull { i ->
+                val o = candTimersArr.optJSONObject(i) ?: return@mapNotNull null
+                val n = o.optString("name").ifBlank { return@mapNotNull null }
+                val target = if (o.has("target_delay_sec") && !o.isNull("target_delay_sec")) o.getInt("target_delay_sec") else null
+                val executeAt = o.optLong("execute_at", 0L)
+                PendingTimerChange(n, target, executeAt)
+            }
+        } else emptyList()
+
+        val globalSec = DelayManager.getCurrentEffectiveDelaySeconds(ctx)
+        val unlocked = DelayManager.isSettingsUnlocked(ctx)
+        val now = System.currentTimeMillis()
+        val toleranceMs = 5_000L
+
+        val finalRulesMap = LinkedHashMap<String, ScreenRule>()
+        for (r in candRules) {
+            finalRulesMap[r.name] = r
+        }
+
+        for (oldRule in oldRules) {
+            val perRule = oldRule.protectionDelaySec ?: 0
+            val waitSec = max(perRule, globalSec)
+            val fromRuleTimer = perRule > 0 && perRule >= globalSec
+            val isProtected = PERMANENT_ON_THIS_FLAVOR || (waitSec > 0 && (fromRuleTimer || !unlocked))
+
+            if (!isProtected) continue
+
+            val candRule = finalRulesMap[oldRule.name]
+            if (candRule == null) {
+                Log.w(TAG, "Constitutional Guard: Blocked unscheduled deletion of protected screen rule '${oldRule.name}'")
+                finalRulesMap[oldRule.name] = oldRule
+            } else {
+                val oldEffDelay = oldRule.protectionDelaySec ?: globalSec
+                val candEffDelay = candRule.protectionDelaySec ?: globalSec
+                val safeProtectionDelay = if (candEffDelay >= oldEffDelay) candRule.protectionDelaySec else oldRule.protectionDelaySec
+                val safeBlockedIds = (oldRule.blockedIds + candRule.blockedIds).distinct()
+                val safePackage = oldRule.packageName
+                val safeBlockedHours = if (oldRule.blockedHours == null) null else (candRule.blockedHours ?: oldRule.blockedHours)
+
+                finalRulesMap[oldRule.name] = candRule.copy(
+                    packageName = safePackage,
+                    blockedIds = safeBlockedIds,
+                    protectionDelaySec = safeProtectionDelay,
+                    blockedHours = safeBlockedHours
+                )
+            }
+        }
+
+        val finalPending = if (PERMANENT_ON_THIS_FLAVOR) {
+            emptyList()
+        } else {
+            candPending.mapNotNull { (name, candExecAt) ->
+                val oldRule = oldRules.firstOrNull { it.name == name }
+                val oldExecAt = oldPending.firstOrNull { it.first == name }?.second
+                val minExecAt = when {
+                    oldExecAt != null -> oldExecAt
+                    oldRule != null -> {
+                        val perRule = oldRule.protectionDelaySec ?: 0
+                        val waitSec = max(perRule, globalSec)
+                        val fromRuleTimer = perRule > 0 && perRule >= globalSec
+                        val unlockApplies = !fromRuleTimer && unlocked
+                        if (waitSec <= 0 || unlockApplies) 0L else (now + waitSec * 1000L - toleranceMs)
+                    }
+                    else -> candExecAt
+                }
+                name to max(candExecAt, minExecAt)
+            }
+        }
+
+        val finalTimers = if (PERMANENT_ON_THIS_FLAVOR) {
+            emptyList()
+        } else {
+            candTimers.map { candTimer ->
+                val oldRule = oldRules.firstOrNull { it.name == candTimer.name }
+                val oldTimer = oldTimers.firstOrNull { it.name == candTimer.name }
+                val minExecAt = when {
+                    oldTimer != null -> oldTimer.executeAt
+                    oldRule != null -> {
+                        val effectiveCurrent = oldRule.protectionDelaySec ?: globalSec
+                        val waitSec = max(effectiveCurrent, globalSec)
+                        val unlockApplies = oldRule.protectionDelaySec == null && unlocked
+                        if (waitSec <= 0 || unlockApplies) 0L else (now + waitSec * 1000L - toleranceMs)
+                    }
+                    else -> candTimer.executeAt
+                }
+                candTimer.copy(executeAt = max(candTimer.executeAt, minExecAt))
+            }
+        }
+
+        save(ctx, finalRulesMap.values.toList())
+        savePending(ctx, finalPending)
+        savePendingTimerChanges(ctx, finalTimers)
+        applyPendingRemovalsIfReady(ctx, force = true)
+        return true
     }
 }
