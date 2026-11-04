@@ -109,6 +109,10 @@ try {
     }
     Write-Host "  [OK] Installation reussie (Success) !" -ForegroundColor Green
 
+    # Relancer la liaison IPC entre Custos UI et le nouveau GuardianService pour activer immediatement enforceLockdown()
+    & $adb -s $targetDevice shell "am force-stop com.jo.selfcontrol.ultimate && am start -n com.jo.selfcontrol.ultimate/.MainActivity" | Out-Null
+    Write-Host "  [OK] Liaison GuardianService reinitialisee et verrous appliques." -ForegroundColor Green
+
     # 7. Vérification du statut Device Owner
     $doCheck = & $adb -s $targetDevice shell dpm list-owners | Out-String
     if ($doCheck -match "com\.jo\.custos\.guardian") {

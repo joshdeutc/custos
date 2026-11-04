@@ -33,8 +33,28 @@ object GuardianClient {
         override fun onServiceDisconnected(name: ComponentName?) {
             service = null
             isBound = false
-            Log.w(TAG, "Disconnected from GuardianService IPC")
+            Log.w(TAG, "Disconnected from GuardianService IPC -> scheduling rebind")
+            scheduleRebind()
         }
+
+        override fun onBindingDied(name: ComponentName?) {
+            service = null
+            isBound = false
+            Log.w(TAG, "Binding died for GuardianService IPC (package updated?) -> rebinding")
+            appContext?.let { ctx ->
+                runCatching { ctx.unbindService(this) }
+                scheduleRebind()
+            }
+        }
+    }
+
+    private fun scheduleRebind() {
+        val ctx = appContext ?: return
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (!isBound || service == null) {
+                init(ctx)
+            }
+        }, 1500L)
     }
 
     private fun syncInitialConfigIfNeeded(ctx: Context) {
