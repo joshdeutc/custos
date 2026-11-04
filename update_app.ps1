@@ -55,10 +55,10 @@ $projectDir = if (Test-Path "..\custos\gradlew.bat") {
     "C:\Users\jo\Documents\All_of_custos_project\custos"
 }
 
-Write-Host "`n[2/5] Compilation de Custos et Guardian (:app:assembleMeDebug :guardian:assembleDebug)..." -ForegroundColor Cyan
+Write-Host "`n[2/4] Compilation de Custos UI (:app:assembleMeDebug)..." -ForegroundColor Cyan
 Push-Location $projectDir
 try {
-    & .\gradlew.bat :app:assembleMeDebug :guardian:assembleDebug
+    & .\gradlew.bat :app:assembleMeDebug
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERREUR] Échec de la compilation Gradle." -ForegroundColor Red
         exit 1
@@ -68,29 +68,23 @@ try {
 }
 
 $appApk = Join-Path $projectDir "app\build\outputs\apk\me\debug\app-me-debug.apk"
-$guardianApk = Join-Path $projectDir "guardian\build\outputs\apk\debug\guardian-debug.apk"
 
-# 4. Déverrouillage temporaire de l'installation (Device Owner)
-Write-Host "`n[3/5] Déverrouillage temporaire des restrictions d'installation..." -ForegroundColor Cyan
-& $adb -s $deviceId shell am broadcast -p com.jo.selfcontrol.ultimate -a com.jo.selfcontrol.ultimate.ALLOW_INSTALL --ei minutes 10
-Start-Sleep -Seconds 1
-
-# 5. Installation des mises à jour
-Write-Host "`n[4/5] Installation des APKs sur l'appareil..." -ForegroundColor Cyan
-if (Test-Path $guardianApk) {
-    Write-Host "-> Installation de Guardian..." -ForegroundColor Cyan
-    & $adb -s $deviceId install -r $guardianApk
-}
-Write-Host "-> Installation de Custos..." -ForegroundColor Cyan
+# 4. Installation de la mise à jour de Custos UI
+Write-Host "`n[3/4] Installation de Custos UI sur l'appareil..." -ForegroundColor Cyan
 & $adb -s $deviceId install -r -d -t $appApk
 $installOk = ($LASTEXITCODE -eq 0)
 
-# 6. Re-verrouillage immédiat des restrictions d'installation
-Write-Host "`n[5/5] Re-verrouillage des restrictions d'installation..." -ForegroundColor Cyan
-& $adb -s $deviceId shell am broadcast -p com.jo.selfcontrol.ultimate -a com.jo.selfcontrol.ultimate.BLOCK_INSTALL
+# Nettoyage de l'APK compilé sur le PC
+if (Test-Path $appApk) {
+    Remove-Item -Path $appApk -Force -ErrorAction SilentlyContinue
+}
+
+# 5. Maintien automatique des services d'accessibilité et relance
+Write-Host "`n[4/4] Vérification des services d'accessibilité (Guardian + Custos UI)..." -ForegroundColor Cyan
+& $adb -s $deviceId shell "settings put secure enabled_accessibility_services com.jo.custos.guardian/com.jo.custos.guardian.GuardianWatcherService:com.jo.selfcontrol.ultimate/com.jo.selfcontrol.ultimate.AppWatcherService && settings put secure accessibility_enabled 1"
 
 if ($installOk) {
-    Write-Host "`n[SUCCÈS] Mise à jour installée avec succès !" -ForegroundColor Green
+    Write-Host "`n[SUCCÈS] Mise à jour de Custos UI installée avec succès (APK local purgé) !" -ForegroundColor Green
     Write-Host "Relance de l'application..." -ForegroundColor Cyan
     & $adb -s $deviceId shell am start -n com.jo.selfcontrol.ultimate/.MainActivity
 } else {
