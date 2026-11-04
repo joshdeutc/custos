@@ -384,6 +384,7 @@ object GuardianEngine {
     }
 
     fun getWhitelistStateJson(ctx: Context): String {
+        checkAndPromotePendingRequests(ctx)
         val file = File(ctx.filesDir, STATE_FILE)
         return if (file.exists()) file.readText() else "{}"
     }

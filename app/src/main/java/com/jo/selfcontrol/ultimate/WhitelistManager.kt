@@ -340,12 +340,54 @@ object WhitelistManager {
      * Automatically promotes ready applications to the whitelist, releases them
      * from OS hide/suspend, and notifies the user.
      */
+    private val notifiedUnlockedKeys = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
     @Synchronized
     fun checkAndPromotePendingRequests(ctx: Context): WhitelistState {
         var state = loadStateInternal(ctx)
         if (!state.enabled) return state
 
         val now = System.currentTimeMillis()
+
+        // If Guardian is Device Owner, delegate promotion to GuardianEngine via enforceLockdown()
+        // because saveWhitelistStateJson() is constitutionally blocked once initialized.
+        if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
+            val ready = state.pendingRequests.filter { it.availableAt <= now }
+            val disableReady = state.pendingDisableExecuteAt in 1..now
+            val delayReady = state.pendingDelayExecuteAt in 1..now && state.pendingDelayHours != null
+
+            if (ready.isNotEmpty() || disableReady || delayReady) {
+                GuardianClient.enforceLockdown()
+                state = loadStateInternal(ctx)
+
+                if (disableReady && !state.enabled) {
+                    saveHiddenState(ctx, emptySet())
+                    Log.w(TAG, "Pending whitelist disable executed via Guardian -> Whitelist DISABLED")
+                    EventLog.log(ctx, "WHITELIST", "Pending deactivation executed via Guardian -> Whitelist DISABLED")
+                    notifyWhitelistDisabled(ctx)
+                    return state
+                }
+
+                if (ready.isNotEmpty()) {
+                    val hidden = loadHiddenState(ctx).toMutableSet()
+                    for (req in ready) {
+                        val pkg = req.packageName
+                        AppWatcherService.blockedApps.remove(pkg)
+                        hidden.remove(pkg)
+                        val key = "$pkg:${req.availableAt}"
+                        if (notifiedUnlockedKeys.add(key)) {
+                            Log.w(TAG, "Pending whitelist delay completed via Guardian for: $pkg")
+                            EventLog.log(ctx, "WHITELIST", "Quarantine delay expired: added $pkg to whitelist")
+                            notifyAppUnlocked(ctx, pkg)
+                        }
+                    }
+                    saveHiddenState(ctx, hidden)
+                }
+            }
+            scheduleNextUnlockAlarm(ctx)
+            return state
+        }
+
         var modified = false
 
         // -1. Check pending whitelist deactivation
@@ -575,7 +617,10 @@ object WhitelistManager {
             lastScheduledTargetTime = 0L
 
             if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
-                GuardianClient.saveWhitelistStateJson(jsonStr)
+                val existing = GuardianClient.getWhitelistStateJson()
+                if (existing.isNullOrBlank() || existing == "{}") {
+                    GuardianClient.saveWhitelistStateJson(jsonStr)
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error saving $STATE_FILE: ${e.message}", e)
