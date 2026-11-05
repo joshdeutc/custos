@@ -329,22 +329,45 @@ class GuardianWatcherService : AccessibilityService() {
         val rules = screenRules.filter { it.packageName == pkg }
         if (rules.isEmpty()) return false
 
-        if (pkg == INSTAGRAM_PACKAGE) {
-            val activeIgRules = rules.filter { isRuleActiveNow(it) }
-            if (activeIgRules.isNotEmpty()) {
-                return enforceInstagramRestrictions(activeIgRules)
-            }
-            return false
-        }
-
         val activeRules = rules.filter { isRuleActiveNow(it) }
         if (activeRules.isEmpty()) return false
+
+        if (pkg == INSTAGRAM_PACKAGE) {
+            val root = rootInActiveWindow
+            if (root != null) {
+                try {
+                    val selectedTab = instagramSelectedTab(root)
+                    if (selectedTab == INSTAGRAM_DIRECT_TAB_VIEW_ID) return false
+                } finally {
+                    root.recycle()
+                }
+            }
+        }
 
         for (rule in activeRules) {
             if (rule.allowedIds.isNotEmpty() && rule.allowedIds.any { visibleIdPresent(pkg, it) }) {
                 continue
             }
-            val hit = rule.blockedIds.firstOrNull { marker -> visibleIdPresent(pkg, marker) } ?: continue
+
+            var hit: String? = null
+            if (pkg == INSTAGRAM_PACKAGE) {
+                val root = rootInActiveWindow
+                if (root != null) {
+                    try {
+                        val selectedTab = instagramSelectedTab(root)
+                        if (selectedTab != null && (selectedTab in rule.blockedIds || rule.blockedIds.any { selectedTab.endsWith(it) })) {
+                            hit = selectedTab
+                        }
+                    } finally {
+                        root.recycle()
+                    }
+                }
+            }
+
+            if (hit == null) {
+                hit = rule.blockedIds.firstOrNull { marker -> visibleIdPresent(pkg, marker) }
+            }
+            if (hit == null) continue
 
             lastScreenRuleActionAt = now
             Log.w(TAG, "Enforcing screen rule '${rule.name}' for $pkg (hit=$hit)")
@@ -352,66 +375,6 @@ class GuardianWatcherService : AccessibilityService() {
             return true
         }
         return false
-    }
-
-    private fun enforceInstagramRestrictions(rules: List<ScreenRuleManager.ScreenRule>): Boolean {
-        val now = System.currentTimeMillis()
-        if (now - lastInstagramScanTime < INSTAGRAM_SCAN_INTERVAL_MS) return false
-        lastInstagramScanTime = now
-
-        val root = rootInActiveWindow ?: return false
-        try {
-            val selectedTab = instagramSelectedTab(root)
-            if (selectedTab == INSTAGRAM_DIRECT_TAB_VIEW_ID) return false
-
-            var targetRule: ScreenRuleManager.ScreenRule? = null
-            var hit: String? = null
-
-            for (rule in rules) {
-                if (rule.allowedIds.any { hasViewId(root, it) }) continue
-                if (selectedTab != null && (selectedTab in rule.blockedIds || rule.blockedIds.any { selectedTab.endsWith(it) })) {
-                    targetRule = rule
-                    hit = selectedTab
-                    break
-                }
-                val viewHit = rule.blockedIds.firstOrNull { hasViewId(root, it) }
-                if (viewHit != null) {
-                    targetRule = rule
-                    hit = viewHit
-                    break
-                }
-            }
-
-            if (targetRule == null || hit == null) return false
-            if (now - lastInstagramBackTime < INSTAGRAM_REDIRECT_COOLDOWN_MS) return false
-            lastInstagramBackTime = now
-
-            val shortHit = hit.removePrefix("com.instagram.android:id/")
-            Log.w(TAG, "Instagram ${targetRule.name} ($shortHit) -> redirect to allowed screen")
-            EventLog.log(this, "IG_REDIRECT", "${targetRule.name} $shortHit (selectedTab=$selectedTab)")
-
-            val escapeTapId = targetRule.escapeTapId
-            if (escapeTapId != null && tapNavItem(INSTAGRAM_PACKAGE, escapeTapId, targetRule.escapeTapIndex)) {
-                return true
-            }
-            val escapeDeeplink = targetRule.escapeDeeplink
-            if (escapeDeeplink != null && openDeeplink(INSTAGRAM_PACKAGE, escapeDeeplink)) {
-                return true
-            }
-            if (hit in INSTAGRAM_PREFER_DEEPLINK_IDS && openInstagramInbox()) {
-                return true
-            }
-            if (tapInstagramDirectTab()) {
-                return true
-            }
-            if (openInstagramInbox()) {
-                return true
-            }
-            goHome("instagram_fallback")
-            return true
-        } finally {
-            root.recycle()
-        }
     }
 
     private fun openInstagramInbox(): Boolean = openDeeplink(INSTAGRAM_PACKAGE, INSTAGRAM_INBOX_URI)
@@ -429,15 +392,6 @@ class GuardianWatcherService : AccessibilityService() {
             if (selected) return id
         }
         return null
-    }
-
-    private fun hasViewId(root: AccessibilityNodeInfo, viewId: String): Boolean = try {
-        val nodes = root.findAccessibilityNodeInfosByViewId(viewId)
-        val res = nodes.any { it.isVisibleToUser }
-        nodes.forEach { it.recycle() }
-        res
-    } catch (_: Exception) {
-        false
     }
 
     private fun findNodeInAnyWindow(viewId: String): AccessibilityNodeInfo? {
@@ -641,8 +595,12 @@ class GuardianWatcherService : AccessibilityService() {
             how = "tap"
         } else if (rule.escapeDeeplink != null && openDeeplink(pkg, rule.escapeDeeplink)) {
             how = "deeplink"
+        } else if (pkg == INSTAGRAM_PACKAGE && hit in INSTAGRAM_PREFER_DEEPLINK_IDS && openInstagramInbox()) {
+            how = "instagram_deeplink"
         } else if (pkg == "com.snapchat.android" && tapSnapchatChat()) {
             how = "snapchat_chat_coords"
+        } else if (pkg == INSTAGRAM_PACKAGE && (tapInstagramDirectTab() || openInstagramInbox())) {
+            how = "instagram_direct_fallback"
         } else {
             val fallbackTapped = when (pkg) {
                 "com.android.vending" -> {
