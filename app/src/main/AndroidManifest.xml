@@ -29,6 +29,7 @@
 
     <!-- Internet access required for DPM Private DNS connectivity check -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 
     <queries>
         <package android:name="com.jo.custos.guardian" />

@@ -50,14 +50,7 @@ class GuardianService : Service() {
                         return
                     }
                     Log.i(TAG, "Package detected dynamically in GuardianService: $pkg")
-                    GuardianEngine.init(context)
-                    if (GuardianEngine.isGuarded(context, pkg)) return
-                    val state = GuardianEngine.getState(context)
-                    if (state.enabled && pkg !in state.allowedPackages) {
-                        GuardianEngine.setPackageSuspendedInternal(context, pkg, true)
-                        GuardianEngine.setPackageHiddenInternal(context, pkg, true)
-                        Log.w(TAG, "Guardian dynamically locked down newly installed app: $pkg")
-                    }
+                    GuardianEngine.onPackageAdded(context, pkg)
                 }
             }
         }
