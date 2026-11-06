@@ -68,7 +68,7 @@ jobs:
           current_tag="${{ github.ref_name }}"
           echo "Preserving active release tag: $current_tag"
           gh release list --limit 50 --json tagName --jq '.[].tagName' | while read -r tag; do
-            if [ -n "$tag" ] && [ "$tag" != "$current_tag" ]; then
+            if [ -n "$tag" ] && [ "$tag" != "$current_tag" ] && [[ "$tag" == v* ]]; then
               echo "Pruning older release: $tag"
               gh release delete "$tag" --yes --cleanup-tag || true
             fi
