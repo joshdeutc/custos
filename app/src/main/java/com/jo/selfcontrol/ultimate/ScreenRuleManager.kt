@@ -73,16 +73,20 @@ object ScreenRuleManager {
         "voir plus", "see more", "afficher plus",
         "ok", "annuler", "cancel", "suivant", "next", "terminer", "finish",
         "retour", "back", "oui", "non", "yes", "no",
-        "accueil", "home", "recherche", "search", "chargement", "loading",
+        "accueil", "home", "recherche", "rechercher", "recherchez", "search", "searching",
+        "recherche et découverte", "explorer", "explore",
+        "chargement", "loading", "filtre", "filtres", "filter", "filters",
         // Personal pronouns & references that appear in avatars, headers, or member lists
         "vous", "moi", "toi", "lui", "elle", "nous", "eux",
         "you", "me", "us", "him", "her", "them",
         // Generic status & dynamic chat markers
         "en ligne", "online", "vu à", "last seen",
-        "message", "messages", "chat", "chats",
+        "message", "messages", "chat", "chats", "nouveau message", "new message", "direct",
         "photo", "photos", "vidéo", "video", "vidéos", "videos",
         "audio", "vocal", "document", "documents",
-        "contact", "contacts", "profil", "profile", "compte", "account"
+        "contact", "contacts", "profil", "profile", "compte", "account",
+        "options", "plus d'options", "more options", "menu", "paramètres", "settings",
+        "fermer", "close", "recharger", "refresh", "actualiser"
     )
 
     /** Patterns matching ephemeral or dynamic content (message counts, unread counters, timestamps). */
@@ -141,6 +145,7 @@ object ScreenRuleManager {
             val raw = normalizeText(id.substringAfter(':')).lowercase()
             if (raw.length < 3) return 0
             if (raw in GENERIC_TEXT_PHRASES) return 0
+            if (raw.contains("meta ai") || raw.contains("recherch") || raw.contains("search")) return 0
             if (raw.split(' ', '_', '-').all { it.lowercase() in GENERIC_WORDS }) return 0
             if (EPHEMERAL_PATTERNS.any { it.containsMatchIn(raw) }) return 0
             return 10
@@ -636,18 +641,25 @@ object ScreenRuleManager {
             Log.w(TAG, "Ignoring rule '${o.optString("name")}' — no valid blocked ids")
             null
         } else {
+            val pkg = o.getString("package")
             val allowedRaw = o.optJSONArray("allowed_ids")?.let { a ->
                 (0 until a.length()).map { a.getString(it) }
             } ?: emptyList()
             // Clean out generic furniture words from allowedIds so they never act as false vetos
             val cleanAllowed = allowedRaw.filter { specificity(it) > 0 }
+            val rawEscapeTapId = o.optString("escape_tap_id").ifBlank { null }
+            val safeEscapeTapId = if (pkg == "com.instagram.android" && rawEscapeTapId?.endsWith("tab_icon") == true) {
+                null
+            } else {
+                rawEscapeTapId
+            }
 
             ScreenRule(
                 name = o.getString("name"),
-                packageName = o.getString("package"),
+                packageName = pkg,
                 blockedIds = cleanBlocked,
                 allowedIds = cleanAllowed,
-                escapeTapId = o.optString("escape_tap_id").ifBlank { null },
+                escapeTapId = safeEscapeTapId,
                 escapeTapIndex = o.optInt("escape_tap_index", 0),
                 escapeDeeplink = o.optString("escape_deeplink").ifBlank { null },
                 protectionDelaySec = if (o.has("protection_delay_sec")) o.getInt("protection_delay_sec") else null,

@@ -345,10 +345,6 @@ class GuardianWatcherService : AccessibilityService() {
         }
 
         for (rule in activeRules) {
-            if (rule.allowedIds.isNotEmpty() && rule.allowedIds.any { visibleIdPresent(pkg, it) }) {
-                continue
-            }
-
             var hit: String? = null
             if (pkg == INSTAGRAM_PACKAGE) {
                 val root = rootInActiveWindow
@@ -591,16 +587,23 @@ class GuardianWatcherService : AccessibilityService() {
         } else null
 
         var how = "failed"
-        if (escapeTapId != null && tapNavItem(pkg, escapeTapId, rule.escapeTapIndex)) {
+        if (pkg == INSTAGRAM_PACKAGE) {
+            // Instagram: perform GLOBAL_ACTION_BACK first.
+            // Navigating into Reels from Feed/Explore/Inbox is a forward navigation;
+            // BACK immediately pops Reels and returns to the previous screen.
+            if (performGlobalAction(GLOBAL_ACTION_BACK)) {
+                how = "instagram_back"
+            } else if (tapInstagramDirectTab() || openInstagramInbox()) {
+                how = "instagram_direct_fallback"
+            } else if (openDeeplink(pkg, INSTAGRAM_INBOX_URI)) {
+                how = "instagram_deeplink"
+            }
+        } else if (escapeTapId != null && tapNavItem(pkg, escapeTapId, rule.escapeTapIndex)) {
             how = "tap"
         } else if (rule.escapeDeeplink != null && openDeeplink(pkg, rule.escapeDeeplink)) {
             how = "deeplink"
-        } else if (pkg == INSTAGRAM_PACKAGE && hit in INSTAGRAM_PREFER_DEEPLINK_IDS && openInstagramInbox()) {
-            how = "instagram_deeplink"
         } else if (pkg == "com.snapchat.android" && tapSnapchatChat()) {
             how = "snapchat_chat_coords"
-        } else if (pkg == INSTAGRAM_PACKAGE && (tapInstagramDirectTab() || openInstagramInbox())) {
-            how = "instagram_direct_fallback"
         } else {
             val fallbackTapped = when (pkg) {
                 "com.android.vending" -> {
@@ -639,11 +642,17 @@ class GuardianWatcherService : AccessibilityService() {
 
         overlayHandler.postDelayed({
             val stillBlocked = rule.blockedIds.any { visibleIdPresent(pkg, it) }
-            val reached = !stillBlocked && (rule.allowedIds.isEmpty() || rule.allowedIds.any { visibleIdPresent(pkg, it) })
+            val reached = !stillBlocked
             ScreenRuleManager.recordOutcome(this, rule.name, reached)
             EventLog.log(this, "SCREEN_RULE", "${rule.name} $shortHit -> $how, reached=$reached")
 
             if (stillBlocked) {
+                if (pkg == INSTAGRAM_PACKAGE) {
+                    if (tapInstagramDirectTab() || openInstagramInbox()) {
+                        Log.w(TAG, "Screen escape fallback: redirected to Instagram Inbox")
+                        return@postDelayed
+                    }
+                }
                 val launchIntent = packageManager.getLaunchIntentForPackage(pkg)?.apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 }

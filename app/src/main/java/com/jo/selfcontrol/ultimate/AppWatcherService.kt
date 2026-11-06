@@ -335,6 +335,11 @@ class AppWatcherService : AccessibilityService() {
     }
 
     internal fun selectedNavItem(pkg: String): Pair<String, Int>? {
+        if (pkg == "com.instagram.android") {
+            // Instagram escape is handled reliably via BACK or Inbox fallback;
+            // bottom nav tabs are ambiguous (index 2 is Reels itself).
+            return null
+        }
         if (pkg == "com.snapchat.android") {
             if (visibleIdPresent(pkg, "com.snapchat.android:id/ff_item") || visibleIdPresent(pkg, "text:Chat")) {
                 return "com.snapchat.android:id/ngs_chat_icon_container" to 0

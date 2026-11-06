@@ -62,6 +62,42 @@ object ScreenRuleManager {
         "coordinator", "host", "window", "size", "calculator", "background", "placeholder"
     )
 
+    /** Common text markers that appear across many tabs/carousels (ads, recommendations, navigation). */
+    private val GENERIC_TEXT_PHRASES = setOf(
+        "sponsorisé", "sponsorise", "sponsored",
+        "recommandé pour vous", "recommande pour vous", "recommended for you",
+        "recommandations", "recommendations",
+        "outils et utilitaires", "suggestions", "suggestions pour vous",
+        "nouveautés", "nouveautes", "nouveautés et mises à jour", "news",
+        "en savoir plus", "learn more", "plus d'infos", "plus", "more",
+        "voir plus", "see more", "afficher plus",
+        "ok", "annuler", "cancel", "suivant", "next", "terminer", "finish",
+        "retour", "back", "oui", "non", "yes", "no",
+        "accueil", "home", "recherche", "rechercher", "recherchez", "search", "searching",
+        "recherche et découverte", "explorer", "explore",
+        "chargement", "loading", "filtre", "filtres", "filter", "filters",
+        // Personal pronouns & references that appear in avatars, headers, or member lists
+        "vous", "moi", "toi", "lui", "elle", "nous", "eux",
+        "you", "me", "us", "him", "her", "them",
+        // Generic status & dynamic chat markers
+        "en ligne", "online", "vu à", "last seen",
+        "message", "messages", "chat", "chats", "nouveau message", "new message", "direct",
+        "photo", "photos", "vidéo", "video", "vidéos", "videos",
+        "audio", "vocal", "document", "documents",
+        "contact", "contacts", "profil", "profile", "compte", "account",
+        "options", "plus d'options", "more options", "menu", "paramètres", "settings",
+        "fermer", "close", "recharger", "refresh", "actualiser"
+    )
+
+    /** Patterns matching ephemeral or dynamic content (message counts, unread counters, timestamps). */
+    private val EPHEMERAL_PATTERNS = listOf(
+        Regex("""\b\d+\s*(statut|message|notification|appel|vue|abonné|like|commentaire|membre)s?\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(non lu|non lus|unread)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(il y a|ago)\s+\d+""", RegexOption.IGNORE_CASE),
+        Regex("""\b\d{1,2}:\d{2}\b"""),
+        Regex("""\b(hier|aujourd'hui|demain|yesterday|today|tomorrow)\b""", RegexOption.IGNORE_CASE)
+    )
+
     /**
      * Specific IDs from known apps that appear across multiple or all tabs,
      * such as global top headers or bottom navigation bar containers.
@@ -104,8 +140,16 @@ object ScreenRuleManager {
             .trim()
     }
 
-    private fun specificity(id: String): Int {
-        if (id.startsWith("text:")) return 10
+    fun specificity(id: String): Int {
+        if (id.startsWith("text:") || id.startsWith("desc:")) {
+            val raw = normalizeText(id.substringAfter(':')).lowercase()
+            if (raw.length < 3) return 0
+            if (raw in GENERIC_TEXT_PHRASES) return 0
+            if (raw.contains("meta ai") || raw.contains("recherch") || raw.contains("search")) return 0
+            if (raw.split(' ', '_', '-').all { it.lowercase() in GENERIC_WORDS }) return 0
+            if (EPHEMERAL_PATTERNS.any { it.containsMatchIn(raw) }) return 0
+            return 10
+        }
         return id.substringAfter(":id/")
             .split('_')
             .count { it.isNotBlank() && it.lowercase() !in GENERIC_WORDS }
@@ -558,14 +602,23 @@ object ScreenRuleManager {
             Log.w(TAG, "Ignoring rule '${o.optString("name")}' — no blocked ids")
             null
         } else {
+            val pkg = o.getString("package")
+            val rawAllowed = o.optJSONArray("allowed_ids")?.let { a ->
+                (0 until a.length()).map { a.getString(it) }
+            } ?: emptyList()
+            val cleanedAllowed = rawAllowed.filter { specificity(it) > 0 }
+            val rawEscapeTapId = o.optString("escape_tap_id").ifBlank { null }
+            val safeEscapeTapId = if (pkg == "com.instagram.android" && rawEscapeTapId?.endsWith("tab_icon") == true) {
+                null
+            } else {
+                rawEscapeTapId
+            }
             ScreenRule(
                 name = o.getString("name"),
-                packageName = o.getString("package"),
+                packageName = pkg,
                 blockedIds = blocked,
-                allowedIds = o.optJSONArray("allowed_ids")?.let { a ->
-                    (0 until a.length()).map { a.getString(it) }
-                } ?: emptyList(),
-                escapeTapId = o.optString("escape_tap_id").ifBlank { null },
+                allowedIds = cleanedAllowed,
+                escapeTapId = safeEscapeTapId,
                 escapeTapIndex = o.optInt("escape_tap_index", 0),
                 escapeDeeplink = o.optString("escape_deeplink").ifBlank { null },
                 protectionDelaySec = if (o.has("protection_delay_sec")) o.getInt("protection_delay_sec") else null,

@@ -191,15 +191,18 @@ object ScreenLearnSession {
         // The destination markers need the *same* differential, in reverse.
         val allowedMarkers = ScreenRuleManager
             .deriveMarkers(allowedSets.flatten().toSet(), listOf(targetIds))
+            .filter { ScreenRuleManager.specificity(it) > 0 }
             .take(4)
+
+        val safeEscapeTapId = if (packageName == "com.instagram.android") null else escapeTapId
 
         val rule = ScreenRuleManager.ScreenRule(
             name = ruleName,
             packageName = packageName,
             blockedIds = chosen,
             allowedIds = allowedMarkers,
-            escapeTapId = escapeTapId,
-            escapeTapIndex = escapeTapIndex,
+            escapeTapId = safeEscapeTapId,
+            escapeTapIndex = if (safeEscapeTapId == null) 0 else escapeTapIndex,
             protectionDelaySec = protectionDelaySec.takeIf { it > 0 },
             blockedHours = blockedHours?.takeIf { it.isNotBlank() && it != "*" }
         )
