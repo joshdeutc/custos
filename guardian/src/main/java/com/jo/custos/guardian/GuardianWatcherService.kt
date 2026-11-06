@@ -77,6 +77,42 @@ class GuardianWatcherService : AccessibilityService() {
         private const val INSTAGRAM_INBOX_URI = "https://www.instagram.com/direct/inbox/"
         private const val INSTAGRAM_REDIRECT_COOLDOWN_MS = 500L
 
+        private val INSTAGRAM_INBOX_MARKERS = listOf(
+            "com.instagram.android:id/direct_inbox_action_bar",
+            "com.instagram.android:id/direct_thread_header",
+            "com.instagram.android:id/row_thread_title",
+            "com.instagram.android:id/thread_title",
+            "com.instagram.android:id/direct_thread_layout",
+            "com.instagram.android:id/action_bar_title",
+            "com.instagram.android:id/row_thread_composer",
+            "com.instagram.android:id/row_thread_composer_edittext",
+            "com.instagram.android:id/message_composer",
+            "com.instagram.android:id/direct_text_message_text_view",
+            "desc:Fil de discussion",
+            "desc:Appel vidéo",
+            "desc:Détails de la discussion",
+            "desc:Envoyer un message",
+            "text:Messages",
+            "text:Discussion"
+        )
+
+        private val INSTAGRAM_REELS_CONTAINER_IDS = listOf(
+            "com.instagram.android:id/clips_viewer_container",
+            "com.instagram.android:id/clips_viewer_view_pager",
+            "com.instagram.android:id/clips_expanded_touch_view",
+            "com.instagram.android:id/root_clips_layout",
+            "com.instagram.android:id/clips_swipe_refresh_container",
+            "com.instagram.android:id/clips_video_container"
+        )
+
+        private val INSTAGRAM_GENERIC_POST_MARKERS = setOf(
+            "desc:J'aime",
+            "desc:Commentaire",
+            "desc:Republier",
+            "desc:Désactiver le son",
+            "desc:Partager la publication"
+        )
+
         private val INSTAGRAM_PREFER_DEEPLINK_IDS = setOf(
             "com.instagram.android:id/explore_action_bar",
             "com.instagram.android:id/action_bar_search_edit_text"
@@ -332,38 +368,8 @@ class GuardianWatcherService : AccessibilityService() {
         val activeRules = rules.filter { isRuleActiveNow(it) }
         if (activeRules.isEmpty()) return false
 
-        if (pkg == INSTAGRAM_PACKAGE) {
-            val root = rootInActiveWindow
-            if (root != null) {
-                try {
-                    val selectedTab = instagramSelectedTab(root)
-                    if (selectedTab == INSTAGRAM_DIRECT_TAB_VIEW_ID) return false
-                } finally {
-                    root.recycle()
-                }
-            }
-        }
-
         for (rule in activeRules) {
-            var hit: String? = null
-            if (pkg == INSTAGRAM_PACKAGE) {
-                val root = rootInActiveWindow
-                if (root != null) {
-                    try {
-                        val selectedTab = instagramSelectedTab(root)
-                        if (selectedTab != null && (selectedTab in rule.blockedIds || rule.blockedIds.any { selectedTab.endsWith(it) })) {
-                            hit = selectedTab
-                        }
-                    } finally {
-                        root.recycle()
-                    }
-                }
-            }
-
-            if (hit == null) {
-                hit = rule.blockedIds.firstOrNull { marker -> visibleIdPresent(pkg, marker) }
-            }
-            if (hit == null) continue
+            val hit = findRuleHit(pkg, rule) ?: continue
 
             lastScreenRuleActionAt = now
             Log.w(TAG, "Enforcing screen rule '${rule.name}' for $pkg (hit=$hit)")
@@ -373,7 +379,80 @@ class GuardianWatcherService : AccessibilityService() {
         return false
     }
 
+    private fun findRuleHit(pkg: String, rule: ScreenRuleManager.ScreenRule): String? {
+        // If any allowed id is present, this screen is allowed by this rule
+        if (rule.allowedIds.isNotEmpty() && rule.allowedIds.any { marker -> visibleIdPresent(pkg, marker) }) {
+            return null
+        }
+
+        if (pkg == INSTAGRAM_PACKAGE) {
+            // Instagram DM / Inbox / Threads are strictly immune
+            if (isInstagramDirectOrThreadActive()) return null
+
+            // Check if selected tab is explicitly blocked by rule
+            val root = rootInActiveWindow
+            if (root != null) {
+                try {
+                    val selectedTab = instagramSelectedTab(root)
+                    if (selectedTab != null && (selectedTab in rule.blockedIds || rule.blockedIds.any { selectedTab.endsWith(it) })) {
+                        return selectedTab
+                    }
+                } finally {
+                    root.recycle()
+                }
+            }
+
+            val reelsActive = isInstagramReelsActive()
+
+            for (blockedId in rule.blockedIds) {
+                // If it's a generic post interaction marker (like "desc:J'aime"), it only counts
+                // as a hit when the user is actually on Reels (not on standard feed posts).
+                if (blockedId in INSTAGRAM_GENERIC_POST_MARKERS && !reelsActive) {
+                    continue
+                }
+                if (visibleIdPresent(pkg, blockedId)) {
+                    return blockedId
+                }
+            }
+            return null
+        }
+
+        return rule.blockedIds.firstOrNull { marker -> visibleIdPresent(pkg, marker) }
+    }
+
     private fun openInstagramInbox(): Boolean = openDeeplink(INSTAGRAM_PACKAGE, INSTAGRAM_INBOX_URI)
+
+    private fun isInstagramDirectOrThreadActive(): Boolean {
+        val root = rootInActiveWindow
+        if (root != null) {
+            try {
+                val selectedTab = instagramSelectedTab(root)
+                if (selectedTab == INSTAGRAM_DIRECT_TAB_VIEW_ID) return true
+            } finally {
+                root.recycle()
+            }
+        }
+        for (marker in INSTAGRAM_INBOX_MARKERS) {
+            if (visibleIdPresent(INSTAGRAM_PACKAGE, marker)) return true
+        }
+        return false
+    }
+
+    private fun isInstagramReelsActive(): Boolean {
+        val root = rootInActiveWindow
+        if (root != null) {
+            try {
+                val selectedTab = instagramSelectedTab(root)
+                if (selectedTab == "com.instagram.android:id/clips_tab") return true
+            } finally {
+                root.recycle()
+            }
+        }
+        for (marker in INSTAGRAM_REELS_CONTAINER_IDS) {
+            if (visibleIdPresent(INSTAGRAM_PACKAGE, marker)) return true
+        }
+        return false
+    }
 
     private fun instagramSelectedTab(root: AccessibilityNodeInfo): String? {
         for (id in INSTAGRAM_TAB_VIEW_IDS) {
@@ -588,15 +667,27 @@ class GuardianWatcherService : AccessibilityService() {
 
         var how = "failed"
         if (pkg == INSTAGRAM_PACKAGE) {
-            // Instagram: perform GLOBAL_ACTION_BACK first.
-            // Navigating into Reels from Feed/Explore/Inbox is a forward navigation;
-            // BACK immediately pops Reels and returns to the previous screen.
-            if (performGlobalAction(GLOBAL_ACTION_BACK)) {
-                how = "instagram_back"
-            } else if (tapInstagramDirectTab() || openInstagramInbox()) {
-                how = "instagram_direct_fallback"
-            } else if (openDeeplink(pkg, INSTAGRAM_INBOX_URI)) {
-                how = "instagram_deeplink"
+            val root = rootInActiveWindow
+            val selectedTab = if (root != null) {
+                try { instagramSelectedTab(root) } finally { root.recycle() }
+            } else null
+
+            if (selectedTab == "com.instagram.android:id/clips_tab") {
+                if (tapNavItem(pkg, "com.instagram.android:id/feed_tab", 0) ||
+                    tapInstagramDirectTab() ||
+                    openInstagramInbox()) {
+                    how = "instagram_tab_escape"
+                } else if (performGlobalAction(GLOBAL_ACTION_BACK)) {
+                    how = "instagram_back"
+                }
+            } else {
+                if (performGlobalAction(GLOBAL_ACTION_BACK)) {
+                    how = "instagram_back"
+                } else if (tapInstagramDirectTab() || openInstagramInbox()) {
+                    how = "instagram_direct_fallback"
+                } else if (openDeeplink(pkg, INSTAGRAM_INBOX_URI)) {
+                    how = "instagram_deeplink"
+                }
             }
         } else if (escapeTapId != null && tapNavItem(pkg, escapeTapId, rule.escapeTapIndex)) {
             how = "tap"
@@ -641,15 +732,17 @@ class GuardianWatcherService : AccessibilityService() {
         Log.w(TAG, "${rule.name}: $shortHit -> escape ($how)")
 
         overlayHandler.postDelayed({
-            val stillBlocked = rule.blockedIds.any { visibleIdPresent(pkg, it) }
+            val stillBlocked = findRuleHit(pkg, rule) != null
             val reached = !stillBlocked
             ScreenRuleManager.recordOutcome(this, rule.name, reached)
             EventLog.log(this, "SCREEN_RULE", "${rule.name} $shortHit -> $how, reached=$reached")
 
             if (stillBlocked) {
                 if (pkg == INSTAGRAM_PACKAGE) {
-                    if (tapInstagramDirectTab() || openInstagramInbox()) {
-                        Log.w(TAG, "Screen escape fallback: redirected to Instagram Inbox")
+                    if (tapNavItem(pkg, "com.instagram.android:id/feed_tab", 0) ||
+                        tapInstagramDirectTab() ||
+                        openInstagramInbox()) {
+                        Log.w(TAG, "Screen escape fallback: redirected to Instagram feed/inbox")
                         return@postDelayed
                     }
                 }
