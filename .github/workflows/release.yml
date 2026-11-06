@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - 'v*'
+      - 'micha-v*'
 
 permissions:
   contents: write
@@ -12,8 +12,8 @@ permissions:
 jobs:
   build-release:
     runs-on: ubuntu-latest
-    # Cet environnement impose le Wait Timer (ex: 24h ou 48h) configuré dans les réglages GitHub
-    environment: production
+    # Environnement dédié à Micha (clé cryptographique distincte micha-release.jks + Wait Timer)
+    environment: micha-production
 
     steps:
       - name: Checkout code
@@ -39,7 +39,7 @@ jobs:
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew :guardian:assembleRelease :app:assembleMeRelease --stacktrace
+        run: ./gradlew :guardian:assembleRelease :app:assembleBrotherRelease --stacktrace
 
       - name: Clean up Keystore file
         if: always()
@@ -68,8 +68,8 @@ jobs:
           current_tag="${{ github.ref_name }}"
           echo "Preserving active release tag: $current_tag"
           gh release list --limit 50 --json tagName --jq '.[].tagName' | while read -r tag; do
-            if [ -n "$tag" ] && [ "$tag" != "$current_tag" ]; then
-              echo "Pruning older release: $tag"
+            if [ -n "$tag" ] && [ "$tag" != "$current_tag" ] && [[ "$tag" == micha-v* ]]; then
+              echo "Pruning older Micha release: $tag"
               gh release delete "$tag" --yes --cleanup-tag || true
             fi
           done

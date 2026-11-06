@@ -27,9 +27,9 @@ android {
         versionCode 1
         versionName "1.0"
 
-        buildConfigField "boolean", "PERMANENT_APP_LIMITS", "false"
-        buildConfigField "boolean", "PERMANENT_CURFEW", "false"
-        buildConfigField "boolean", "PERMANENT_SCREEN_RULES", "false"
+        buildConfigField "boolean", "PERMANENT_APP_LIMITS", "true"
+        buildConfigField "boolean", "PERMANENT_CURFEW", "true"
+        buildConfigField "boolean", "PERMANENT_SCREEN_RULES", "true"
         buildConfigField "boolean", "EVENT_LOG_ENABLED", "true"
     }
 
