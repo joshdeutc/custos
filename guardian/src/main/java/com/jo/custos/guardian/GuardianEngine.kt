@@ -738,15 +738,24 @@ object GuardianEngine {
         }
 
         if (state.quarantineDelayHours <= 0) {
-            val newlyAllowed = installed.map { it.packageName }.filterNot { isGuarded(ctx, it) }
+            val newlyAllowed = installed.map { it.packageName }.filterNot { isGuarded(ctx, it) }.filter { pkg ->
+                pkg in state.allowedPackages || pkg in INITIAL_ALLOWED_PACKAGES || isInstalledFromPlayStore(ctx, pkg)
+            }
             val merged = state.allowedPackages + newlyAllowed
             if (merged != state.allowedPackages) {
                 state = state.copy(allowedPackages = merged)
                 saveStateInternal(ctx, state)
             }
             for (pkgInfo in installed) {
-                setPackageSuspendedInternal(ctx, pkgInfo.packageName, false)
-                setPackageHiddenInternal(ctx, pkgInfo.packageName, false)
+                val pkg = pkgInfo.packageName
+                if (isGuarded(ctx, pkg) || pkg in state.allowedPackages) {
+                    setPackageSuspendedInternal(ctx, pkg, false)
+                    setPackageHiddenInternal(ctx, pkg, false)
+                } else {
+                    setPackageSuspendedInternal(ctx, pkg, true)
+                    setPackageHiddenInternal(ctx, pkg, true)
+                    uninstallPackageSilently(ctx, pkg)
+                }
             }
             return
         }
@@ -758,10 +767,80 @@ object GuardianEngine {
                 setPackageSuspendedInternal(ctx, pkg, false)
                 setPackageHiddenInternal(ctx, pkg, false)
             } else {
-                // Unauthorized app -> hide and suspend
+                // Unauthorized app -> hide and suspend (and uninstall if from PC/ADB)
                 setPackageSuspendedInternal(ctx, pkg, true)
                 setPackageHiddenInternal(ctx, pkg, true)
+                if (!isInstalledFromPlayStore(ctx, pkg)) {
+                    uninstallPackageSilently(ctx, pkg)
+                }
             }
+        }
+    }
+
+    fun isInstalledFromPlayStore(ctx: Context, pkg: String): Boolean {
+        return try {
+            val pm = ctx.packageManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val info = pm.getInstallSourceInfo(pkg)
+                info.installingPackageName == "com.android.vending" ||
+                    info.initiatingPackageName == "com.android.vending"
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getInstallerPackageName(pkg) == "com.android.vending"
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun uninstallPackageSilently(ctx: Context, pkg: String): Boolean {
+        if (isGuarded(ctx, pkg)) return false
+        if (!isDeviceOwner(ctx)) return false
+        return try {
+            val packageInstaller = ctx.packageManager.packageInstaller
+            val intent = Intent(ctx, GuardianPackageReceiver::class.java).apply {
+                action = "com.jo.custos.guardian.ACTION_UNINSTALL_RESULT"
+                putExtra("pkg", pkg)
+            }
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+            val pi = PendingIntent.getBroadcast(ctx, pkg.hashCode(), intent, flags)
+            packageInstaller.uninstall(pkg, pi.intentSender)
+            Log.w(TAG, "🚨 Guardian triggered silent uninstallation of unauthorized PC/ADB app: $pkg")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed silent uninstall of $pkg: ${e.message}", e)
+            false
+        }
+    }
+
+    fun onPackageAdded(ctx: Context, pkg: String) {
+        init(ctx)
+        if (isGuarded(ctx, pkg)) {
+            Log.i(TAG, "Package $pkg is guarded or system app. Skipping quarantine.")
+            return
+        }
+        val state = getState(ctx)
+        if (!state.enabled || pkg in state.allowedPackages) return
+
+        if (!isInstalledFromPlayStore(ctx, pkg)) {
+            setPackageSuspendedInternal(ctx, pkg, true)
+            setPackageHiddenInternal(ctx, pkg, true)
+            uninstallPackageSilently(ctx, pkg)
+            Log.w(TAG, "🚨 Unauthorized PC/ADB install detected ($pkg) -> Hidden, Suspended & Uninstalled!")
+            return
+        }
+
+        if (state.quarantineDelayHours <= 0) {
+            requestAppAddition(ctx, pkg)
+            Log.i(TAG, "Quarantine delay is 0: Guardian auto-allowed Play Store app: $pkg")
+        } else {
+            setPackageSuspendedInternal(ctx, pkg, true)
+            setPackageHiddenInternal(ctx, pkg, true)
+            Log.w(TAG, "Guardian locked down newly installed unauthorized Play Store app: $pkg")
         }
     }
 

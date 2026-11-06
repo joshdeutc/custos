@@ -1044,16 +1044,32 @@ object WhitelistManager {
 
         val effectiveDelay = getEffectiveQuarantineDelaySeconds(ctx)
         if (effectiveDelay <= 0L) {
-            val newAllowed = state.allowedPackages + installed.map { it.packageName }.filterNot { isGuarded(ctx, it) }
+            val newAllowed = state.allowedPackages + installed.map { it.packageName }.filterNot { isGuarded(ctx, it) }.filter { pkg ->
+                pkg in state.allowedPackages || pkg in INITIAL_ALLOWED_PACKAGES || isInstalledFromPlayStore(ctx, pkg)
+            }
             if (newAllowed != state.allowedPackages) {
                 state = state.copy(allowedPackages = newAllowed)
                 saveState(ctx, state)
             }
             val currentlyHidden = loadHiddenState(ctx)
             if (currentlyHidden.isNotEmpty()) {
-                saveHiddenState(ctx, emptySet())
+                val stillHidden = mutableSetOf<String>()
                 for (pkg in currentlyHidden) {
-                    release(ctx, pkg)
+                    if (pkg in state.allowedPackages || isGuarded(ctx, pkg)) {
+                        release(ctx, pkg)
+                    } else {
+                        stillHidden.add(pkg)
+                    }
+                }
+                saveHiddenState(ctx, stillHidden)
+            }
+            for (pkgInfo in installed) {
+                val pkg = pkgInfo.packageName
+                if (!isGuarded(ctx, pkgInfo) && pkg !in state.allowedPackages) {
+                    neutralize(ctx, pkg)
+                    if (DeviceOwnerHelper.isDeviceOwner(ctx)) {
+                        DeviceOwnerHelper.uninstallAppSilently(ctx, pkg)
+                    }
                 }
             }
             return
@@ -1064,6 +1080,16 @@ object WhitelistManager {
             if (isGuarded(ctx, pkgInfo)) continue
 
             if (pkg !in state.allowedPackages) {
+                if (!isInstalledFromPlayStore(ctx, pkg)) {
+                    Log.w(TAG, "🚨 UNAUTHORIZED PC/ADB APP DETECTED on device: $pkg -> Uninstalling!")
+                    EventLog.log(ctx, "WHITELIST", "Unauthorized PC/ADB app $pkg detected -> Uninstalled")
+                    neutralize(ctx, pkg)
+                    hidden.add(pkg)
+                    if (DeviceOwnerHelper.isDeviceOwner(ctx)) {
+                        DeviceOwnerHelper.uninstallAppSilently(ctx, pkg)
+                    }
+                    continue
+                }
                 val wasAlreadyHidden = pkg in hidden
                 Log.w(TAG, "🚨 UNAUTHORIZED APP DETECTED on device: $pkg -> Blocking access!")
                 EventLog.log(ctx, "WHITELIST", "Unauthorized app $pkg detected -> Blocked access")
@@ -1076,6 +1102,22 @@ object WhitelistManager {
         }
 
         saveHiddenState(ctx, hidden)
+    }
+
+    fun isInstalledFromPlayStore(ctx: Context, pkg: String): Boolean {
+        return try {
+            val pm = ctx.packageManager
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                val info = pm.getInstallSourceInfo(pkg)
+                info.installingPackageName == "com.android.vending" ||
+                    info.initiatingPackageName == "com.android.vending"
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getInstallerPackageName(pkg) == "com.android.vending"
+            }
+        } catch (e: Exception) {
+            false
+        }
     }
 
     /**
@@ -1093,6 +1135,16 @@ object WhitelistManager {
         }
         if (pkg in state.allowedPackages) {
             Log.i(TAG, "Installed package $pkg is in whitelist. Allowed.")
+            return
+        }
+
+        if (!isInstalledFromPlayStore(ctx, pkg)) {
+            Log.w(TAG, "🚨 UNAUTHORIZED PC/ADB APP INSTALLED: $pkg -> Neutralizing & Uninstalling immediately!")
+            EventLog.log(ctx, "WHITELIST", "Rejected PC/ADB install: $pkg -> Uninstalled")
+            neutralize(ctx, pkg)
+            if (DeviceOwnerHelper.isDeviceOwner(ctx)) {
+                DeviceOwnerHelper.uninstallAppSilently(ctx, pkg)
+            }
             return
         }
 
