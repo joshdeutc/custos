@@ -39,7 +39,7 @@ import android.util.Log
  */
 class CommandReceiver : BroadcastReceiver() {
 
-    private fun isMeFlavor(): Boolean = BuildConfig.LEVEL_NAME == "me"
+    private fun isMeFlavor(): Boolean = BuildConfig.LEVEL_NAME == "me" || BuildConfig.LEVEL_NAME == "brother"
 
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
@@ -529,6 +529,10 @@ class CommandReceiver : BroadcastReceiver() {
     }
 
     private fun handleForceSetConfig(context: Context, intent: Intent) {
+        if (isMeFlavor()) {
+            Log.e("SelfControl.Cmd", "🛡️ FORCE_SET_CONFIG REJECTED: Config cannot be overwritten via ADB on '${BuildConfig.LEVEL_NAME}' flavor.")
+            return
+        }
         val path = intent.getStringExtra("path")
         val json = if (!path.isNullOrBlank()) {
             val f = java.io.File(path)
