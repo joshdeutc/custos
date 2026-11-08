@@ -151,6 +151,7 @@ class LimitService : Service() {
             DelayManager.applyPendingConfigsIfReady(this@LimitService)
             DelayManager.applyPendingDelayIfReady(this@LimitService)
             WhitelistManager.checkAndPromotePendingRequests(this@LimitService)
+            ScreenRuleManager.applyPendingRemovalsIfReady(this@LimitService)
             checkConfigReload()
             checkA11YReEnable()
             checkA11yHealth()

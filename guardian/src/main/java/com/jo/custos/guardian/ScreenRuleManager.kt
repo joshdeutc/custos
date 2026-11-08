@@ -148,11 +148,11 @@ object ScreenRuleManager {
             if (raw.contains("meta ai") || raw.contains("recherch") || raw.contains("search")) return 0
             if (raw.split(' ', '_', '-').all { it.lowercase() in GENERIC_WORDS }) return 0
             if (EPHEMERAL_PATTERNS.any { it.containsMatchIn(raw) }) return 0
-            return 10
+            return 1
         }
         return id.substringAfter(":id/")
             .split('_')
-            .count { it.isNotBlank() && it.lowercase() !in GENERIC_WORDS }
+            .count { it.isNotBlank() && it.lowercase() !in GENERIC_WORDS } * 10
     }
 
     // ──────────────────────────────────────
@@ -602,23 +602,16 @@ object ScreenRuleManager {
             Log.w(TAG, "Ignoring rule '${o.optString("name")}' — no blocked ids")
             null
         } else {
-            val pkg = o.getString("package")
             val rawAllowed = o.optJSONArray("allowed_ids")?.let { a ->
                 (0 until a.length()).map { a.getString(it) }
             } ?: emptyList()
             val cleanedAllowed = rawAllowed.filter { specificity(it) > 0 }
-            val rawEscapeTapId = o.optString("escape_tap_id").ifBlank { null }
-            val safeEscapeTapId = if (pkg == "com.instagram.android" && rawEscapeTapId?.endsWith("tab_icon") == true) {
-                null
-            } else {
-                rawEscapeTapId
-            }
             ScreenRule(
                 name = o.getString("name"),
-                packageName = pkg,
+                packageName = o.getString("package"),
                 blockedIds = blocked,
                 allowedIds = cleanedAllowed,
-                escapeTapId = safeEscapeTapId,
+                escapeTapId = o.optString("escape_tap_id").ifBlank { null },
                 escapeTapIndex = o.optInt("escape_tap_index", 0),
                 escapeDeeplink = o.optString("escape_deeplink").ifBlank { null },
                 protectionDelaySec = if (o.has("protection_delay_sec")) o.getInt("protection_delay_sec") else null,

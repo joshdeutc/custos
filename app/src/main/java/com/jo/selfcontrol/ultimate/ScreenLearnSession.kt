@@ -194,15 +194,13 @@ object ScreenLearnSession {
             .filter { ScreenRuleManager.specificity(it) > 0 }
             .take(4)
 
-        val safeEscapeTapId = if (packageName == "com.instagram.android") null else escapeTapId
-
         val rule = ScreenRuleManager.ScreenRule(
             name = ruleName,
             packageName = packageName,
             blockedIds = chosen,
             allowedIds = allowedMarkers,
-            escapeTapId = safeEscapeTapId,
-            escapeTapIndex = if (safeEscapeTapId == null) 0 else escapeTapIndex,
+            escapeTapId = escapeTapId,
+            escapeTapIndex = escapeTapIndex,
             protectionDelaySec = protectionDelaySec.takeIf { it > 0 },
             blockedHours = blockedHours?.takeIf { it.isNotBlank() && it != "*" }
         )

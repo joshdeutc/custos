@@ -513,19 +513,24 @@ object DelayManager {
             for (r in screenRules) {
                 val sec = r.protectionDelaySec
                 val pendingTimer = ScreenRuleManager.pendingTimerChange(context, r.name)
+                val pendingRemMs = ScreenRuleManager.pendingRemovalRemainingMs(context, r.name)
                 val pendingSec = pendingTimer?.targetDelaySec
-                if (sec != null && sec > 0) {
-                    val desc = if (pendingTimer != null) {
-                        val targetLabel = if (pendingSec != null) formatDuration(pendingSec.toLong()) else "Global"
-                        "${formatDuration(sec.toLong())} (⏳ → $targetLabel)"
-                    } else {
-                        formatDuration(sec.toLong())
+                if ((sec != null && sec > 0) || pendingTimer != null || pendingRemMs != null) {
+                    val effectiveSec = (sec ?: getCurrentEffectiveDelaySeconds(context)).toLong()
+                    val baseLabel = if (sec != null && sec > 0) formatDuration(sec.toLong()) else "Aligné sur délai général (${formatDuration(effectiveSec)})"
+                    val desc = when {
+                        pendingRemMs != null -> "$baseLabel (⏳ Suppression dans ${formatDuration(pendingRemMs / 1000)})"
+                        pendingTimer != null -> {
+                            val targetLabel = if (pendingSec != null) formatDuration(pendingSec.toLong()) else "Global"
+                            "$baseLabel (⏳ → $targetLabel)"
+                        }
+                        else -> baseLabel
                     }
                     list.add(
                         ConfiguredDelayItem(
                             title = "🔒 Écran : ${r.name}",
-                            delaySeconds = sec.toLong(),
-                            isGlobal = false,
+                            delaySeconds = effectiveSec,
+                            isGlobal = sec == null || sec <= 0,
                             description = desc
                         )
                     )
@@ -601,6 +606,10 @@ object DelayManager {
             val pendingTimers = ScreenRuleManager.loadPendingTimerChanges(context).filter { it.executeAt > now }
             if (pendingTimers.isNotEmpty()) {
                 return false to "Des modifications de délais sur les règles d'écran sont encore en attente."
+            }
+            val pendingRemovals = ScreenRuleManager.loadPending(context).filter { it.second > now }
+            if (pendingRemovals.isNotEmpty()) {
+                return false to "Des suppressions de règles d'écran sont encore en cours d'attente."
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error checking ScreenRuleManager eligibility: ${e.message}")

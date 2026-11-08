@@ -255,77 +255,75 @@ class AppWatcherService : AccessibilityService() {
     //  Screen learning — capture primitives
     // ──────────────────────────────────────
 
-    private fun normalizeText(s: CharSequence?): String = ScreenRuleManager.normalizeText(s)
+    private fun normalizeText(s: CharSequence?): String =
+        s?.toString()?.trim()?.replace(Regex("\\s+"), " ") ?: ""
 
     private fun visibleIdPresent(pkg: String, viewId: String): Boolean {
-        val ids = visibleIdsFor(pkg)
-        return viewId in ids
+        val isText = viewId.startsWith("text:")
+        val query = if (isText) viewId.removePrefix("text:") else ""
+        fun matchesIn(root: AccessibilityNodeInfo): Boolean {
+            if (root.packageName?.toString() != pkg) return false
+            return if (isText) {
+                root.findAccessibilityNodeInfosByText(query).any {
+                    it.isVisibleToUser && normalizeText(it.text).equals(query, ignoreCase = true)
+                }
+            } else {
+                root.findAccessibilityNodeInfosByViewId(viewId).any { it.isVisibleToUser }
+            }
+        }
+        try {
+            var checkedPkgWindow = false
+            for (window in windows) {
+                val root = window.root ?: continue
+                if (root.packageName?.toString() != pkg) continue
+                checkedPkgWindow = true
+                if (matchesIn(root)) return true
+            }
+            if (checkedPkgWindow) return false
+        } catch (_: Exception) {}
+        return try {
+            val root = rootInActiveWindow ?: return false
+            matchesIn(root)
+        } catch (_: Exception) {
+            false
+        }
     }
 
     internal fun visibleIdsFor(pkg: String): Set<String> {
         val ids = LinkedHashSet<String>()
         val prefix = "$pkg:id/"
-        var budget = 800
-
-        val dm = resources.displayMetrics
-        val screenBounds = Rect()
+        var budget = 4_000
         fun walk(node: AccessibilityNodeInfo?) {
             if (node == null || budget <= 0) return
             budget--
-            val id = node.viewIdResourceName
-            node.getBoundsInScreen(screenBounds)
-            val onScreen = node.isVisibleToUser || (screenBounds.width() > 0 && screenBounds.height() > 0 &&
-                screenBounds.intersects(0, 0, dm.widthPixels, dm.heightPixels))
-
-            if (onScreen) {
+            if (node.isVisibleToUser) {
+                val id = node.viewIdResourceName
                 if (id != null && id.startsWith(prefix)) {
                     ids.add(id)
                 }
                 val txt = normalizeText(node.text)
-                if (txt.length in 3..35 && !txt.all { it.isDigit() || it == ':' || it == ' ' }) {
+                if (txt.length in 3..30 && !txt.all { it.isDigit() || it == ':' || it == ' ' }) {
                     ids.add("text:$txt")
                 }
-                val desc = normalizeText(node.contentDescription)
-                if (desc.length in 3..40 && !desc.all { it.isDigit() || it == ':' || it == ' ' } && desc != txt) {
-                    ids.add("desc:$desc")
-                }
             }
-            val count = node.childCount
-            for (i in 0 until count) {
+            for (i in 0 until node.childCount) {
                 if (budget <= 0) break
-                val child = try { node.getChild(i) } catch (_: Exception) { null } ?: continue
-                try {
-                    walk(child)
-                } finally {
-                    child.recycle()
-                }
+                val child = try { node.getChild(i) } catch (_: Exception) { null }
+                walk(child)
             }
         }
-
         try {
             var foundInWindows = false
             for (window in windows) {
                 val root = window.root ?: continue
-                if (root.packageName?.toString() == pkg) {
-                    foundInWindows = true
-                    try {
-                        walk(root)
-                    } finally {
-                        root.recycle()
-                    }
-                } else {
-                    root.recycle()
-                }
+                if (root.packageName?.toString() != pkg) continue
+                foundInWindows = true
+                walk(root)
             }
             if (!foundInWindows) {
-                rootInActiveWindow?.let { root ->
-                    try {
-                        if (root.packageName?.toString() == pkg) {
-                            walk(root)
-                        }
-                    } finally {
-                        root.recycle()
-                    }
+                val root = rootInActiveWindow
+                if (root != null && root.packageName?.toString() == pkg) {
+                    walk(root)
                 }
             }
         } catch (e: Exception) {
@@ -335,11 +333,6 @@ class AppWatcherService : AccessibilityService() {
     }
 
     internal fun selectedNavItem(pkg: String): Pair<String, Int>? {
-        if (pkg == "com.instagram.android") {
-            // Instagram escape is handled reliably via BACK or Inbox fallback;
-            // bottom nav tabs are ambiguous (index 2 is Reels itself).
-            return null
-        }
         if (pkg == "com.snapchat.android") {
             if (visibleIdPresent(pkg, "com.snapchat.android:id/ff_item") || visibleIdPresent(pkg, "text:Chat")) {
                 return "com.snapchat.android:id/ngs_chat_icon_container" to 0
@@ -358,68 +351,32 @@ class AppWatcherService : AccessibilityService() {
 
         val prefix = "$pkg:id/"
         val byId = LinkedHashMap<String, MutableList<Boolean>>()
-        var budget = 800
-        val dm = resources.displayMetrics
-        val screenBounds = Rect()
-        var selectedItemTarget: String? = null
-
+        var budget = 3_000
         fun walk(node: AccessibilityNodeInfo?) {
             if (node == null || budget <= 0) return
             budget--
             val id = node.viewIdResourceName
-            val isSel = node.isSelected || node.isChecked
-            node.getBoundsInScreen(screenBounds)
-            val isBottomBar = screenBounds.bottom >= dm.heightPixels * 0.70f
-
             if (id != null && id.startsWith(prefix) && node.isVisibleToUser) {
+                val isSel = node.isSelected || node.isChecked
                 byId.getOrPut(id) { mutableListOf() }.add(isSel)
             }
-
-            if (isSel && isBottomBar && selectedItemTarget == null) {
-                val txt = normalizeText(node.text)
-                val desc = normalizeText(node.contentDescription)
-                when {
-                    txt.isNotBlank() && txt.length in 2..25 -> selectedItemTarget = "text:$txt"
-                    desc.isNotBlank() && desc.length in 2..35 -> selectedItemTarget = "desc:$desc"
-                    id != null && id.startsWith(prefix) -> selectedItemTarget = id
-                }
-            }
-
-            val count = node.childCount
-            for (i in 0 until count) {
+            for (i in 0 until node.childCount) {
                 if (budget <= 0) break
-                val child = try { node.getChild(i) } catch (_: Exception) { null } ?: continue
-                try {
-                    walk(child)
-                } finally {
-                    child.recycle()
-                }
+                val child = try { node.getChild(i) } catch (_: Exception) { null }
+                walk(child)
             }
         }
-
         try {
             var found = false
             for (window in windows) {
                 val root = window.root ?: continue
-                if (root.packageName?.toString() == pkg) {
-                    found = true
-                    try {
-                        walk(root)
-                    } finally {
-                        root.recycle()
-                    }
-                } else {
-                    root.recycle()
-                }
+                if (root.packageName?.toString() != pkg) continue
+                found = true
+                walk(root)
             }
             if (!found) {
-                rootInActiveWindow?.let { root ->
-                    try {
-                        if (root.packageName?.toString() == pkg) walk(root)
-                    } finally {
-                        root.recycle()
-                    }
-                }
+                val root = rootInActiveWindow
+                if (root != null && root.packageName?.toString() == pkg) walk(root)
             }
         } catch (e: Exception) {
             Log.w(TAG, "selectedNavItem($pkg) failed: ${e.message}")
@@ -435,10 +392,6 @@ class AppWatcherService : AccessibilityService() {
         val single = byId.entries.firstOrNull { it.value.size == 1 && it.value[0] }
         if (single != null) {
             return single.key to 0
-        }
-        val target = selectedItemTarget
-        if (target != null) {
-            return target to 0
         }
         return null
     }

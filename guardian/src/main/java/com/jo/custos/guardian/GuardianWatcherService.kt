@@ -72,31 +72,11 @@ class GuardianWatcherService : AccessibilityService() {
         private const val SCREEN_RULE_REDIRECT_COOLDOWN_MS = 500L
 
         const val INSTAGRAM_PACKAGE = "com.instagram.android"
-        private const val INSTAGRAM_SCAN_INTERVAL_MS = 80L
-        private const val INSTAGRAM_DIRECT_TAB_VIEW_ID = "com.instagram.android:id/direct_tab"
-        private const val INSTAGRAM_INBOX_URI = "https://www.instagram.com/direct/inbox/"
-        private const val INSTAGRAM_REDIRECT_COOLDOWN_MS = 500L
 
-        private val INSTAGRAM_INBOX_MARKERS = listOf(
-            "com.instagram.android:id/direct_inbox_action_bar",
-            "com.instagram.android:id/direct_thread_header",
-            "com.instagram.android:id/row_thread_title",
-            "com.instagram.android:id/thread_title",
-            "com.instagram.android:id/direct_thread_layout",
-            "com.instagram.android:id/action_bar_title",
-            "com.instagram.android:id/row_thread_composer",
-            "com.instagram.android:id/row_thread_composer_edittext",
-            "com.instagram.android:id/message_composer",
-            "com.instagram.android:id/direct_text_message_text_view",
-            "desc:Fil de discussion",
-            "desc:Appel vidéo",
-            "desc:Détails de la discussion",
-            "desc:Envoyer un message",
-            "text:Messages",
-            "text:Discussion"
-        )
-
-        private val INSTAGRAM_REELS_CONTAINER_IDS = listOf(
+        private val INSTAGRAM_REDIRECT_IDS = listOf(
+            "com.instagram.android:id/main_feed_action_bar",          // home feed
+            "com.instagram.android:id/explore_action_bar",            // Explore grid
+            "com.instagram.android:id/action_bar_search_edit_text",   // people search
             "com.instagram.android:id/clips_viewer_container",
             "com.instagram.android:id/clips_viewer_view_pager",
             "com.instagram.android:id/clips_expanded_touch_view",
@@ -105,18 +85,18 @@ class GuardianWatcherService : AccessibilityService() {
             "com.instagram.android:id/clips_video_container"
         )
 
-        private val INSTAGRAM_GENERIC_POST_MARKERS = setOf(
-            "desc:J'aime",
-            "desc:Commentaire",
-            "desc:Republier",
-            "desc:Désactiver le son",
-            "desc:Partager la publication"
-        )
-
         private val INSTAGRAM_PREFER_DEEPLINK_IDS = setOf(
             "com.instagram.android:id/explore_action_bar",
             "com.instagram.android:id/action_bar_search_edit_text"
         )
+
+        private val INSTAGRAM_INBOX_IDS = listOf(
+            "com.instagram.android:id/direct_inbox_action_bar",
+            "com.instagram.android:id/direct_thread_header"
+        )
+
+        private const val INSTAGRAM_SCAN_INTERVAL_MS = 80L
+        private const val INSTAGRAM_DIRECT_TAB_VIEW_ID = "com.instagram.android:id/direct_tab"
 
         private val INSTAGRAM_TAB_VIEW_IDS = listOf(
             "com.instagram.android:id/feed_tab",
@@ -125,6 +105,15 @@ class GuardianWatcherService : AccessibilityService() {
             "com.instagram.android:id/search_tab",
             "com.instagram.android:id/profile_tab"
         )
+
+        private val INSTAGRAM_REDIRECTED_TABS = setOf(
+            "com.instagram.android:id/feed_tab",
+            "com.instagram.android:id/clips_tab",
+            "com.instagram.android:id/search_tab"
+        )
+
+        private const val INSTAGRAM_INBOX_URI = "https://www.instagram.com/direct/inbox/"
+        private const val INSTAGRAM_REDIRECT_COOLDOWN_MS = 500L
 
         private var lastHomeMs = 0L
 
@@ -357,110 +346,106 @@ class GuardianWatcherService : AccessibilityService() {
 
     internal fun enforceScreenRules(pkg: String): Boolean {
         val now = System.currentTimeMillis()
+        reloadScreenRulesIfStale(now)
+        val rules = screenRules.filter { it.packageName == pkg && isRuleActiveNow(it) }
+        if (rules.isEmpty()) return false
+
+        if (pkg == INSTAGRAM_PACKAGE) {
+            return enforceInstagramRestrictions(rules)
+        }
+
         if (now - lastScreenRuleActionAt < SCREEN_RULE_REDIRECT_COOLDOWN_MS) return false
         if (now - lastScreenRuleScanAt < SCREEN_RULE_SCAN_INTERVAL_MS) return false
         lastScreenRuleScanAt = now
 
-        reloadScreenRulesIfStale(now)
-        val rules = screenRules.filter { it.packageName == pkg }
-        if (rules.isEmpty()) return false
-
-        val activeRules = rules.filter { isRuleActiveNow(it) }
-        if (activeRules.isEmpty()) return false
-
-        for (rule in activeRules) {
-            val hit = findRuleHit(pkg, rule) ?: continue
+        for (rule in rules) {
+            if (rule.allowedIds.isNotEmpty() && rule.allowedIds.any { visibleIdPresent(pkg, it) }) {
+                continue
+            }
+            val hit = rule.blockedIds.firstOrNull { visibleIdPresent(pkg, it) } ?: continue
 
             lastScreenRuleActionAt = now
-            Log.w(TAG, "Enforcing screen rule '${rule.name}' for $pkg (hit=$hit)")
             performScreenEscape(rule, hit)
             return true
         }
         return false
     }
 
-    private fun findRuleHit(pkg: String, rule: ScreenRuleManager.ScreenRule): String? {
-        // If any allowed id is present, this screen is allowed by this rule
-        if (rule.allowedIds.isNotEmpty() && rule.allowedIds.any { marker -> visibleIdPresent(pkg, marker) }) {
-            return null
-        }
+    /**
+     * Instagram Partial Access enforcement (exact block from feat/me-flavor-and-screen-rules & 47fac43).
+     * Redirects restricted Instagram surfaces (feed, Reels, Explore, search) to the Direct inbox.
+     * BACK is deliberately not used — it only returns to the previous tab, which is normally the feed.
+     */
+    private fun enforceInstagramRestrictions(rules: List<ScreenRuleManager.ScreenRule>): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - lastInstagramBackTime < INSTAGRAM_REDIRECT_COOLDOWN_MS) return false
+        if (now - lastInstagramScanTime < INSTAGRAM_SCAN_INTERVAL_MS) return false
+        lastInstagramScanTime = now
 
-        if (pkg == INSTAGRAM_PACKAGE) {
-            // Instagram DM / Inbox / Threads are strictly immune
-            if (isInstagramDirectOrThreadActive()) return null
+        val root = rootInActiveWindow ?: return false
+        val selectedTab = instagramSelectedTab(root)
+        if (selectedTab == INSTAGRAM_DIRECT_TAB_VIEW_ID) return false
+        if (INSTAGRAM_INBOX_IDS.any { hasViewId(root, it) }) return false
 
-            // Check if selected tab is explicitly blocked by rule
-            val root = rootInActiveWindow
-            if (root != null) {
-                try {
-                    val selectedTab = instagramSelectedTab(root)
-                    if (selectedTab != null && (selectedTab in rule.blockedIds || rule.blockedIds.any { selectedTab.endsWith(it) })) {
-                        return selectedTab
-                    }
-                } finally {
-                    root.recycle()
-                }
+        var matchedRule: ScreenRuleManager.ScreenRule? = null
+        var hitId: String? = null
+        for (rule in rules) {
+            if (rule.allowedIds.any { hasViewId(root, it) }) continue
+            val m = when {
+                selectedTab != null && selectedTab in rule.blockedIds -> selectedTab
+                else -> rule.blockedIds.firstOrNull { it.contains(":id/") && hasViewId(root, it) }
             }
-
-            val reelsActive = isInstagramReelsActive()
-
-            for (blockedId in rule.blockedIds) {
-                // If it's a generic post interaction marker (like "desc:J'aime"), it only counts
-                // as a hit when the user is actually on Reels (not on standard feed posts).
-                if (blockedId in INSTAGRAM_GENERIC_POST_MARKERS && !reelsActive) {
-                    continue
-                }
-                if (visibleIdPresent(pkg, blockedId)) {
-                    return blockedId
-                }
+            if (m != null) {
+                matchedRule = rule
+                hitId = m
+                break
             }
-            return null
         }
+        if (hitId == null) {
+            val defaultHit = when (selectedTab) {
+                in INSTAGRAM_REDIRECTED_TABS -> selectedTab
+                else -> INSTAGRAM_REDIRECT_IDS.firstOrNull { hasViewId(root, it) }
+            }
+            if (defaultHit != null) {
+                matchedRule = rules.first()
+                hitId = defaultHit
+            }
+        }
+        val hit = hitId ?: return false
+        val rule = matchedRule ?: rules.first()
 
-        return rule.blockedIds.firstOrNull { marker -> visibleIdPresent(pkg, marker) }
+        lastInstagramBackTime = now
+        val preferDeeplink = hit in INSTAGRAM_PREFER_DEEPLINK_IDS
+        val how = when {
+            rule.escapeTapId != null && tapNavItem(INSTAGRAM_PACKAGE, rule.escapeTapId, rule.escapeTapIndex) -> "tap"
+            rule.escapeDeeplink != null && openDeeplink(INSTAGRAM_PACKAGE, rule.escapeDeeplink) -> "deeplink"
+            preferDeeplink && openInstagramInbox() -> "deeplink"
+            tapInstagramDirectTab() -> "tab"
+            openInstagramInbox() -> "deeplink"
+            else -> {
+                goHome("instagram_fallback")
+                "home"
+            }
+        }
+        val shortHit = hit.substringAfter(":id/")
+        Log.w(TAG, "Instagram restricted view ($shortHit) -> inbox via $how (rule=${rule.name})")
+        EventLog.log(this, "IG_REDIRECT", "$shortHit -> $how")
+        return true
     }
 
     private fun openInstagramInbox(): Boolean = openDeeplink(INSTAGRAM_PACKAGE, INSTAGRAM_INBOX_URI)
 
-    private fun isInstagramDirectOrThreadActive(): Boolean {
-        val root = rootInActiveWindow
-        if (root != null) {
-            try {
-                val selectedTab = instagramSelectedTab(root)
-                if (selectedTab == INSTAGRAM_DIRECT_TAB_VIEW_ID) return true
-            } finally {
-                root.recycle()
-            }
-        }
-        for (marker in INSTAGRAM_INBOX_MARKERS) {
-            if (visibleIdPresent(INSTAGRAM_PACKAGE, marker)) return true
-        }
-        return false
-    }
-
-    private fun isInstagramReelsActive(): Boolean {
-        val root = rootInActiveWindow
-        if (root != null) {
-            try {
-                val selectedTab = instagramSelectedTab(root)
-                if (selectedTab == "com.instagram.android:id/clips_tab") return true
-            } finally {
-                root.recycle()
-            }
-        }
-        for (marker in INSTAGRAM_REELS_CONTAINER_IDS) {
-            if (visibleIdPresent(INSTAGRAM_PACKAGE, marker)) return true
-        }
-        return false
+    private fun hasViewId(root: AccessibilityNodeInfo, viewId: String): Boolean = try {
+        root.findAccessibilityNodeInfosByViewId(viewId).any { it.isVisibleToUser }
+    } catch (_: Exception) {
+        false
     }
 
     private fun instagramSelectedTab(root: AccessibilityNodeInfo): String? {
         for (id in INSTAGRAM_TAB_VIEW_IDS) {
             val selected = try {
-                val nodes = root.findAccessibilityNodeInfosByViewId(id)
-                val res = nodes.any { it.isVisibleToUser && (it.isSelected || it.isChecked) }
-                nodes.forEach { it.recycle() }
-                res
+                root.findAccessibilityNodeInfosByViewId(id)
+                    .any { it.isVisibleToUser && (it.isSelected || it.isChecked) }
             } catch (_: Exception) {
                 false
             }
@@ -473,13 +458,15 @@ class GuardianWatcherService : AccessibilityService() {
         try {
             for (window in windows) {
                 val root = window.root ?: continue
-                val found = root.findAccessibilityNodeInfosByViewId(viewId).firstOrNull { it.isVisibleToUser }
-                root.recycle()
+                val found = root.findAccessibilityNodeInfosByViewId(viewId)
+                    .firstOrNull { it.isVisibleToUser }
                 if (found != null) return found
             }
         } catch (_: Exception) {}
         return try {
-            rootInActiveWindow?.findAccessibilityNodeInfosByViewId(viewId)?.firstOrNull { it.isVisibleToUser }
+            rootInActiveWindow
+                ?.findAccessibilityNodeInfosByViewId(viewId)
+                ?.firstOrNull { it.isVisibleToUser }
         } catch (_: Exception) {
             null
         }
@@ -490,9 +477,7 @@ class GuardianWatcherService : AccessibilityService() {
         if (icon == null) {
             false
         } else {
-            val bounds = Rect()
-            icon.getBoundsInScreen(bounds)
-            icon.recycle()
+            val bounds = Rect().also { icon.getBoundsInScreen(it) }
             if (bounds.isEmpty) {
                 false
             } else {
@@ -539,124 +524,42 @@ class GuardianWatcherService : AccessibilityService() {
     private fun normalizeText(s: CharSequence?): String = ScreenRuleManager.normalizeText(s)
 
     private fun visibleIdPresent(pkg: String, viewId: String): Boolean {
-        try {
-            val activeRoot = rootInActiveWindow
-            if (activeRoot != null) {
-                try {
-                    if (activeRoot.packageName?.toString() == pkg && checkNodeMatch(activeRoot, viewId)) {
-                        return true
-                    }
-                } finally {
-                    activeRoot.recycle()
-                }
-            }
-        } catch (_: Exception) {}
-
-        try {
-            val currentWindows = windows ?: return false
-            for (window in currentWindows) {
-                val root = window.root ?: continue
-                try {
-                    if (root.packageName?.toString() == pkg && checkNodeMatch(root, viewId)) {
-                        return true
-                    }
-                } finally {
-                    root.recycle()
-                }
-            }
-        } catch (_: Exception) {}
-        return false
-    }
-
-    private fun checkNodeMatch(root: AccessibilityNodeInfo, targetId: String): Boolean {
-        val dm = resources.displayMetrics
-        val screenBounds = Rect()
-        var budget = 400
-
-        val isText = targetId.startsWith("text:")
-        val isDesc = targetId.startsWith("desc:")
-        val isId = !isText && !isDesc
-
-        val targetVal = when {
-            isText -> normalizeText(targetId.removePrefix("text:"))
-            isDesc -> normalizeText(targetId.removePrefix("desc:"))
-            else -> targetId
+        val isText = viewId.startsWith("text:")
+        val isDesc = viewId.startsWith("desc:")
+        val query = when {
+            isText -> viewId.removePrefix("text:")
+            isDesc -> viewId.removePrefix("desc:")
+            else -> ""
         }
-        val cleanWord = targetVal.filter { it.isLetterOrDigit() || it == ' ' }.trim()
-
-        fun isNodeOnScreen(node: AccessibilityNodeInfo): Boolean {
-            if (node.isVisibleToUser) return true
-            node.getBoundsInScreen(screenBounds)
-            return screenBounds.width() > 0 && screenBounds.height() > 0 &&
-                screenBounds.intersects(0, 0, dm.widthPixels, dm.heightPixels)
-        }
-
-        fun matchesNode(node: AccessibilityNodeInfo): Boolean {
-            if (!isNodeOnScreen(node)) return false
-            if (isId) return node.viewIdResourceName == targetVal
-            val nodeText = normalizeText(node.text)
-            val nodeDesc = normalizeText(node.contentDescription)
-            val maxLen = kotlin.math.max(50, targetVal.length * 3)
-            val textLenOk = nodeText.length <= maxLen
-            val descLenOk = nodeDesc.length <= maxLen
-
-            if (isText) {
-                if (nodeText.equals(targetVal, ignoreCase = true) || nodeDesc.equals(targetVal, ignoreCase = true)) return true
-                if (textLenOk && nodeText.contains(targetVal, ignoreCase = true)) return true
-                if (descLenOk && nodeDesc.contains(targetVal, ignoreCase = true)) return true
-                if (cleanWord.length >= 4) {
-                    if (textLenOk && nodeText.contains(cleanWord, ignoreCase = true)) return true
-                    if (descLenOk && nodeDesc.contains(cleanWord, ignoreCase = true)) return true
-                }
-            } else if (isDesc) {
-                if (nodeDesc.equals(targetVal, ignoreCase = true) || nodeText.equals(targetVal, ignoreCase = true)) return true
-                if (descLenOk && nodeDesc.contains(targetVal, ignoreCase = true)) return true
-                if (textLenOk && nodeText.contains(targetVal, ignoreCase = true)) return true
-                if (cleanWord.length >= 4) {
-                    if (descLenOk && nodeDesc.contains(cleanWord, ignoreCase = true)) return true
-                    if (textLenOk && nodeText.contains(cleanWord, ignoreCase = true)) return true
-                }
-            }
-            return false
-        }
-
-        fun dfs(node: AccessibilityNodeInfo): Boolean {
-            if (budget <= 0) return false
-            budget--
-            if (matchesNode(node)) return true
-            val count = node.childCount
-            for (i in 0 until count) {
-                if (budget <= 0) break
-                val child = try { node.getChild(i) } catch (_: Exception) { null } ?: continue
-                try {
-                    if (dfs(child)) return true
-                } finally {
-                    child.recycle()
-                }
-            }
-            return false
-        }
-
-        try {
-            if (isId) {
-                val nodes = root.findAccessibilityNodeInfosByViewId(targetVal)
-                if (!nodes.isNullOrEmpty()) {
-                    val hit = nodes.any { isNodeOnScreen(it) }
-                    nodes.forEach { it.recycle() }
-                    if (hit) return true
+        fun matchesIn(root: AccessibilityNodeInfo): Boolean {
+            if (root.packageName?.toString() != pkg) return false
+            return if (isText || isDesc) {
+                root.findAccessibilityNodeInfosByText(query).any {
+                    it.isVisibleToUser && (
+                        normalizeText(it.text).equals(query, ignoreCase = true) ||
+                        normalizeText(it.contentDescription).equals(query, ignoreCase = true)
+                    )
                 }
             } else {
-                val searchWord = if (cleanWord.length >= 3) cleanWord else targetVal
-                val nodes = root.findAccessibilityNodeInfosByText(searchWord)
-                if (!nodes.isNullOrEmpty()) {
-                    val hit = nodes.any { matchesNode(it) }
-                    nodes.forEach { it.recycle() }
-                    if (hit) return true
-                }
+                root.findAccessibilityNodeInfosByViewId(viewId).any { it.isVisibleToUser }
             }
+        }
+        try {
+            var checkedPkgWindow = false
+            for (window in windows) {
+                val root = window.root ?: continue
+                if (root.packageName?.toString() != pkg) continue
+                checkedPkgWindow = true
+                if (matchesIn(root)) return true
+            }
+            if (checkedPkgWindow) return false
         } catch (_: Exception) {}
-
-        return dfs(root)
+        return try {
+            val root = rootInActiveWindow ?: return false
+            matchesIn(root)
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun performScreenEscape(rule: ScreenRuleManager.ScreenRule, hit: String) {
@@ -665,96 +568,25 @@ class GuardianWatcherService : AccessibilityService() {
             "com.snapchat.android:id/ngs_chat_icon_container"
         } else null
 
-        var how = "failed"
-        if (pkg == INSTAGRAM_PACKAGE) {
-            val root = rootInActiveWindow
-            val selectedTab = if (root != null) {
-                try { instagramSelectedTab(root) } finally { root.recycle() }
-            } else null
-
-            if (selectedTab == "com.instagram.android:id/clips_tab") {
-                if (tapNavItem(pkg, "com.instagram.android:id/feed_tab", 0) ||
-                    tapInstagramDirectTab() ||
-                    openInstagramInbox()) {
-                    how = "instagram_tab_escape"
-                } else if (performGlobalAction(GLOBAL_ACTION_BACK)) {
-                    how = "instagram_back"
-                }
-            } else {
-                if (performGlobalAction(GLOBAL_ACTION_BACK)) {
-                    how = "instagram_back"
-                } else if (tapInstagramDirectTab() || openInstagramInbox()) {
-                    how = "instagram_direct_fallback"
-                } else if (openDeeplink(pkg, INSTAGRAM_INBOX_URI)) {
-                    how = "instagram_deeplink"
-                }
-            }
-        } else if (escapeTapId != null && tapNavItem(pkg, escapeTapId, rule.escapeTapIndex)) {
-            how = "tap"
-        } else if (rule.escapeDeeplink != null && openDeeplink(pkg, rule.escapeDeeplink)) {
-            how = "deeplink"
-        } else if (pkg == "com.snapchat.android" && tapSnapchatChat()) {
-            how = "snapchat_chat_coords"
-        } else {
-            val fallbackTapped = when (pkg) {
-                "com.android.vending" -> {
-                    tapNavItem(pkg, "text:Jeux", 0) ||
-                        tapNavItem(pkg, "desc:Jeux", 0) ||
-                        tapNavItem(pkg, "text:Applis", 0) ||
-                        tapNavItem(pkg, "desc:Applis", 0)
-                }
-                else -> false
-            }
-
-            if (fallbackTapped) {
-                how = "fallback_nav_tap"
-            } else {
-                val navAllowed = rule.allowedIds.firstOrNull { it.startsWith("text:") || it.startsWith("desc:") }
-                if (navAllowed != null && tapNavItem(pkg, navAllowed, 0)) {
-                    how = "allowed_marker_tap"
-                } else if (performGlobalAction(GLOBAL_ACTION_BACK)) {
-                    how = "back"
-                } else {
-                    val launchIntent = packageManager.getLaunchIntentForPackage(pkg)?.apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    }
-                    if (launchIntent != null) {
-                        startActivity(launchIntent)
-                        how = "clear_top_relaunch"
-                    } else {
-                        goHome("screen_escape_fallback")
-                        how = "home_fallback"
-                    }
-                }
+        val how = when {
+            escapeTapId != null && tapNavItem(pkg, escapeTapId, rule.escapeTapIndex) -> "tap"
+            rule.escapeDeeplink != null && openDeeplink(pkg, rule.escapeDeeplink) -> "deeplink"
+            pkg == "com.snapchat.android" && tapSnapchatChat() -> "snapchat_chat_coords"
+            else -> {
+                goHome("screen_escape_fallback")
+                "home"
             }
         }
         val shortHit = hit.substringAfter(":id/")
         Log.w(TAG, "${rule.name}: $shortHit -> escape ($how)")
 
         overlayHandler.postDelayed({
-            val stillBlocked = findRuleHit(pkg, rule) != null
-            val reached = !stillBlocked
+            val stillBlocked = rule.blockedIds.any { visibleIdPresent(pkg, it) }
+            val reached = !stillBlocked && (
+                rule.allowedIds.isEmpty() || rule.allowedIds.any { visibleIdPresent(pkg, it) }
+            )
             ScreenRuleManager.recordOutcome(this, rule.name, reached)
             EventLog.log(this, "SCREEN_RULE", "${rule.name} $shortHit -> $how, reached=$reached")
-
-            if (stillBlocked) {
-                if (pkg == INSTAGRAM_PACKAGE) {
-                    if (tapNavItem(pkg, "com.instagram.android:id/feed_tab", 0) ||
-                        tapInstagramDirectTab() ||
-                        openInstagramInbox()) {
-                        Log.w(TAG, "Screen escape fallback: redirected to Instagram feed/inbox")
-                        return@postDelayed
-                    }
-                }
-                val launchIntent = packageManager.getLaunchIntentForPackage(pkg)?.apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                }
-                if (launchIntent != null) {
-                    startActivity(launchIntent)
-                } else {
-                    goHome("screen_escape_stuck")
-                }
-            }
         }, 900L)
     }
 
@@ -787,158 +619,56 @@ class GuardianWatcherService : AccessibilityService() {
 
     private fun tapNavItem(pkg: String, viewId: String, index: Int): Boolean {
         val matches = mutableListOf<AccessibilityNodeInfo>()
-        val dm = resources.displayMetrics
-        val screenBounds = Rect()
-
-        fun isNodeOnScreen(node: AccessibilityNodeInfo): Boolean {
-            if (node.isVisibleToUser) return true
-            node.getBoundsInScreen(screenBounds)
-            return screenBounds.width() > 0 && screenBounds.height() > 0 &&
-                screenBounds.intersects(0, 0, dm.widthPixels, dm.heightPixels)
+        val isText = viewId.startsWith("text:")
+        val isDesc = viewId.startsWith("desc:")
+        val query = when {
+            isText -> viewId.removePrefix("text:")
+            isDesc -> viewId.removePrefix("desc:")
+            else -> ""
         }
-
-        fun findInRoot(root: AccessibilityNodeInfo) {
-            val isText = viewId.startsWith("text:")
-            val isDesc = viewId.startsWith("desc:")
-            val isId = !isText && !isDesc
-
-            val targetVal = when {
-                isText -> normalizeText(viewId.removePrefix("text:"))
-                isDesc -> normalizeText(viewId.removePrefix("desc:"))
-                else -> viewId
-            }
-            val cleanWord = targetVal.filter { it.isLetterOrDigit() || it == ' ' }.trim()
-
-            fun matchesNode(node: AccessibilityNodeInfo): Boolean {
-                if (!isNodeOnScreen(node)) return false
-                if (isId) return node.viewIdResourceName == targetVal
-                val nodeText = normalizeText(node.text)
-                val nodeDesc = normalizeText(node.contentDescription)
-                val maxLen = kotlin.math.max(50, targetVal.length * 3)
-                val textLenOk = nodeText.length <= maxLen
-                val descLenOk = nodeDesc.length <= maxLen
-
-                if (isText) {
-                    if (nodeText.equals(targetVal, ignoreCase = true) || nodeDesc.equals(targetVal, ignoreCase = true)) return true
-                    if (textLenOk && nodeText.contains(targetVal, ignoreCase = true)) return true
-                    if (descLenOk && nodeDesc.contains(targetVal, ignoreCase = true)) return true
-                    if (cleanWord.length >= 4) {
-                        if (textLenOk && nodeText.contains(cleanWord, ignoreCase = true)) return true
-                        if (descLenOk && nodeDesc.contains(cleanWord, ignoreCase = true)) return true
-                    }
-                } else if (isDesc) {
-                    if (nodeDesc.equals(targetVal, ignoreCase = true) || nodeText.equals(targetVal, ignoreCase = true)) return true
-                    if (descLenOk && nodeDesc.contains(targetVal, ignoreCase = true)) return true
-                    if (textLenOk && nodeText.contains(targetVal, ignoreCase = true)) return true
-                    if (cleanWord.length >= 4) {
-                        if (descLenOk && nodeDesc.contains(cleanWord, ignoreCase = true)) return true
-                        if (textLenOk && nodeText.contains(cleanWord, ignoreCase = true)) return true
-                    }
+        fun collectFrom(root: AccessibilityNodeInfo) {
+            if (isText || isDesc) {
+                for (n in root.findAccessibilityNodeInfosByText(query)) {
+                    if (n.isVisibleToUser && (
+                        normalizeText(n.text).equals(query, ignoreCase = true) ||
+                        normalizeText(n.contentDescription).equals(query, ignoreCase = true)
+                    )) matches += n
                 }
-                return false
-            }
-
-            try {
-                if (isId) {
-                    val nodes = root.findAccessibilityNodeInfosByViewId(targetVal)
-                    if (nodes != null) {
-                        for (node in nodes) {
-                            if (isNodeOnScreen(node)) matches.add(node) else node.recycle()
-                        }
-                    }
-                } else {
-                    val searchWord = if (cleanWord.length >= 3) cleanWord else targetVal
-                    val nodes = root.findAccessibilityNodeInfosByText(searchWord)
-                    if (nodes != null) {
-                        for (node in nodes) {
-                            if (matchesNode(node)) matches.add(node) else node.recycle()
-                        }
-                    }
+            } else {
+                for (n in root.findAccessibilityNodeInfosByViewId(viewId)) {
+                    if (n.isVisibleToUser) matches += n
                 }
-            } catch (_: Exception) {}
-
-            if (matches.isEmpty()) {
-                var budget = 400
-                fun dfs(node: AccessibilityNodeInfo) {
-                    if (budget <= 0) return
-                    budget--
-                    if (matchesNode(node)) {
-                        matches.add(node)
-                        return
-                    }
-                    val count = node.childCount
-                    for (i in 0 until count) {
-                        if (budget <= 0 || matches.isNotEmpty()) break
-                        val child = try { node.getChild(i) } catch (_: Exception) { null } ?: continue
-                        dfs(child)
-                        if (!matches.contains(child)) child.recycle()
-                    }
-                }
-                dfs(root)
             }
         }
-
         try {
-            var found = false
             for (window in windows) {
                 val root = window.root ?: continue
-                if (root.packageName?.toString() == pkg) {
-                    found = true
-                    try {
-                        findInRoot(root)
-                    } finally {
-                        root.recycle()
-                    }
-                } else {
-                    root.recycle()
-                }
+                if (root.packageName?.toString() != pkg) continue
+                collectFrom(root)
             }
-            if (!found) {
-                rootInActiveWindow?.let { root ->
-                    try {
-                        if (root.packageName?.toString() == pkg) findInRoot(root)
-                    } finally {
-                        root.recycle()
-                    }
+            if (matches.isEmpty()) {
+                val root = rootInActiveWindow
+                if (root != null && root.packageName?.toString() == pkg) {
+                    collectFrom(root)
                 }
             }
         } catch (_: Exception) {
-            matches.forEach { it.recycle() }
             return false
         }
-
-        val node = matches.getOrNull(index) ?: matches.firstOrNull() ?: run {
-            matches.forEach { it.recycle() }
-            return false
-        }
-
-        var curr: AccessibilityNodeInfo? = node
-        var clicked = false
-        while (curr != null) {
-            if (curr.isClickable) {
-                clicked = curr.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                if (clicked) break
-            }
-            val parent = curr.parent
-            if (curr != node) curr.recycle()
-            curr = parent
-        }
-
+        val node = matches.getOrNull(index) ?: matches.firstOrNull() ?: return false
         val bounds = Rect().also { node.getBoundsInScreen(it) }
-        var gestured = false
-        if (!bounds.isEmpty) {
-            try {
-                val path = Path().apply { moveTo(bounds.exactCenterX(), bounds.exactCenterY()) }
-                gestured = dispatchGesture(
-                    GestureDescription.Builder()
-                        .addStroke(GestureDescription.StrokeDescription(path, 0L, 10L))
-                        .build(),
-                    null, null
-                )
-            } catch (_: Exception) {}
+        if (bounds.isEmpty) return false
+        return try {
+            val path = Path().apply { moveTo(bounds.exactCenterX(), bounds.exactCenterY()) }
+            dispatchGesture(
+                GestureDescription.Builder()
+                    .addStroke(GestureDescription.StrokeDescription(path, 0L, 10L))
+                    .build(),
+                null, null
+            )
+        } catch (_: Exception) {
+            false
         }
-        matches.forEach { it.recycle() }
-        return clicked || gestured
     }
 
     // ──────────────────────────────────────

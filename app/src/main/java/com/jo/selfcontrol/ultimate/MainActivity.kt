@@ -890,6 +890,103 @@ class MainActivity : Activity() {
             }
         }
 
+        // Pending Partial Access (Screen Rules) removals & timer changes
+        val pendingScreenRemovals = ScreenRuleManager.loadPending(this)
+            .filter { it.second > now }
+            .sortedBy { it.second }
+        val pendingScreenTimers = ScreenRuleManager.loadPendingTimerChanges(this)
+            .filter { it.executeAt > now }
+            .sortedBy { it.executeAt }
+
+        if (pendingScreenRemovals.isNotEmpty() || pendingScreenTimers.isNotEmpty()) {
+            val screenRulesByName = ScreenRuleManager.load(this).associateBy { it.name }
+            delayContainer.addView(TextView(this).apply {
+                text = "⏳ Partial Access changes (${pendingScreenRemovals.size + pendingScreenTimers.size})"
+                setTextColor(Color.BLACK)
+                textSize = 14f
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(0, dp(16), 0, dp(8))
+            })
+
+            for ((ruleName, executeAt) in pendingScreenRemovals) {
+                val remainingSec = ((executeAt - now) / 1000).toInt().coerceAtLeast(0)
+                val rule = screenRulesByName[ruleName]
+                val appLabel = rule?.let { getAppName(it.packageName) } ?: ""
+
+                delayContainer.addView(LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12), dp(12), dp(12), dp(12))
+                    background = roundedBackground(Color.WHITE)
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    ).apply { bottomMargin = dp(8) }
+
+                    addView(TextView(this@MainActivity).apply {
+                        text = "🗑️ Suppr. règle d'écran : $ruleName — ${formatTime(remainingSec)}"
+                        setTextColor(Color.BLACK)
+                        textSize = 14f
+                        typeface = Typeface.DEFAULT_BOLD
+                    })
+                    if (appLabel.isNotBlank()) {
+                        addView(TextView(this@MainActivity).apply {
+                            text = "  • Application : $appLabel"
+                            setTextColor(Color.BLACK)
+                            textSize = 13f
+                            setPadding(0, dp(4), 0, dp(6))
+                        })
+                    }
+                    addView(Button(this@MainActivity).apply {
+                        text = "Cancel removal"
+                        setTextColor(Color.WHITE)
+                        background = roundedBackground(Color.parseColor("#D32F2F"))
+                        setOnClickListener {
+                            ScreenRuleManager.cancelRemoval(this@MainActivity, ruleName)
+                            refreshDelayUI()
+                            refreshPartialAccessUI(force = true)
+                        }
+                    })
+                })
+            }
+
+            for (timerChange in pendingScreenTimers) {
+                val remainingSec = ((timerChange.executeAt - now) / 1000).toInt().coerceAtLeast(0)
+                val targetLabel = protectionTimerLabel(timerChange.targetDelaySec)
+                delayContainer.addView(LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12), dp(12), dp(12), dp(12))
+                    background = roundedBackground(Color.WHITE)
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    ).apply { bottomMargin = dp(8) }
+
+                    addView(TextView(this@MainActivity).apply {
+                        text = "🛡️ Timer règle d'écran : ${timerChange.name} — ${formatTime(remainingSec)}"
+                        setTextColor(Color.BLACK)
+                        textSize = 14f
+                        typeface = Typeface.DEFAULT_BOLD
+                    })
+                    addView(TextView(this@MainActivity).apply {
+                        text = "  • Nouveau délai : $targetLabel"
+                        setTextColor(Color.BLACK)
+                        textSize = 13f
+                        setPadding(0, dp(4), 0, dp(6))
+                    })
+                    addView(Button(this@MainActivity).apply {
+                        text = "Cancel timer change"
+                        setTextColor(Color.WHITE)
+                        background = roundedBackground(Color.parseColor("#D32F2F"))
+                        setOnClickListener {
+                            ScreenRuleManager.cancelTimerChange(this@MainActivity, timerChange.name)
+                            refreshDelayUI()
+                            refreshPartialAccessUI(force = true)
+                        }
+                    })
+                })
+            }
+        }
+
         // ── Bouton vers la Vue d'ensemble des délais ──
         val configuredDelays = DelayManager.getConfiguredDelays(this)
         val dedicatedCount = configuredDelays.count { !it.isGlobal }
@@ -4782,7 +4879,8 @@ class MainActivity : Activity() {
                         background = roundedBackground(Color.parseColor("#444444"))
                         setOnClickListener {
                             ScreenRuleManager.cancelTimerChange(this@MainActivity, rule.name)
-                            refreshPartialAccessUI()
+                            refreshPartialAccessUI(force = true)
+                            refreshDelayUI()
                         }
                         layoutParams = LinearLayout.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
@@ -4807,7 +4905,8 @@ class MainActivity : Activity() {
                             background = roundedBackground(Color.BLACK)
                             setOnClickListener {
                                 ScreenRuleManager.cancelRemoval(this@MainActivity, rule.name)
-                                refreshPartialAccessUI()
+                                refreshPartialAccessUI(force = true)
+                                refreshDelayUI()
                             }
                         })
                     }
@@ -4836,7 +4935,8 @@ class MainActivity : Activity() {
                                         }
                                         else -> {}
                                     }
-                                    refreshPartialAccessUI()
+                                    refreshPartialAccessUI(force = true)
+                                    refreshDelayUI()
                                 }
                             }
                             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -4890,7 +4990,8 @@ class MainActivity : Activity() {
             is ScreenRuleManager.RemovalOutcome.NotFound ->
                 Toast.makeText(this, "Rule not found.", Toast.LENGTH_SHORT).show()
         }
-        refreshPartialAccessUI()
+        refreshPartialAccessUI(force = true)
+        refreshDelayUI()
     }
 
     private fun startScreenRuleLearning() {

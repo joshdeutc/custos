@@ -148,11 +148,11 @@ object ScreenRuleManager {
             if (raw.contains("meta ai") || raw.contains("recherch") || raw.contains("search")) return 0
             if (raw.split(' ', '_', '-').all { it.lowercase() in GENERIC_WORDS }) return 0
             if (EPHEMERAL_PATTERNS.any { it.containsMatchIn(raw) }) return 0
-            return 10
+            return 1
         }
         return id.substringAfter(":id/")
             .split('_')
-            .count { it.isNotBlank() && it.lowercase() !in GENERIC_WORDS }
+            .count { it.isNotBlank() && it.lowercase() !in GENERIC_WORDS } * 10
     }
 
     // ──────────────────────────────────────
@@ -274,29 +274,10 @@ object ScreenRuleManager {
             if (!remoteJson.isNullOrEmpty() && remoteJson != "{}") {
                 try {
                     val remoteObj = JSONObject(remoteJson)
-                    if (localObj == null) {
-                        Log.i(TAG, "Local screen rules missing, restoring from Guardian")
+                    if (localObj == null || localObj.toString() != remoteObj.toString()) {
                         file.writeText(remoteObj.toString(2))
-                        return remoteObj
                     }
-                    val localRules = localObj.optJSONArray("rules")
-                    val remoteRules = remoteObj.optJSONArray("rules")
-                    val localCount = localRules?.length() ?: 0
-                    val remoteCount = remoteRules?.length() ?: 0
-
-                    if (localCount >= remoteCount) {
-                        // Local has equal or more rules; treat local as source of truth and keep Guardian in sync
-                        if (localObj.toString() != remoteObj.toString()) {
-                            Log.i(TAG, "Syncing local screen rules ($localCount) to Guardian ($remoteCount)")
-                            GuardianClient.saveScreenRulesJson(localObj.toString())
-                        }
-                        return localObj
-                    } else {
-                        // Guardian has more rules than local (e.g. fresh reinstall)
-                        Log.i(TAG, "Restoring more rules from Guardian ($remoteCount > $localCount)")
-                        file.writeText(remoteObj.toString(2))
-                        return remoteObj
-                    }
+                    return remoteObj
                 } catch (e: Exception) {
                     Log.e(TAG, "Cannot parse Guardian screen rules: ${e.message}")
                 }
@@ -451,7 +432,7 @@ object ScreenRuleManager {
     fun pendingRemovalRemainingMs(ctx: Context, name: String): Long? {
         val at = loadPending(ctx).firstOrNull { it.first == name }?.second ?: return null
         val left = at - System.currentTimeMillis()
-        return if (left > 0) left else 0L
+        return if (left > 0) left else null
     }
 
     /**
@@ -523,7 +504,7 @@ object ScreenRuleManager {
         EventLog.log(ctx, "SCREEN_RULE", "removed '$name'")
     }
 
-    private fun loadPending(ctx: Context): List<Pair<String, Long>> {
+    internal fun loadPending(ctx: Context): List<Pair<String, Long>> {
         val arr = readRoot(ctx).optJSONArray("pending_removals") ?: return emptyList()
         return (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
@@ -632,34 +613,23 @@ object ScreenRuleManager {
     }
 
     private fun parseRule(o: JSONObject): ScreenRule? = try {
-        val blockedRaw = o.optJSONArray("blocked_ids")?.let { a ->
-            (0 until a.length()).map { a.getString(it) }.filter { it.isNotBlank() }
+        val blocked = o.optJSONArray("blocked_ids")?.let { a ->
+            (0 until a.length()).map { a.getString(it) }
         } ?: emptyList()
-        // Clean out generic furniture, personal pronouns, and ephemeral markers from blocked_ids
-        val cleanBlocked = blockedRaw.filter { specificity(it) > 0 }
-        if (cleanBlocked.isEmpty()) {
-            Log.w(TAG, "Ignoring rule '${o.optString("name")}' — no valid blocked ids")
+        if (blocked.isEmpty()) {
+            Log.w(TAG, "Ignoring rule '${o.optString("name")}' — no blocked ids")
             null
         } else {
-            val pkg = o.getString("package")
-            val allowedRaw = o.optJSONArray("allowed_ids")?.let { a ->
+            val rawAllowed = o.optJSONArray("allowed_ids")?.let { a ->
                 (0 until a.length()).map { a.getString(it) }
             } ?: emptyList()
-            // Clean out generic furniture words from allowedIds so they never act as false vetos
-            val cleanAllowed = allowedRaw.filter { specificity(it) > 0 }
-            val rawEscapeTapId = o.optString("escape_tap_id").ifBlank { null }
-            val safeEscapeTapId = if (pkg == "com.instagram.android" && rawEscapeTapId?.endsWith("tab_icon") == true) {
-                null
-            } else {
-                rawEscapeTapId
-            }
-
+            val cleanedAllowed = rawAllowed.filter { specificity(it) > 0 }
             ScreenRule(
                 name = o.getString("name"),
-                packageName = pkg,
-                blockedIds = cleanBlocked,
-                allowedIds = cleanAllowed,
-                escapeTapId = safeEscapeTapId,
+                packageName = o.getString("package"),
+                blockedIds = blocked,
+                allowedIds = cleanedAllowed,
+                escapeTapId = o.optString("escape_tap_id").ifBlank { null },
                 escapeTapIndex = o.optInt("escape_tap_index", 0),
                 escapeDeeplink = o.optString("escape_deeplink").ifBlank { null },
                 protectionDelaySec = if (o.has("protection_delay_sec")) o.getInt("protection_delay_sec") else null,
