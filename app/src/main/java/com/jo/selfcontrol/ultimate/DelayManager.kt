@@ -61,8 +61,13 @@ object DelayManager {
             if (!remoteJson.isNullOrEmpty() && remoteJson != "{}") {
                 try {
                     val remoteState = parseDelayState(JSONObject(remoteJson))
-                    cachedState = remoteState
-                    return remoteState
+                    val allUpdates = localState.requestedConfigUpdates + remoteState.requestedConfigUpdates
+                    val mergedUpdates = allUpdates.groupBy { "${it.targetType}:${it.targetKey}" }.values.map { list ->
+                        list.maxByOrNull { it.executeAt }!!
+                    }
+                    val merged = remoteState.copy(requestedConfigUpdates = mergedUpdates)
+                    cachedState = merged
+                    return merged
                 } catch (e: Exception) {
                     Log.e(TAG, "Error parsing remote delay state: ${e.message}")
                 }
