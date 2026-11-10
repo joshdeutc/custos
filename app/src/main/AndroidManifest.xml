@@ -105,35 +105,7 @@
 
         <receiver
             android:name=".CommandReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.jo.selfcontrol.ultimate.ALLOW_INSTALL" />
-                <action android:name="com.jo.selfcontrol.ultimate.BLOCK_INSTALL" />
-                <action android:name="com.jo.selfcontrol.ultimate.SET_WHITELIST_DELAY" />
-                <action android:name="com.jo.selfcontrol.ultimate.STATUS_WHITELIST" />
-                <action android:name="com.jo.selfcontrol.ultimate.ENFORCE_WHITELIST" />
-                <action android:name="com.jo.selfcontrol.ultimate.REQUEST_WHITELIST_APP" />
-                <action android:name="com.jo.selfcontrol.ultimate.CANCEL_WHITELIST_APP" />
-                <action android:name="com.jo.selfcontrol.ultimate.CANCEL_PENDING_CONFIG" />
-                <action android:name="com.jo.selfcontrol.ultimate.FORCE_SET_CONFIG" />
-                <action android:name="com.jo.selfcontrol.ultimate.REMOVE_WHITELIST_APP" />
-                <action android:name="com.jo.selfcontrol.ultimate.CHECK_WHITELIST_EXPIRATION" />
-                <action android:name="com.jo.selfcontrol.ultimate.SET_PRIVATE_DNS" />
-                <action android:name="com.jo.selfcontrol.ultimate.GET_PRIVATE_DNS" />
-            </intent-filter>
-        </receiver>
-
-        <!-- Debug-only test automation hooks (no-op in release builds) -->
-        <receiver
-            android:name=".TestAutomationReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.jo.selfcontrol.ultimate.TEST_SET_CURFEW_MUTE" />
-                <action android:name="com.jo.selfcontrol.ultimate.TEST_CLEAR_CURFEW" />
-                <action android:name="com.jo.selfcontrol.ultimate.TEST_SET_APP_LIMIT" />
-                <action android:name="com.jo.selfcontrol.ultimate.TEST_CLEAR_APP_LIMIT" />
-            </intent-filter>
-        </receiver>
+            android:exported="false" />
 
         <!-- Foreground service: monitoring + enforcement core -->
         <service

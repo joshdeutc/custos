@@ -103,19 +103,8 @@ object GuardianClient {
                 DelayManager.loadState(ctx)
             }
 
-            // Sync whitelist state and delay
+            // Sync whitelist state from Guardian (Guardian is the single source of truth; never overwrite its delay from local cache)
             val localWhitelistFile = java.io.File(ctx.filesDir, "whitelist_state.json")
-            if (localWhitelistFile.exists()) {
-                val localWhitelistText = localWhitelistFile.readText()
-                val json = org.json.JSONObject(localWhitelistText)
-                val hours = json.optInt("quarantine_delay_hours", 0)
-                if (hours >= 0) {
-                    service?.requestChangeQuarantineDelay(hours)
-                }
-            } else {
-                service?.requestChangeQuarantineDelay(0)
-            }
-
             val remoteWhitelist = service?.whitelistStateJson
             val remoteAllowedCount = if (!remoteWhitelist.isNullOrBlank() && remoteWhitelist != "{}") {
                 try {

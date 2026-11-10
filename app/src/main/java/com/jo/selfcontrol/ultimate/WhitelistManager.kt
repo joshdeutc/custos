@@ -684,12 +684,26 @@ object WhitelistManager {
      * - If reducing the delay: deferred by the current delay duration to prevent impulse relaxation.
      */
     fun setQuarantineDelay(ctx: Context, newHours: Int, useGlobal: Boolean = false): String {
+        val targetHours = if (useGlobal) {
+            (DelayManager.getCurrentEffectiveDelaySeconds(ctx) / 3600).coerceAtLeast(1)
+        } else {
+            newHours
+        }
         if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
-            val ok = GuardianClient.requestChangeQuarantineDelay(newHours)
-            val desc = "$newHours heure(s)"
+            val currentHours = getEffectiveQuarantineDelayHours(ctx)
+            val ok = GuardianClient.requestChangeQuarantineDelay(targetHours)
+            GuardianClient.getWhitelistStateJson()?.let { remoteJson ->
+                runCatching { File(ctx.filesDir, STATE_FILE).writeText(remoteJson) }
+            }
+            cachedState = null
+            val desc = if (useGlobal) "aligné sur le délai général (${targetHours}h)" else "$targetHours heure(s)"
             return if (ok) {
                 EventLog.log(ctx, "WHITELIST", "Changement de délai vers $desc soumis au Guardian")
-                "Délai de quarantaine mis à jour via le Guardian : $desc"
+                if (targetHours < currentHours) {
+                    "Réduction vers $desc programmée dans ${currentHours}h via le Guardian (anti-impulsion)"
+                } else {
+                    "Délai de quarantaine mis à jour via le Guardian : $desc"
+                }
             } else {
                 "Échec de mise à jour du délai via le Guardian."
             }
@@ -738,6 +752,10 @@ object WhitelistManager {
     fun cancelPendingDelayChange(ctx: Context): Boolean {
         if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {
             val ok = GuardianClient.cancelPendingDelayChange()
+            GuardianClient.getWhitelistStateJson()?.let { remoteJson ->
+                runCatching { File(ctx.filesDir, STATE_FILE).writeText(remoteJson) }
+            }
+            cachedState = null
             if (ok) {
                 EventLog.log(ctx, "WHITELIST", "Annulation du changement de délai via le Guardian")
             }
@@ -1339,6 +1357,20 @@ object WhitelistManager {
         if (cleanPkg.isBlank()) return false
         if (BuildConfig.BLOCK_ALL_BROWSERS && BrowserBlocklist.isBrowser(ctx, cleanPkg)) {
             Log.w(TAG, "Refusing whitelist addition of browser $cleanPkg (BLOCK_ALL_BROWSERS active)")
+            return false
+        }
+        val isInstalled = try {
+            ctx.packageManager.getPackageInfo(cleanPkg, PackageManager.MATCH_UNINSTALLED_PACKAGES)
+            true
+        } catch (_: Exception) {
+            false
+        }
+        if (isInstalled && !isInstalledFromPlayStore(ctx, cleanPkg) && cleanPkg !in INITIAL_ALLOWED_PACKAGES) {
+            Log.w(TAG, "Refusing whitelist addition of non-Play-Store package $cleanPkg")
+            return false
+        }
+        if (!isInstalled && getEffectiveQuarantineDelaySeconds(ctx) <= 0L) {
+            Log.w(TAG, "Refusing pre-install whitelist addition of $cleanPkg while delay is 0")
             return false
         }
         if (GuardianClient.isAvailable && GuardianClient.isGuardianDeviceOwner()) {

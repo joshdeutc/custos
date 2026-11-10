@@ -42,7 +42,15 @@ class CommandReceiver : BroadcastReceiver() {
     private fun isMeFlavor(): Boolean = BuildConfig.LEVEL_NAME == "me"
 
     override fun onReceive(context: Context, intent: Intent) {
-        when (intent.action) {
+        val action = intent.action ?: return
+        if (isMeFlavor() &&
+            action != "com.jo.selfcontrol.ultimate.UNINSTALL_RESULT" &&
+            action != "com.jo.selfcontrol.ultimate.CHECK_WHITELIST_EXPIRATION"
+        ) {
+            Log.e("SelfControl.Cmd", "🛡️ ADB broadcast rejected on 'me' flavor: $action")
+            return
+        }
+        when (action) {
             "com.jo.selfcontrol.ultimate.STATUS" -> handleStatus(context)
             "com.jo.selfcontrol.ultimate.ALLOW_INSTALL" -> handleAllowInstall(context, intent)
             "com.jo.selfcontrol.ultimate.BLOCK_INSTALL" -> handleBlockInstall(context)

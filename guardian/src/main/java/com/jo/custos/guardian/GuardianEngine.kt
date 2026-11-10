@@ -517,7 +517,22 @@ object GuardianEngine {
                 return true
             }
 
+            val isInstalled = try {
+                ctx.packageManager.getPackageInfo(cleanPkg, PackageManager.MATCH_UNINSTALLED_PACKAGES)
+                true
+            } catch (_: Exception) {
+                false
+            }
+            if (isInstalled && !isInstalledFromPlayStore(ctx, cleanPkg) && cleanPkg !in INITIAL_ALLOWED_PACKAGES) {
+                Log.w(TAG, "Refusing whitelist addition of non-Play-Store package: $cleanPkg")
+                return false
+            }
+
             if (state.quarantineDelayHours == 0) {
+                if (!isInstalled) {
+                    Log.w(TAG, "Refusing pre-install whitelist addition while delay is 0: $cleanPkg")
+                    return false
+                }
                 val updatedAllowed = state.allowedPackages + cleanPkg
                 saveStateInternal(ctx, state.copy(allowedPackages = updatedAllowed))
                 setPackageSuspendedInternal(ctx, cleanPkg, false)
