@@ -1097,7 +1097,8 @@ object DelayManager {
         val minWaitMs = if (isProtected) (effectiveDelaySec * 1000L - toleranceMs).coerceAtLeast(0L) else 0L
 
         val (safePendingSec, safePendingExecAt) = if (candState.pendingDelaySeconds != null && candState.pendingDelayExecuteAt > 0L) {
-            val minExecAt = if (oldState.pendingDelayExecuteAt > 0L) {
+            val prevTarget = oldState.pendingDelaySeconds ?: oldState.globalDelaySeconds
+            val minExecAt = if (oldState.pendingDelayExecuteAt > 0L && candState.pendingDelaySeconds >= prevTarget) {
                 oldState.pendingDelayExecuteAt
             } else {
                 now + minWaitMs
@@ -1123,11 +1124,60 @@ object DelayManager {
             0L
         }
 
+        val activeConfig = ConfigManager.loadConfig(context)
         val safePendingConfigs = candState.requestedConfigUpdates.map { candUpd ->
             val oldMatch = oldState.requestedConfigUpdates.firstOrNull {
-                it.id == candUpd.id || (it.targetType == candUpd.targetType && it.targetKey == candUpd.targetKey && it.targetKey.isNotEmpty())
+                it.targetType == candUpd.targetType &&
+                    it.targetKey == candUpd.targetKey &&
+                    it.isDelete == candUpd.isDelete &&
+                    it.newLimitsJson == candUpd.newLimitsJson &&
+                    it.payloadJson == candUpd.payloadJson
             }
-            val minExecAt = oldMatch?.executeAt ?: (now + minWaitMs)
+            val simulatedConfig = when (candUpd.targetType) {
+                "APP_LIMIT" -> {
+                    val pkg = candUpd.targetKey
+                    if (candUpd.isDelete) {
+                        activeConfig.copy(limits = activeConfig.limits.filter { it.packageName != pkg })
+                    } else {
+                        val newLim = runCatching { ConfigManager.parseAppLimit(JSONObject(candUpd.payloadJson)) }.getOrNull()
+                        if (newLim != null) {
+                            activeConfig.copy(limits = activeConfig.limits.filter { it.packageName != pkg } + newLim)
+                        } else activeConfig
+                    }
+                }
+                "CURFEW" -> {
+                    val sig = candUpd.targetKey
+                    if (candUpd.isDelete) {
+                        if (sig == "*") activeConfig.copy(periodBlocks = emptyList())
+                        else activeConfig.copy(periodBlocks = activeConfig.periodBlocks.filter { it.scheduleSignature() != sig })
+                    } else {
+                        val newRule = runCatching { ConfigManager.parsePeriodBlockRule(JSONObject(candUpd.payloadJson)) }.getOrNull()
+                        if (newRule != null) {
+                            activeConfig.copy(periodBlocks = activeConfig.periodBlocks.filter { it.scheduleSignature() != sig } + newRule)
+                        } else activeConfig
+                    }
+                }
+                "INSTALL_BLOCK" -> {
+                    val name = candUpd.targetKey
+                    if (candUpd.isDelete) {
+                        activeConfig.copy(installBlocks = activeConfig.installBlocks.filter { it.name != name })
+                    } else {
+                        val newGroup = runCatching { ConfigManager.parseInstallBlockGroup(JSONObject(candUpd.payloadJson)) }.getOrNull()
+                        if (newGroup != null) {
+                            activeConfig.copy(installBlocks = activeConfig.installBlocks.filter { it.name != name } + newGroup)
+                        } else activeConfig
+                    }
+                }
+                else -> ConfigManager.fromJsonString(candUpd.newLimitsJson) ?: activeConfig
+            }
+            val defer = ConfigManager.requiredDefer(activeConfig, simulatedConfig, effectiveDelaySec)
+            val unlockApplies = !defer.fromExplicitTimer && unlocked
+            val ruleMinWaitMs = if (defer.mustDefer && !unlockApplies) {
+                kotlin.math.max(minWaitMs, (defer.seconds * 1000L - toleranceMs).coerceAtLeast(0L))
+            } else {
+                minWaitMs
+            }
+            val minExecAt = oldMatch?.executeAt ?: (now + ruleMinWaitMs)
             candUpd.copy(executeAt = kotlin.math.max(candUpd.executeAt, minExecAt))
         }
 

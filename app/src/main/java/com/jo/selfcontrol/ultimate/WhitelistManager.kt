@@ -258,12 +258,9 @@ object WhitelistManager {
         var pendingDelayUseGlobal = json.optBoolean("pending_delay_use_global", false)
         var pendingDelayExecuteAt = json.optLong("pending_delay_execute_at", 0L)
 
-        if (quarantineHours >= 100) {
-            Log.w(TAG, "WhitelistManager auto-reset excessive quarantine delay ($quarantineHours h -> 0 h)")
-            quarantineHours = 0
-            pendingDelayHours = null
-            pendingDelayUseGlobal = false
-            pendingDelayExecuteAt = 0L
+        quarantineHours = quarantineHours.coerceIn(0, 168)
+        if (pendingDelayHours != null) {
+            pendingDelayHours = pendingDelayHours.coerceIn(0, 168)
         }
         val pendingDisableExecuteAt = json.optLong("pending_disable_execute_at", 0L)
 
@@ -1063,7 +1060,7 @@ object WhitelistManager {
         val effectiveDelay = getEffectiveQuarantineDelaySeconds(ctx)
         if (effectiveDelay <= 0L) {
             val newAllowed = state.allowedPackages + installed.map { it.packageName }.filterNot { isGuarded(ctx, it) }.filter { pkg ->
-                pkg in state.allowedPackages || pkg in INITIAL_ALLOWED_PACKAGES || isInstalledFromPlayStore(ctx, pkg)
+                pkg in state.allowedPackages || isInstalledFromPlayStore(ctx, pkg)
             }
             if (newAllowed != state.allowedPackages) {
                 state = state.copy(allowedPackages = newAllowed)
@@ -1127,8 +1124,9 @@ object WhitelistManager {
             val pm = ctx.packageManager
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
                 val info = pm.getInstallSourceInfo(pkg)
-                info.installingPackageName == "com.android.vending" ||
-                    info.initiatingPackageName == "com.android.vending"
+                info.initiatingPackageName != "com.android.shell" &&
+                    (info.installingPackageName == "com.android.vending" ||
+                        info.initiatingPackageName == "com.android.vending")
             } else {
                 @Suppress("DEPRECATION")
                 pm.getInstallerPackageName(pkg) == "com.android.vending"
@@ -1365,7 +1363,7 @@ object WhitelistManager {
         } catch (_: Exception) {
             false
         }
-        if (isInstalled && !isInstalledFromPlayStore(ctx, cleanPkg) && cleanPkg !in INITIAL_ALLOWED_PACKAGES) {
+        if (isInstalled && !isInstalledFromPlayStore(ctx, cleanPkg)) {
             Log.w(TAG, "Refusing whitelist addition of non-Play-Store package $cleanPkg")
             return false
         }

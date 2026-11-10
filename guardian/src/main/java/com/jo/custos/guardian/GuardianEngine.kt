@@ -326,11 +326,9 @@ object GuardianEngine {
             var pendingDelayExec = json.optLong("pending_delay_execute_at", 0L)
             val pendingDisableExec = json.optLong("pending_disable_execute_at", 0L)
 
-            if (delayHours >= 100) {
-                Log.w(TAG, "Guardian auto-reset excessive quarantine delay ($delayHours h -> 0 h)")
-                delayHours = 0
-                pendingDelayHours = null
-                pendingDelayExec = 0L
+            delayHours = delayHours.coerceIn(0, 168)
+            if (pendingDelayHours != null) {
+                pendingDelayHours = pendingDelayHours.coerceIn(0, 168)
             }
             val dnsHost = if (json.has("private_dns_host")) {
                 if (json.isNull("private_dns_host")) null else json.getString("private_dns_host")
@@ -523,7 +521,7 @@ object GuardianEngine {
             } catch (_: Exception) {
                 false
             }
-            if (isInstalled && !isInstalledFromPlayStore(ctx, cleanPkg) && cleanPkg !in INITIAL_ALLOWED_PACKAGES) {
+            if (isInstalled && !isInstalledFromPlayStore(ctx, cleanPkg)) {
                 Log.w(TAG, "Refusing whitelist addition of non-Play-Store package: $cleanPkg")
                 return false
             }
@@ -617,29 +615,30 @@ object GuardianEngine {
 
     fun requestChangeQuarantineDelay(ctx: Context, newHours: Int): Boolean {
         if (newHours < 0) return false
+        val clampedHours = newHours.coerceIn(0, 168)
         synchronized(lock) {
             checkAndPromotePendingRequests(ctx)
             val state = getState(ctx)
             val current = state.quarantineDelayHours
 
-            if (newHours >= current) {
+            if (clampedHours >= current) {
                 // Tightening / Increasing protection -> Instantaneous!
                 saveStateInternal(ctx, state.copy(
-                    quarantineDelayHours = newHours,
+                    quarantineDelayHours = clampedHours,
                     pendingDelayHours = null,
                     pendingDelayExecuteAt = 0L
                 ))
-                Log.i(TAG, "Quarantine delay increased immediately to ${newHours}h")
+                Log.i(TAG, "Quarantine delay increased immediately to ${clampedHours}h")
                 scheduleNextUnlockAlarm(ctx)
                 return true
             } else {
                 // Relaxing / Decreasing protection -> Constitutional delay mandatory!
                 val executeAt = System.currentTimeMillis() + (current * 3600_000L)
                 saveStateInternal(ctx, state.copy(
-                    pendingDelayHours = newHours,
+                    pendingDelayHours = clampedHours,
                     pendingDelayExecuteAt = executeAt
                 ))
-                Log.w(TAG, "Delay reduction to ${newHours}h scheduled in ${current}h")
+                Log.w(TAG, "Delay reduction to ${clampedHours}h scheduled in ${current}h")
                 scheduleNextUnlockAlarm(ctx)
                 return true
             }
@@ -754,7 +753,7 @@ object GuardianEngine {
 
         if (state.quarantineDelayHours <= 0) {
             val newlyAllowed = installed.map { it.packageName }.filterNot { isGuarded(ctx, it) }.filter { pkg ->
-                pkg in state.allowedPackages || pkg in INITIAL_ALLOWED_PACKAGES || isInstalledFromPlayStore(ctx, pkg)
+                pkg in state.allowedPackages || isInstalledFromPlayStore(ctx, pkg)
             }
             val merged = state.allowedPackages + newlyAllowed
             if (merged != state.allowedPackages) {
@@ -797,8 +796,9 @@ object GuardianEngine {
             val pm = ctx.packageManager
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 val info = pm.getInstallSourceInfo(pkg)
-                info.installingPackageName == "com.android.vending" ||
-                    info.initiatingPackageName == "com.android.vending"
+                info.initiatingPackageName != "com.android.shell" &&
+                    (info.installingPackageName == "com.android.vending" ||
+                        info.initiatingPackageName == "com.android.vending")
             } else {
                 @Suppress("DEPRECATION")
                 pm.getInstallerPackageName(pkg) == "com.android.vending"
@@ -948,6 +948,13 @@ object GuardianEngine {
         synchronized(lock) {
             val cleanHost = host?.trim()?.takeIf { it.isNotEmpty() }
             val state = getState(ctx)
+            if (!state.privateDnsHost.isNullOrBlank() && cleanHost != state.privateDnsHost) {
+                val isProtected = state.quarantineDelayHours > 0 || DelayManager.getCurrentEffectiveDelaySeconds(ctx) > 0
+                if (isProtected) {
+                    Log.w(TAG, "Constitutional Guard: Rejected modification/clearing of Private DNS (${state.privateDnsHost} -> $cleanHost) while protection delay is active")
+                    return false
+                }
+            }
             saveStateInternal(ctx, state.copy(privateDnsHost = cleanHost))
             return applyPrivateDnsInternal(ctx, cleanHost)
         }
@@ -1119,7 +1126,7 @@ object GuardianEngine {
                 }
 
                 // Check daily usage quota (calculated from 02:00 AM logical day start)
-                val maxSec = if (limit.maxSecondsPerDay > 0) limit.maxSecondsPerDay else limit.maxMinutesPerDay * 60
+                val maxSec = limit.maxSecondsPerDay.coerceAtLeast(0)
                 if (maxSec == 0) {
                     // Quota 0 min/sec = completely blocked 24/7
                     newlyBlocked.add(pkg)

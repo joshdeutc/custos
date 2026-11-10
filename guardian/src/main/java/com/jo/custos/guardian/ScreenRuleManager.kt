@@ -706,14 +706,10 @@ object ScreenRuleManager {
                 val candEffDelay = candRule.protectionDelaySec ?: globalSec
                 val safeProtectionDelay = if (candEffDelay >= oldEffDelay) candRule.protectionDelaySec else oldRule.protectionDelaySec
                 val safeBlockedIds = (oldRule.blockedIds + candRule.blockedIds).distinct()
-                val safePackage = oldRule.packageName
-                val safeBlockedHours = if (oldRule.blockedHours == null) null else (candRule.blockedHours ?: oldRule.blockedHours)
 
-                finalRulesMap[oldRule.name] = candRule.copy(
-                    packageName = safePackage,
+                finalRulesMap[oldRule.name] = oldRule.copy(
                     blockedIds = safeBlockedIds,
-                    protectionDelaySec = safeProtectionDelay,
-                    blockedHours = safeBlockedHours
+                    protectionDelaySec = safeProtectionDelay
                 )
             }
         }
@@ -745,8 +741,11 @@ object ScreenRuleManager {
             candTimers.map { candTimer ->
                 val oldRule = oldRules.firstOrNull { it.name == candTimer.name }
                 val oldTimer = oldTimers.firstOrNull { it.name == candTimer.name }
+                val candTargetEff = candTimer.targetDelaySec ?: globalSec
+                val oldTargetEff = oldTimer?.targetDelaySec ?: globalSec
+                val canReuseOldTimer = oldTimer != null && candTargetEff >= oldTargetEff
                 val minExecAt = when {
-                    oldTimer != null -> oldTimer.executeAt
+                    canReuseOldTimer -> oldTimer!!.executeAt
                     oldRule != null -> {
                         val effectiveCurrent = oldRule.protectionDelaySec ?: globalSec
                         val waitSec = max(effectiveCurrent, globalSec)

@@ -301,6 +301,20 @@ class ConfigManager {
             return nowMinutes >= start || nowMinutes < effectiveEnd
         }
 
+        private fun isAllowedScheduleRelaxed(oldLimit: AppLimit, newLimit: AppLimit): Boolean {
+            if ((newLimit.allowedDays.toSet() - oldLimit.allowedDays.toSet()).isNotEmpty()) {
+                return true
+            }
+            if (oldLimit.allDay) return false
+            if (newLimit.allDay) return true
+            for (m in 0 until 1440) {
+                val wasAllowed = isInAllowedWindow(m, oldLimit.allowedHoursStart, oldLimit.allowedHoursEnd)
+                val nowAllowed = isInAllowedWindow(m, newLimit.allowedHoursStart, newLimit.allowedHoursEnd)
+                if (nowAllowed && !wasAllowed) return true
+            }
+            return false
+        }
+
         /**
          * Calculates the defer requirement specifically for a single app limit.
          */
@@ -321,6 +335,9 @@ class ConfigManager {
             } else {
                 if (newLimit.maxSecondsPerDay > oldLimit.maxSecondsPerDay) {
                     add(oldLimit.protectionDelaySec, "Quota raised: ${oldLimit.packageName}")
+                }
+                if (isAllowedScheduleRelaxed(oldLimit, newLimit)) {
+                    add(oldLimit.protectionDelaySec, "Allowed schedule relaxed: ${oldLimit.packageName}")
                 }
                 if (isSessionRelaxation(oldLimit.session, newLimit.session)) {
                     add(oldLimit.protectionDelaySec, "Session relaxed: ${oldLimit.packageName}")
@@ -369,6 +386,9 @@ class ConfigManager {
                 }
                 if (newLimit.maxSecondsPerDay > oldLimit.maxSecondsPerDay) {
                     add(oldLimit.protectionDelaySec, "Quota raised: $pkg")
+                }
+                if (isAllowedScheduleRelaxed(oldLimit, newLimit)) {
+                    add(oldLimit.protectionDelaySec, "Allowed schedule relaxed: $pkg")
                 }
                 if (isSessionRelaxation(oldLimit.session, newLimit.session)) {
                     add(oldLimit.protectionDelaySec, "Session relaxed: $pkg")
@@ -479,12 +499,13 @@ class ConfigManager {
 
         fun parseAppLimit(obj: JSONObject): AppLimit {
             val pkg = obj.getString("package")
-            val maxMin = obj.optInt("max_minutes_per_day", 0)
-            val maxSec = if (obj.has("max_seconds_per_day")) {
+            val rawMin = obj.optInt("max_minutes_per_day", 0).coerceAtLeast(0)
+            val maxSec = (if (obj.has("max_seconds_per_day")) {
                 obj.getInt("max_seconds_per_day")
             } else {
-                maxMin * 60
-            }
+                rawMin * 60
+            }).coerceAtLeast(0)
+            val maxMin = maxSec / 60
 
             // Parse allowed_days
             val allowedDays = when (val days = obj.opt("allowed_days")) {
