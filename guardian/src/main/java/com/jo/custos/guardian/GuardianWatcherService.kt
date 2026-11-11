@@ -150,10 +150,39 @@ class GuardianWatcherService : AccessibilityService() {
     // F1/F3 remediation — Layer 1: the enforcement loop also runs here, in the immortal
     // accessibility service (process :guardian, survives `pm clear` of Custos UI), so dynamic
     // enforcement no longer depends on the UI binding GuardianService.
+    private var guardianServiceBound = false
+    private val selfServiceConnection = object : android.content.ServiceConnection {
+        override fun onServiceConnected(name: android.content.ComponentName?, service: android.os.IBinder?) {
+            guardianServiceBound = true
+        }
+        override fun onServiceDisconnected(name: android.content.ComponentName?) {
+            guardianServiceBound = false
+        }
+    }
+
+    private fun ensureGuardianServiceAlive() {
+        runCatching {
+            val intent = Intent(applicationContext, GuardianService::class.java)
+            applicationContext.startService(intent)
+            if (!guardianServiceBound) {
+                guardianServiceBound = applicationContext.bindService(
+                    intent,
+                    selfServiceConnection,
+                    Context.BIND_AUTO_CREATE
+                )
+            }
+        }
+    }
+
     private val heartbeatHandler = Handler(Looper.getMainLooper())
     private val heartbeatRunnable = object : Runnable {
         override fun run() {
             try {
+                val pm = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+                if (pm?.isInteractive == false) {
+                    FallbackUsageTracker.onScreenOff(applicationContext, System.currentTimeMillis())
+                }
+                ensureGuardianServiceAlive()
                 GuardianEngine.evaluateLimits(applicationContext)
                 DelayManager.applyPendingDelayIfReady(applicationContext)
                 DelayManager.applyPendingConfigsIfReady(applicationContext)
@@ -186,7 +215,8 @@ class GuardianWatcherService : AccessibilityService() {
         } catch (e: Exception) {
             Log.w(TAG, "Failed to update serviceInfo flags: ${e.message}")
         }
-        // Start the independent enforcement loop + arm the alarm backstop (F1/F3).
+        // Start the independent enforcement loop + self-bind GuardianService + arm the alarm backstop (F1/F3).
+        ensureGuardianServiceAlive()
         heartbeatHandler.removeCallbacks(heartbeatRunnable)
         heartbeatHandler.post(heartbeatRunnable)
         runCatching { GuardianEngine.scheduleHeartbeat(applicationContext) }
@@ -199,7 +229,7 @@ class GuardianWatcherService : AccessibilityService() {
         applySessionOverlay(null)
         heartbeatHandler.removeCallbacks(heartbeatRunnable)
         // Best-effort self-heal if someone disabled the a11y service (e.g. via adb). The hard
-        // guarantee is the ACTION_HEARTBEAT alarm, which survives even a hard process kill.
+        // guarantee is GuardianService (still running via startService) + the ACTION_HEARTBEAT alarm.
         runCatching { GuardianEngine.ensureAccessibilityServicesEnabled(applicationContext) }
         runCatching { GuardianEngine.scheduleHeartbeat(applicationContext) }
         return super.onUnbind(intent)
@@ -211,6 +241,10 @@ class GuardianWatcherService : AccessibilityService() {
         if (instance === this) instance = null
         applySessionOverlay(null)
         heartbeatHandler.removeCallbacks(heartbeatRunnable)
+        if (guardianServiceBound) {
+            runCatching { applicationContext.unbindService(selfServiceConnection) }
+            guardianServiceBound = false
+        }
         runCatching { GuardianEngine.ensureAccessibilityServicesEnabled(applicationContext) }
         runCatching { GuardianEngine.scheduleHeartbeat(applicationContext) }
         Log.w(TAG, "GuardianWatcherService destroyed")
@@ -232,11 +266,11 @@ class GuardianWatcherService : AccessibilityService() {
             val pkg = event.packageName?.toString() ?: return
 
             if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-                // F4: feed the accessibility-driven usage tracker for EVERY foreground transition
-                // (including launcher/systemui) so a limited app's interval is closed when left.
-                // This keeps daily quotas working even if `get_usage_stats` is revoked via adb.
-                FallbackUsageTracker.onForeground(applicationContext, pkg, System.currentTimeMillis())
                 if (!pkg.startsWith("com.android.systemui") && pkg != imePackage && pkg != "com.jo.custos.guardian") {
+                    // F4: feed the accessibility-driven usage tracker for real foreground app transitions
+                    // (including launcher, which closes any limited app's interval when going home, while
+                    // ignoring keyboard/IME, SystemUI, and Guardian overlay popups).
+                    FallbackUsageTracker.onForeground(applicationContext, pkg, System.currentTimeMillis())
                     if (pkg != currentForegroundApp) {
                         currentForegroundApp = pkg
                         applySessionOverlay(null)

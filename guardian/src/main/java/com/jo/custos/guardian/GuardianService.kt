@@ -31,14 +31,48 @@ class GuardianService : Service() {
     }
 
     private var packageReceiver: android.content.BroadcastReceiver? = null
+    private var a11yObserver: android.database.ContentObserver? = null
 
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "GuardianService created")
         GuardianEngine.init(this)
         GuardianEngine.enforceLockdown(this)
+        GuardianEngine.scheduleHeartbeat(this)
         registerPackageReceiver()
+        registerA11yObserver()
+        loopHandler.removeCallbacks(loopRunnable)
         loopHandler.post(loopRunnable)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Keep GuardianService alive as a sticky started service independent of Custos UI binding (F1/F3).
+        return START_STICKY
+    }
+
+    private fun registerA11yObserver() {
+        if (a11yObserver != null) return
+        val observer = object : android.database.ContentObserver(loopHandler) {
+            override fun onChange(selfChange: Boolean) {
+                // Instant self-heal (<10ms) if an attacker attempts `settings put secure enabled_accessibility_services ...` via adb (F3).
+                GuardianEngine.ensureAccessibilityServicesEnabled(applicationContext)
+            }
+        }
+        try {
+            contentResolver.registerContentObserver(
+                android.provider.Settings.Secure.getUriFor(android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES),
+                false,
+                observer
+            )
+            contentResolver.registerContentObserver(
+                android.provider.Settings.Secure.getUriFor(android.provider.Settings.Secure.ACCESSIBILITY_ENABLED),
+                false,
+                observer
+            )
+            a11yObserver = observer
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register accessibility ContentObserver: ${e.message}")
+        }
     }
 
     private fun registerPackageReceiver() {
@@ -74,11 +108,17 @@ class GuardianService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        a11yObserver?.let {
+            try { contentResolver.unregisterContentObserver(it) } catch (_: Exception) {}
+            a11yObserver = null
+        }
         packageReceiver?.let {
             try { unregisterReceiver(it) } catch (_: Exception) {}
             packageReceiver = null
         }
         loopHandler.removeCallbacks(loopRunnable)
+        runCatching { GuardianEngine.ensureAccessibilityServicesEnabled(applicationContext) }
+        runCatching { GuardianEngine.scheduleHeartbeat(applicationContext) }
         Log.w(TAG, "GuardianService destroyed")
     }
 

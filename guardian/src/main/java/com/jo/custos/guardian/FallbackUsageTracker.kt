@@ -95,6 +95,44 @@ object FallbackUsageTracker {
         }
     }
 
+    /** Closes any active foreground interval when the device screen is turned off. */
+    fun onScreenOff(ctx: Context, nowMs: Long) {
+        synchronized(lock) {
+            if (currentPkg == null) return
+            ensureLoaded(ctx)
+            rollDayIfNeeded()
+            flushCurrent(nowMs)
+            currentPkg = null
+            currentSinceMs = 0L
+            persist(ctx)
+            lastPersistMs = nowMs
+        }
+    }
+
+    /**
+     * Synchronizes the closed-intervals floor with UsageStatsManager when UsageStats is healthy
+     * and reports higher closed usage (e.g. after a reboot or before an appops sabotage).
+     * Since UsageQuery only sums closed [ACTIVITY_RESUMED -> ACTIVITY_PAUSED] intervals and
+     * [usageMs] also only stores closed intervals, comparing them directly never double-counts
+     * the currently open foreground interval.
+     */
+    fun syncFloorFromUsageStats(ctx: Context, pkg: String, statsClosedSeconds: Int, nowMs: Long) {
+        if (statsClosedSeconds <= 0) return
+        synchronized(lock) {
+            ensureLoaded(ctx)
+            rollDayIfNeeded()
+            val statsMs = statsClosedSeconds * 1000L
+            val closedMs = usageMs[pkg] ?: 0L
+            if (statsMs > closedMs) {
+                usageMs[pkg] = statsMs
+                if (nowMs - lastPersistMs > PERSIST_INTERVAL_MS) {
+                    persist(ctx)
+                    lastPersistMs = nowMs
+                }
+            }
+        }
+    }
+
     /** Foreground seconds counted for [pkg] during the current logical day, including the live interval. */
     fun secondsFor(ctx: Context, pkg: String, nowMs: Long): Int {
         synchronized(lock) {

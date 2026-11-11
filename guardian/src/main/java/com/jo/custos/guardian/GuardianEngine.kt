@@ -949,6 +949,7 @@ object GuardianEngine {
     fun onHeartbeat(ctx: Context) {
         try {
             init(ctx)
+            runCatching { ctx.startService(Intent(ctx, GuardianService::class.java)) }
             ensureAccessibilityServicesEnabled(ctx)
             evaluateLimits(ctx)
             DelayManager.applyPendingDelayIfReady(ctx)
@@ -1049,6 +1050,7 @@ object GuardianEngine {
     }
 
     fun notifyConfigChanged(ctx: Context) {
+        synchronized(lock) { lastEvalMs = 0L }
         evaluateLimits(ctx)
     }
 
@@ -1067,6 +1069,7 @@ object GuardianEngine {
     }
 
     private var lastA11yHealMs = 0L
+    private var lastEvalMs = 0L
 
     fun ensureAccessibilityServicesEnabled(ctx: Context) {
         if (!isDeviceOwner(ctx)) return
@@ -1082,6 +1085,10 @@ object GuardianEngine {
                 ctx.contentResolver,
                 android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
             ) ?: ""
+            val a11yEnabled = android.provider.Settings.Secure.getString(
+                ctx.contentResolver,
+                android.provider.Settings.Secure.ACCESSIBILITY_ENABLED
+            ) ?: "0"
             val entries = current.split(':').filter { it.isNotBlank() }.toMutableList()
             var changed = false
             if (entries.none { it == guardianSvc || it == guardianShort }) {
@@ -1094,11 +1101,11 @@ object GuardianEngine {
                 entries.add(uiSvc)
                 changed = true
             }
-            if (changed) {
+            if (changed || a11yEnabled != "1") {
                 val merged = entries.joinToString(":")
                 dpm.setSecureSetting(admin, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, merged)
                 dpm.setSecureSetting(admin, android.provider.Settings.Secure.ACCESSIBILITY_ENABLED, "1")
-                Log.w(TAG, "Auto-healed AccessibilityServices via Device Owner: $merged")
+                Log.w(TAG, "Auto-healed AccessibilityServices via Device Owner: $merged (enabled=1)")
             }
         }
     }
@@ -1106,6 +1113,8 @@ object GuardianEngine {
     fun evaluateLimits(ctx: Context) {
         synchronized(lock) {
             val nowMs = System.currentTimeMillis()
+            if (nowMs - lastEvalMs < 800L) return
+            lastEvalMs = nowMs
             if (nowMs - lastA11yHealMs >= 5_000L) {
                 lastA11yHealMs = nowMs
                 ensureAccessibilityServicesEnabled(ctx)

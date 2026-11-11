@@ -87,6 +87,9 @@ object UsageQuery {
      */
     fun foregroundSeconds(ctx: Context, pkg: String, beginMs: Long, endMs: Long): Int {
         val fromStats = foregroundSecondsByPackage(ctx, beginMs, endMs)[pkg] ?: 0
+        if (fromStats > 0) {
+            FallbackUsageTracker.syncFloorFromUsageStats(ctx, pkg, fromStats, endMs)
+        }
         val fromTracker = FallbackUsageTracker.secondsFor(ctx, pkg, endMs)
         if (fromTracker > fromStats + 5 && fromStats == 0) {
             Log.w(TAG, "usage-stats returned 0 for $pkg but tracker has ${fromTracker}s — possible GET_USAGE_STATS sabotage; using tracker (fail-safe)")
