@@ -23,6 +23,8 @@ object GuardianEngine {
     private const val DEFAULT_DELAY_HOURS = 0
     const val DEFAULT_PRIVATE_DNS = "b91912.dns.nextdns.io"
     const val ACTION_CHECK_EXPIRATION = "com.jo.custos.guardian.ACTION_CHECK_EXPIRATION"
+    const val ACTION_HEARTBEAT = "com.jo.custos.guardian.ACTION_GUARDIAN_HEARTBEAT"
+    private const val HEARTBEAT_INTERVAL_MS = 60_000L
 
     val INITIAL_ALLOWED_PACKAGES = setOf(
         "com.jo.lycee",
@@ -911,6 +913,52 @@ object GuardianEngine {
             Log.i(TAG, "Scheduled Guardian expiration alarm for ${java.util.Date(targetTime)}")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to schedule Guardian alarm", e)
+        }
+    }
+
+    /**
+     * Self-rescheduling heartbeat alarm. This is the backstop that keeps Guardian's
+     * dynamic enforcement alive even when BOTH the Custos UI has been cleared (killing
+     * GuardianService) AND the accessibility service has been disabled via adb (killing
+     * GuardianWatcherService + its 1s heartbeat). The alarm wakes the :guardian process,
+     * re-enables the accessibility service (which restarts the fast loop) and re-evaluates
+     * limits. See the F1/F3 remediation in docs/GUARDIAN_SECURITY_PENTEST.md.
+     */
+    fun scheduleHeartbeat(ctx: Context) {
+        try {
+            val am = ctx.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+            val intent = Intent(ACTION_HEARTBEAT).setPackage(ctx.packageName)
+            val pi = PendingIntent.getBroadcast(
+                ctx,
+                9992,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val next = System.currentTimeMillis() + HEARTBEAT_INTERVAL_MS
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi)
+            } else {
+                am.setExact(AlarmManager.RTC_WAKEUP, next, pi)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to schedule Guardian heartbeat: ${e.message}")
+        }
+    }
+
+    /** Invoked by the ACTION_HEARTBEAT alarm. Heals accessibility, re-evaluates, reschedules. */
+    fun onHeartbeat(ctx: Context) {
+        try {
+            init(ctx)
+            ensureAccessibilityServicesEnabled(ctx)
+            evaluateLimits(ctx)
+            DelayManager.applyPendingDelayIfReady(ctx)
+            DelayManager.applyPendingConfigsIfReady(ctx)
+            ScreenRuleManager.applyPendingRemovalsIfReady(ctx)
+        } catch (e: Exception) {
+            Log.e(TAG, "Guardian heartbeat error: ${e.message}")
+        } finally {
+            // Always reschedule so the heartbeat can never die permanently.
+            scheduleHeartbeat(ctx)
         }
     }
 

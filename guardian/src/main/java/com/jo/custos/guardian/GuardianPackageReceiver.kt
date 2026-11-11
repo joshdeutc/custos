@@ -32,11 +32,16 @@ class GuardianPackageReceiver : BroadcastReceiver() {
                 Log.i(TAG, "Boot completed -> Guardian enforcing lockdown")
                 GuardianEngine.init(context)
                 GuardianEngine.enforceLockdown(context)
+                GuardianEngine.scheduleHeartbeat(context)
             }
             GuardianEngine.ACTION_CHECK_EXPIRATION -> {
                 Log.i(TAG, "Guardian expiration alarm triggered -> Checking pending requests")
                 GuardianEngine.init(context)
                 GuardianEngine.checkAndPromotePendingRequests(context)
+            }
+            GuardianEngine.ACTION_HEARTBEAT -> {
+                // Backstop enforcement tick (F1/F3): survives UI clear + a11y kill + process death.
+                GuardianEngine.onHeartbeat(context)
             }
         }
     }

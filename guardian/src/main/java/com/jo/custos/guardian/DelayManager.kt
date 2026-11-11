@@ -523,17 +523,11 @@ object DelayManager {
         try {
             val wlState = GuardianEngine.getState(context)
             if (wlState.enabled) {
-                if (!false) {
-                    return false to "La Whitelist utilise un délai dédié (${wlState.quarantineDelayHours}h). Alignez-la sur le délai général."
-                }
-                if (wlState.pendingDelayExecuteAt > now) {
-                    val rem = ((wlState.pendingDelayExecuteAt - now) / 1000)
-                    return false to "Une modification du délai Whitelist est encore en attente (${formatDuration(rem)} restantes)."
-                }
-                if (wlState.pendingDisableExecuteAt > now) {
-                    val rem = ((wlState.pendingDisableExecuteAt - now) / 1000)
-                    return false to "Une désactivation de la Whitelist est en cours (${formatDuration(rem)} restantes)."
-                }
+                // Fail-closed (F7): tant que la Whitelist (Zero-Trust) est active, son délai de
+                // quarantaine dédié est considéré comme non-alignable sur le délai général, donc le
+                // déverrouillage Réglages/désinstallation est toujours refusé. Il faut d'abord
+                // désactiver la Whitelist (ce qui passe par son propre délai constitutionnel).
+                return false to "La Whitelist (Zero-Trust) est active : désactivez-la d'abord (délai constitutionnel) avant de pouvoir déverrouiller les Réglages."
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error checking Whitelist eligibility: ${e.message}")

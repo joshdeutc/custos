@@ -48,6 +48,7 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="com.jo.custos.guardian.ACTION_CHECK_EXPIRATION" />
+                <action android:name="com.jo.custos.guardian.ACTION_GUARDIAN_HEARTBEAT" />
             </intent-filter>
         </receiver>
 

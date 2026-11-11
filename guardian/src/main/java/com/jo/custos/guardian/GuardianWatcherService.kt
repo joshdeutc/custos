@@ -147,6 +147,24 @@ class GuardianWatcherService : AccessibilityService() {
     private var lastInstagramBackTime = 0L
     private var lastInstagramScanTime = 0L
 
+    // F1/F3 remediation — Layer 1: the enforcement loop also runs here, in the immortal
+    // accessibility service (process :guardian, survives `pm clear` of Custos UI), so dynamic
+    // enforcement no longer depends on the UI binding GuardianService.
+    private val heartbeatHandler = Handler(Looper.getMainLooper())
+    private val heartbeatRunnable = object : Runnable {
+        override fun run() {
+            try {
+                GuardianEngine.evaluateLimits(applicationContext)
+                DelayManager.applyPendingDelayIfReady(applicationContext)
+                DelayManager.applyPendingConfigsIfReady(applicationContext)
+                ScreenRuleManager.applyPendingRemovalsIfReady(applicationContext)
+            } catch (t: Throwable) {
+                Log.e(TAG, "Watcher heartbeat error: ${t.message}")
+            }
+            heartbeatHandler.postDelayed(this, 1000L)
+        }
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         isBound = true
@@ -168,6 +186,10 @@ class GuardianWatcherService : AccessibilityService() {
         } catch (e: Exception) {
             Log.w(TAG, "Failed to update serviceInfo flags: ${e.message}")
         }
+        // Start the independent enforcement loop + arm the alarm backstop (F1/F3).
+        heartbeatHandler.removeCallbacks(heartbeatRunnable)
+        heartbeatHandler.post(heartbeatRunnable)
+        runCatching { GuardianEngine.scheduleHeartbeat(applicationContext) }
         Log.i(TAG, "GuardianWatcherService connected and active (ime=$imePackage)")
     }
 
@@ -175,6 +197,11 @@ class GuardianWatcherService : AccessibilityService() {
         isBound = false
         if (instance === this) instance = null
         applySessionOverlay(null)
+        heartbeatHandler.removeCallbacks(heartbeatRunnable)
+        // Best-effort self-heal if someone disabled the a11y service (e.g. via adb). The hard
+        // guarantee is the ACTION_HEARTBEAT alarm, which survives even a hard process kill.
+        runCatching { GuardianEngine.ensureAccessibilityServicesEnabled(applicationContext) }
+        runCatching { GuardianEngine.scheduleHeartbeat(applicationContext) }
         return super.onUnbind(intent)
     }
 
@@ -183,6 +210,9 @@ class GuardianWatcherService : AccessibilityService() {
         isBound = false
         if (instance === this) instance = null
         applySessionOverlay(null)
+        heartbeatHandler.removeCallbacks(heartbeatRunnable)
+        runCatching { GuardianEngine.ensureAccessibilityServicesEnabled(applicationContext) }
+        runCatching { GuardianEngine.scheduleHeartbeat(applicationContext) }
         Log.w(TAG, "GuardianWatcherService destroyed")
     }
 

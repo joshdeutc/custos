@@ -12,6 +12,7 @@ class GuardianAdminReceiver : DeviceAdminReceiver() {
         Log.i(TAG, "Guardian Device Admin enabled")
         GuardianEngine.init(context)
         GuardianEngine.enforceLockdown(context)
+        GuardianEngine.scheduleHeartbeat(context)
     }
 
     override fun onProfileProvisioningComplete(context: Context, intent: Intent) {
