@@ -3,6 +3,8 @@ package com.jo.custos.guardian
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -84,9 +86,39 @@ class GuardianService : Service() {
         val uid = Binder.getCallingUid()
         if (uid == Process.myUid()) return
         val packages = packageManager.getPackagesForUid(uid)
-        if (packages == null || "com.jo.selfcontrol.ultimate" !in packages) {
+        if (packages == null || CLIENT_UI_PACKAGE !in packages) {
             Log.e(TAG, "Unauthorized AIDL call from UID $uid (${packages?.joinToString()})")
             throw SecurityException("Access denied: UID $uid is not authorized to communicate with GuardianService")
+        }
+        // F6 (defense in depth): once the signing-certificate allowlist is configured, also verify
+        // the caller's certificate so a same-named impostor cannot reach Guardian. While the
+        // allowlist is empty, the package-name check above remains the sole gate (behaviour unchanged).
+        if (AUTHORIZED_UI_CERT_SHA256.isNotEmpty()) {
+            val callerCert = signingCertSha256(CLIENT_UI_PACKAGE)
+            if (callerCert == null || callerCert !in AUTHORIZED_UI_CERT_SHA256) {
+                Log.e(TAG, "Rejected AIDL call: $CLIENT_UI_PACKAGE cert $callerCert not in allowlist")
+                throw SecurityException("Access denied: caller signing certificate is not trusted")
+            }
+        }
+    }
+
+    private fun signingCertSha256(pkg: String): String? {
+        return try {
+            val pm = packageManager
+            val signers: Array<android.content.pm.Signature>? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val info = pm.getPackageInfo(pkg, PackageManager.GET_SIGNING_CERTIFICATES)
+                info.signingInfo?.apkContentsSigners
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(pkg, PackageManager.GET_SIGNATURES).signatures
+            }
+            val cert = signers?.firstOrNull() ?: return null
+            java.security.MessageDigest.getInstance("SHA-256")
+                .digest(cert.toByteArray())
+                .joinToString(":") { "%02X".format(it) }
+        } catch (e: Exception) {
+            Log.e(TAG, "signingCertSha256 failed for $pkg: ${e.message}")
+            null
         }
     }
 
@@ -407,5 +439,13 @@ class GuardianService : Service() {
 
     companion object {
         private const val TAG = "Custos.Guardian.Service"
+        private const val CLIENT_UI_PACKAGE = "com.jo.selfcontrol.ultimate"
+
+        // F6 — TODO(custos): renseigner les 2 empreintes SHA-256 du certificat de signature de
+        // com.jo.selfcontrol.ultimate (Release officielle + Debug developpeur), au format
+        // "AA:BB:CC:...:FF". Tant que cette liste est VIDE, l'authentification AIDL reste par
+        // nom de package seulement (comportement inchange). Une fois remplie, le certificat de
+        // l'appelant doit en faire partie, ce qui bloque un impostor homonyme.
+        private val AUTHORIZED_UI_CERT_SHA256 = emptySet<String>()
     }
 }
