@@ -935,10 +935,18 @@ object GuardianEngine {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             val next = System.currentTimeMillis() + HEARTBEAT_INTERVAL_MS
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi)
-            } else {
-                am.setExact(AlarmManager.RTC_WAKEUP, next, pi)
+            // v1.21: re-test 7.6 showed setExactAndAllowWhileIdle threw SecurityException
+            // (missing exact-alarm permission) -> 0 alarm armed. Now: exact if allowed
+            // (USE_EXACT_ALARM), otherwise inexact while-idle (no permission needed).
+            val canExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || am.canScheduleExactAlarms()
+            try {
+                if (canExact) {
+                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi)
+                } else {
+                    am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi)
+                }
+            } catch (se: SecurityException) {
+                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to schedule Guardian heartbeat: ${e.message}")
@@ -949,8 +957,17 @@ object GuardianEngine {
     fun onHeartbeat(ctx: Context) {
         try {
             init(ctx)
-            runCatching { ctx.startService(Intent(ctx, GuardianService::class.java)) }
             ensureAccessibilityServicesEnabled(ctx)
+            // v1.21: if a11y is still down the service may have been idle-killed; resurrect it
+            // as a foreground service (it promotes itself in onStartCommand within the 5s limit).
+            runCatching {
+                val svc = Intent(ctx, GuardianService::class.java)
+                if (!isAccessibilityHealthy(ctx) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    ctx.startForegroundService(svc.putExtra(GuardianService.EXTRA_FG, true))
+                } else {
+                    ctx.startService(svc)
+                }
+            }.onFailure { Log.e(TAG, "Heartbeat could not (re)start GuardianService: ${it.message}") }
             evaluateLimits(ctx)
             DelayManager.applyPendingDelayIfReady(ctx)
             DelayManager.applyPendingConfigsIfReady(ctx)
@@ -1071,6 +1088,49 @@ object GuardianEngine {
     private var lastA11yHealMs = 0L
     private var lastEvalMs = 0L
 
+    // v1.21 fail-closed: timestamp at which Guardian's a11y service was first seen missing (0 = healthy).
+    @Volatile private var a11yDownSinceMs = 0L
+    private const val A11Y_FAIL_CLOSED_GRACE_MS = 10_000L
+
+    /** True when GuardianWatcherService is listed in enabled_accessibility_services AND a11y is on. */
+    fun isAccessibilityHealthy(ctx: Context): Boolean {
+        return try {
+            val list = android.provider.Settings.Secure.getString(
+                ctx.contentResolver,
+                android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            ) ?: ""
+            val on = android.provider.Settings.Secure.getString(
+                ctx.contentResolver,
+                android.provider.Settings.Secure.ACCESSIBILITY_ENABLED
+            ) ?: "0"
+            on == "1" && list.split(':').any {
+                it == "com.jo.custos.guardian/com.jo.custos.guardian.GuardianWatcherService" ||
+                    it == "com.jo.custos.guardian/.GuardianWatcherService"
+            }
+        } catch (e: Exception) {
+            true // never fail-close on a read error
+        }
+    }
+
+    /**
+     * True when accessibility has been down for longer than the grace period despite
+     * self-heal attempts. While true, every package with a user-configured limit/curfew is
+     * suspended through Device Owner APIs (which do not depend on accessibility).
+     */
+    fun isFailClosedActive(ctx: Context): Boolean {
+        val now = System.currentTimeMillis()
+        if (isAccessibilityHealthy(ctx)) {
+            if (a11yDownSinceMs != 0L) Log.i(TAG, "Accessibility back -> leaving fail-closed mode")
+            a11yDownSinceMs = 0L
+            return false
+        }
+        if (a11yDownSinceMs == 0L) {
+            a11yDownSinceMs = now
+            Log.w(TAG, "Accessibility missing -> grace period started")
+        }
+        return now - a11yDownSinceMs >= A11Y_FAIL_CLOSED_GRACE_MS
+    }
+
     fun ensureAccessibilityServicesEnabled(ctx: Context) {
         if (!isDeviceOwner(ctx)) return
         val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
@@ -1103,9 +1163,33 @@ object GuardianEngine {
             }
             if (changed || a11yEnabled != "1") {
                 val merged = entries.joinToString(":")
-                dpm.setSecureSetting(admin, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, merged)
-                dpm.setSecureSetting(admin, android.provider.Settings.Secure.ACCESSIBILITY_ENABLED, "1")
-                Log.w(TAG, "Auto-healed AccessibilityServices via Device Owner: $merged (enabled=1)")
+                // v1.21 (re-test 7.6): dpm.setSecureSetting() rejects a11y keys (not in the
+                // Device Owner allowlist) -> SecurityException silently swallowed, heal never
+                // happened. Primary path is now Settings.Secure.putString (WRITE_SECURE_SETTINGS,
+                // granted via `pm grant`); dpm path kept as a best-effort fallback.
+                val wrote = runCatching {
+                    android.provider.Settings.Secure.putString(
+                        ctx.contentResolver,
+                        android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+                        merged
+                    )
+                    android.provider.Settings.Secure.putString(
+                        ctx.contentResolver,
+                        android.provider.Settings.Secure.ACCESSIBILITY_ENABLED,
+                        "1"
+                    )
+                }.isSuccess
+                if (!wrote) {
+                    runCatching {
+                        dpm.setSecureSetting(admin, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, merged)
+                        dpm.setSecureSetting(admin, android.provider.Settings.Secure.ACCESSIBILITY_ENABLED, "1")
+                    }
+                }
+                if (isAccessibilityHealthy(ctx)) {
+                    Log.w(TAG, "Auto-healed AccessibilityServices: $merged (enabled=1)")
+                } else {
+                    Log.e(TAG, "A11y self-heal FAILED (WRITE_SECURE_SETTINGS missing/revoked?) -> fail-closed will engage")
+                }
             }
         }
     }
@@ -1223,6 +1307,22 @@ object GuardianEngine {
             }
 
             GuardianWatcherService.updateSessionOverlay(activeOverlayText)
+
+            // v1.21 fail-closed (F3/F4): if accessibility stays down past the grace period
+            // (sabotage via adb and self-heal impossible), the real-time layer and the fallback
+            // usage tracker are blind. Suspend every package the user put under a limit or curfew
+            // until accessibility is back. isGuarded() (checked again in
+            // setPackageSuspendedInternal) guarantees no system app / launcher / IME / Custos is
+            // ever touched (AGENTS.md rule 6, anti-bootloop).
+            if (isFailClosedActive(ctx)) {
+                val failClosedPkgs = (config.limits.map { it.packageName } +
+                    config.periodBlocks.flatMap { it.packages })
+                    .filter { !isGuarded(ctx, it) }
+                if (failClosedPkgs.any { it !in newlyBlocked }) {
+                    Log.w(TAG, "FAIL-CLOSED: accessibility down -> suspending ${failClosedPkgs.size} limited package(s)")
+                }
+                newlyBlocked.addAll(failClosedPkgs)
+            }
 
             // Apply newly blocked / unblocked transitions
             val toBlock = newlyBlocked - activeBlockedApps

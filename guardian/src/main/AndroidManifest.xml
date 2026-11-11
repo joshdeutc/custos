@@ -10,6 +10,15 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <uses-permission android:name="android.permission.DELETE_PACKAGES" tools:ignore="ProtectedPermissions" />
+    <!-- F3 (v1.21): real accessibility self-heal. dpm.setSecureSetting() refuses a11y keys;
+         Settings.Secure.putString() needs WRITE_SECURE_SETTINGS, granted once via
+         `adb shell pm grant com.jo.custos.guardian android.permission.WRITE_SECURE_SETTINGS`. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <!-- F3 (v1.21): heartbeat backstop alarm (was silently failing without these). -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+    <!-- F3 (v1.21): GuardianService promoted to foreground when a11y is down (avoids "app idle" kill). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:allowBackup="false"
@@ -56,7 +65,11 @@
         <!-- AIDL IPC Service for Custos UI communication -->
         <service
             android:name=".GuardianService"
-            android:exported="true">
+            android:exported="true"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Device Owner self-control enforcement watchdog (keeps quotas enforced if accessibility is disabled)" />
             <intent-filter>
                 <action android:name="com.jo.custos.guardian.ACTION_BIND_GUARDIAN" />
             </intent-filter>

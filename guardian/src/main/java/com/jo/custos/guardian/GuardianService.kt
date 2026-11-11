@@ -19,6 +19,7 @@ class GuardianService : Service() {
     private val loopRunnable = object : Runnable {
         override fun run() {
             try {
+                updateForegroundState()
                 GuardianEngine.evaluateLimits(applicationContext)
                 DelayManager.applyPendingDelayIfReady(applicationContext)
                 DelayManager.applyPendingConfigsIfReady(applicationContext)
@@ -27,6 +28,55 @@ class GuardianService : Service() {
                 Log.e(TAG, "Error in evaluation loop: ${e.message}")
             }
             loopHandler.postDelayed(this, 1000L)
+        }
+    }
+
+    // v1.21 (re-test 7.6, cause 3): once accessibility is gone, Android stops this started
+    // service after ~60s ("Stopping service due to app idle"). While a11y is down we promote
+    // to a foreground service (Device Owner apps are exempt from background FGS-start limits),
+    // and demote again as soon as a11y is back -> no extra notification in the normal case.
+    private var isForeground = false
+
+    private fun updateForegroundState(forcePromote: Boolean = false) {
+        val healthy = GuardianEngine.isAccessibilityHealthy(applicationContext)
+        if ((forcePromote || !healthy) && !isForeground) {
+            try {
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    nm.createNotificationChannel(
+                        android.app.NotificationChannel(
+                            FG_CHANNEL_ID,
+                            "Custos Guardian — Protection",
+                            android.app.NotificationManager.IMPORTANCE_LOW
+                        )
+                    )
+                }
+                val notif = android.app.Notification.Builder(this, FG_CHANNEL_ID)
+                    .setSmallIcon(android.R.drawable.ic_lock_lock)
+                    .setContentTitle("Guardian : accessibilité désactivée")
+                    .setContentText("Mode verrouillage actif : les apps limitées sont suspendues.")
+                    .setOngoing(true)
+                    .build()
+                if (Build.VERSION.SDK_INT >= 34) {
+                    startForeground(
+                        FG_NOTIFICATION_ID,
+                        notif,
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                    )
+                } else {
+                    startForeground(FG_NOTIFICATION_ID, notif)
+                }
+                isForeground = true
+                Log.w(TAG, "Accessibility down -> GuardianService promoted to foreground")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to promote GuardianService to foreground: ${e.message}")
+            }
+        } else if (healthy && isForeground) {
+            try {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } catch (_: Exception) {}
+            isForeground = false
+            Log.i(TAG, "Accessibility healthy -> GuardianService back to background")
         }
     }
 
@@ -47,6 +97,10 @@ class GuardianService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Keep GuardianService alive as a sticky started service independent of Custos UI binding (F1/F3).
+        // Promote immediately if a11y is down, or unconditionally when launched via
+        // startForegroundService (EXTRA_FG) to honour the 5s startForeground contract; the
+        // next loop tick demotes it again if a11y turns out to be healthy.
+        updateForegroundState(forcePromote = intent?.getBooleanExtra(EXTRA_FG, false) == true)
         return START_STICKY
     }
 
@@ -56,6 +110,7 @@ class GuardianService : Service() {
             override fun onChange(selfChange: Boolean) {
                 // Instant self-heal (<10ms) if an attacker attempts `settings put secure enabled_accessibility_services ...` via adb (F3).
                 GuardianEngine.ensureAccessibilityServicesEnabled(applicationContext)
+                updateForegroundState()
             }
         }
         try {
@@ -479,6 +534,9 @@ class GuardianService : Service() {
 
     companion object {
         private const val TAG = "Custos.Guardian.Service"
+        private const val FG_CHANNEL_ID = "guardian_failclosed"
+        private const val FG_NOTIFICATION_ID = 7341
+        const val EXTRA_FG = "com.jo.custos.guardian.EXTRA_FG"
         private const val CLIENT_UI_PACKAGE = "com.jo.selfcontrol.ultimate"
 
         // F6 — TODO(custos): renseigner les 2 empreintes SHA-256 du certificat de signature de
