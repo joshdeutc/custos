@@ -78,8 +78,19 @@ object UsageQuery {
             .filterValues { it > 0 }
     }
 
-    /** Convenience: foreground seconds for a single package. */
+    /**
+     * Convenience: foreground seconds for a single package.
+     *
+     * F4: returns max(UsageStatsManager, accessibility-driven FallbackUsageTracker) so daily
+     * quotas keep working even if `android:get_usage_stats` is revoked via adb (which makes
+     * queryEvents return nothing). The tracker counts from real foreground transitions.
+     */
     fun foregroundSeconds(ctx: Context, pkg: String, beginMs: Long, endMs: Long): Int {
-        return foregroundSecondsByPackage(ctx, beginMs, endMs)[pkg] ?: 0
+        val fromStats = foregroundSecondsByPackage(ctx, beginMs, endMs)[pkg] ?: 0
+        val fromTracker = FallbackUsageTracker.secondsFor(ctx, pkg, endMs)
+        if (fromTracker > fromStats + 5 && fromStats == 0) {
+            Log.w(TAG, "usage-stats returned 0 for $pkg but tracker has ${fromTracker}s — possible GET_USAGE_STATS sabotage; using tracker (fail-safe)")
+        }
+        return maxOf(fromStats, fromTracker)
     }
 }

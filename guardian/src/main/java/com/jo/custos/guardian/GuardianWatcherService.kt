@@ -232,6 +232,10 @@ class GuardianWatcherService : AccessibilityService() {
             val pkg = event.packageName?.toString() ?: return
 
             if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                // F4: feed the accessibility-driven usage tracker for EVERY foreground transition
+                // (including launcher/systemui) so a limited app's interval is closed when left.
+                // This keeps daily quotas working even if `get_usage_stats` is revoked via adb.
+                FallbackUsageTracker.onForeground(applicationContext, pkg, System.currentTimeMillis())
                 if (!pkg.startsWith("com.android.systemui") && pkg != imePackage && pkg != "com.jo.custos.guardian") {
                     if (pkg != currentForegroundApp) {
                         currentForegroundApp = pkg
