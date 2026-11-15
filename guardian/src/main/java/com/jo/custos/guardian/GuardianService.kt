@@ -31,14 +31,14 @@ class GuardianService : Service() {
         }
     }
 
-    // v1.21 (re-test 7.6, cause 3): once accessibility is gone, Android stops this started
-    // service after ~60s ("Stopping service due to app idle"). While a11y is down we promote
-    // to a foreground service (Device Owner apps are exempt from background FGS-start limits),
-    // and demote again as soon as a11y is back -> no extra notification in the normal case.
+    // v1.21/v1.22 (re-test 7.6, cause 3 + Carapace Complète): once accessibility or usage_stats
+    // is gone, Android stops this started service after ~60s ("Stopping service due to app idle").
+    // While protection is degraded we promote to a foreground service (Device Owner apps are
+    // exempt from background FGS-start limits), and demote again as soon as both are healthy.
     private var isForeground = false
 
     private fun updateForegroundState(forcePromote: Boolean = false) {
-        val healthy = GuardianEngine.isAccessibilityHealthy(applicationContext)
+        val healthy = GuardianEngine.isProtectionHealthy(applicationContext)
         if ((forcePromote || !healthy) && !isForeground) {
             try {
                 val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
@@ -53,8 +53,13 @@ class GuardianService : Service() {
                 }
                 val notif = android.app.Notification.Builder(this, FG_CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.ic_lock_lock)
-                    .setContentTitle("Guardian : accessibilité désactivée")
-                    .setContentText("Mode verrouillage actif : les apps limitées sont suspendues.")
+                    .setContentTitle("🛡️ Mode Carapace Actif (Sabotage détecté)")
+                    .setContentText("Apps, installations et ADB bloqués. Réactivez Accessibilité et Usage Stats de Guardian dans Paramètres.")
+                    .setStyle(
+                        android.app.Notification.BigTextStyle().bigText(
+                            "Mode Carapace Complète actif : toutes les applications tierces sont suspendues, l'installation d'apps et ADB sont désactivés. Réactivez l'Accessibilité et l'Accès aux données d'utilisation de Custos Guardian dans les Paramètres Android."
+                        )
+                    )
                     .setOngoing(true)
                     .build()
                 if (Build.VERSION.SDK_INT >= 34) {
@@ -67,7 +72,7 @@ class GuardianService : Service() {
                     startForeground(FG_NOTIFICATION_ID, notif)
                 }
                 isForeground = true
-                Log.w(TAG, "Accessibility down -> GuardianService promoted to foreground")
+                Log.w(TAG, "Protection degraded -> GuardianService promoted to foreground (Carapace)")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to promote GuardianService to foreground: ${e.message}")
             }
@@ -76,7 +81,7 @@ class GuardianService : Service() {
                 stopForeground(STOP_FOREGROUND_REMOVE)
             } catch (_: Exception) {}
             isForeground = false
-            Log.i(TAG, "Accessibility healthy -> GuardianService back to background")
+            Log.i(TAG, "Protection healthy -> GuardianService back to background")
         }
     }
 

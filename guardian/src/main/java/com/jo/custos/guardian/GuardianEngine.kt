@@ -722,6 +722,12 @@ object GuardianEngine {
                     dpm.setUninstallBlocked(admin, ctx.packageName, true)
                     dpm.setUninstallBlocked(admin, "com.jo.selfcontrol.ultimate", true)
                     dpm.clearUserRestriction(admin, UserManager.DISALLOW_FACTORY_RESET)
+                    runCatching { dpm.addUserRestriction(admin, UserManager.DISALLOW_SAFE_BOOT) }
+                    if (isProtectionHealthy(ctx)) {
+                        runCatching { dpm.clearUserRestriction(admin, UserManager.DISALLOW_DEBUGGING_FEATURES) }
+                        runCatching { dpm.clearUserRestriction(admin, UserManager.DISALLOW_INSTALL_APPS) }
+                        runCatching { dpm.clearUserRestriction(admin, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES) }
+                    }
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
                         runCatching { dpm.addUserRestriction(admin, UserManager.DISALLOW_CONFIG_DATE_TIME) }
                     }
@@ -958,11 +964,12 @@ object GuardianEngine {
         try {
             init(ctx)
             ensureAccessibilityServicesEnabled(ctx)
-            // v1.21: if a11y is still down the service may have been idle-killed; resurrect it
-            // as a foreground service (it promotes itself in onStartCommand within the 5s limit).
+            // v1.21/v1.22: if protection (a11y or usage_stats) is down, the service may have been
+            // idle-killed; resurrect it as a foreground service (it promotes itself in onStartCommand
+            // within the 5s limit).
             runCatching {
                 val svc = Intent(ctx, GuardianService::class.java)
-                if (!isAccessibilityHealthy(ctx) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (!isProtectionHealthy(ctx) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     ctx.startForegroundService(svc.putExtra(GuardianService.EXTRA_FG, true))
                 } else {
                     ctx.startService(svc)
@@ -982,6 +989,7 @@ object GuardianEngine {
 
     fun setPackageSuspendedInternal(ctx: Context, packageName: String, suspended: Boolean) {
         if (isGuarded(ctx, packageName) && suspended) return
+        if (!isPackageInstalled(ctx, packageName)) return
         val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
         val admin = getAdminComponent(ctx)
         try {
@@ -997,6 +1005,7 @@ object GuardianEngine {
 
     fun setPackageHiddenInternal(ctx: Context, packageName: String, hidden: Boolean) {
         if (isGuarded(ctx, packageName) && hidden) return
+        if (!isPackageInstalled(ctx, packageName)) return
         val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
         val admin = getAdminComponent(ctx)
         try {
@@ -1088,8 +1097,10 @@ object GuardianEngine {
     private var lastA11yHealMs = 0L
     private var lastEvalMs = 0L
 
-    // v1.21 fail-closed: timestamp at which Guardian's a11y service was first seen missing (0 = healthy).
+    // v1.21/v1.22 Carapace Complète (fail-closed): timestamp at which Guardian's protection
+    // (Accessibility or UsageStats) was first seen degraded (0 = healthy).
     @Volatile private var a11yDownSinceMs = 0L
+    @Volatile private var carapaceActive = false
     private const val A11Y_FAIL_CLOSED_GRACE_MS = 10_000L
 
     /** True when GuardianWatcherService is listed in enabled_accessibility_services AND a11y is on. */
@@ -1112,23 +1123,103 @@ object GuardianEngine {
         }
     }
 
+    /** True when Guardian holds MODE_ALLOWED for AppOpsManager.OPSTR_GET_USAGE_STATS (F4). */
+    fun isUsageStatsHealthy(ctx: Context): Boolean {
+        return try {
+            val appOps = ctx.getSystemService(Context.APP_OPS_SERVICE) as? android.app.AppOpsManager ?: return true
+            val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                appOps.unsafeCheckOpNoThrow(
+                    android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    android.os.Process.myUid(),
+                    ctx.packageName
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                appOps.checkOpNoThrow(
+                    android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    android.os.Process.myUid(),
+                    ctx.packageName
+                )
+            }
+            mode == android.app.AppOpsManager.MODE_ALLOWED
+        } catch (e: Exception) {
+            true
+        }
+    }
+
+    /** True when both Accessibility and UsageStats permissions are active and un-sabotaged. */
+    fun isProtectionHealthy(ctx: Context): Boolean =
+        isAccessibilityHealthy(ctx) && isUsageStatsHealthy(ctx)
+
     /**
-     * True when accessibility has been down for longer than the grace period despite
-     * self-heal attempts. While true, every package with a user-configured limit/curfew is
-     * suspended through Device Owner APIs (which do not depend on accessibility).
+     * Applies or lifts the v1.22 Carapace Complète OS-level restrictions:
+     * - DISALLOW_DEBUGGING_FEATURES (cuts ADB immediately and disables Developer Options debugging)
+     * - DISALLOW_INSTALL_APPS & DISALLOW_INSTALL_UNKNOWN_SOURCES (blocks any APK installation)
+     * - DISALLOW_SAFE_BOOT (blocks Safe Mode bypass)
+     * Never touches DISALLOW_FACTORY_RESET (AGENTS.md Rule 1).
+     */
+    private fun applyCarapaceRestrictions(ctx: Context, active: Boolean) {
+        if (!isDeviceOwner(ctx)) return
+        val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
+        val admin = getAdminComponent(ctx)
+        try {
+            if (active) {
+                dpm.addUserRestriction(admin, UserManager.DISALLOW_DEBUGGING_FEATURES)
+                dpm.addUserRestriction(admin, UserManager.DISALLOW_INSTALL_APPS)
+                dpm.addUserRestriction(admin, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+                dpm.addUserRestriction(admin, UserManager.DISALLOW_SAFE_BOOT)
+                Log.w(TAG, "🛡️ CARAPACE ENGAGED: ADB disabled (DISALLOW_DEBUGGING_FEATURES) + App installs blocked (DISALLOW_INSTALL_APPS)")
+            } else {
+                dpm.clearUserRestriction(admin, UserManager.DISALLOW_DEBUGGING_FEATURES)
+                dpm.clearUserRestriction(admin, UserManager.DISALLOW_INSTALL_APPS)
+                dpm.clearUserRestriction(admin, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+                // Re-enable global adb_enabled (cleared by OS when DISALLOW_DEBUGGING_FEATURES was set)
+                runCatching {
+                    android.provider.Settings.Global.putInt(
+                        ctx.contentResolver,
+                        android.provider.Settings.Global.ADB_ENABLED,
+                        1
+                    )
+                }
+                Log.i(TAG, "🛡️ CARAPACE LIFTED: ADB and app installation restrictions cleared")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to apply Carapace restrictions (active=$active): ${e.message}", e)
+        }
+    }
+
+    /**
+     * True when protection (Accessibility or UsageStats) has been down for longer than the 10s
+     * grace period despite self-heal attempts. While true, Carapace Complète engages:
+     * ADB is disabled, app installations are blocked, and ALL non-guarded third-party apps on the
+     * device are suspended via Device Owner APIs.
      */
     fun isFailClosedActive(ctx: Context): Boolean {
         val now = System.currentTimeMillis()
-        if (isAccessibilityHealthy(ctx)) {
-            if (a11yDownSinceMs != 0L) Log.i(TAG, "Accessibility back -> leaving fail-closed mode")
+        if (isProtectionHealthy(ctx)) {
+            if (a11yDownSinceMs != 0L || carapaceActive) {
+                Log.i(TAG, "Protection healthy (a11y + usage_stats) -> leaving Carapace mode")
+            }
             a11yDownSinceMs = 0L
+            if (carapaceActive) {
+                carapaceActive = false
+                applyCarapaceRestrictions(ctx, false)
+            }
             return false
         }
         if (a11yDownSinceMs == 0L) {
             a11yDownSinceMs = now
-            Log.w(TAG, "Accessibility missing -> grace period started")
+            Log.w(
+                TAG,
+                "Protection degraded (a11y=${isAccessibilityHealthy(ctx)}, usageStats=${isUsageStatsHealthy(ctx)}) -> 10s grace period started"
+            )
         }
-        return now - a11yDownSinceMs >= A11Y_FAIL_CLOSED_GRACE_MS
+        val active = now - a11yDownSinceMs >= A11Y_FAIL_CLOSED_GRACE_MS
+        if (active && !carapaceActive) {
+            carapaceActive = true
+            applyCarapaceRestrictions(ctx, true)
+        }
+        return active
     }
 
     fun ensureAccessibilityServicesEnabled(ctx: Context) {
@@ -1308,20 +1399,27 @@ object GuardianEngine {
 
             GuardianWatcherService.updateSessionOverlay(activeOverlayText)
 
-            // v1.21 fail-closed (F3/F4): if accessibility stays down past the grace period
-            // (sabotage via adb and self-heal impossible), the real-time layer and the fallback
-            // usage tracker are blind. Suspend every package the user put under a limit or curfew
-            // until accessibility is back. isGuarded() (checked again in
-            // setPackageSuspendedInternal) guarantees no system app / launcher / IME / Custos is
-            // ever touched (AGENTS.md rule 6, anti-bootloop).
+            // v1.22 Carapace Complète (F3/F4): if Accessibility or UsageStats stays down past the
+            // 10s grace period (sabotage via ADB/Settings and self-heal impossible), Guardian
+            // engages full lockdown: ADB is cut (DISALLOW_DEBUGGING_FEATURES), app installs are
+            // blocked (DISALLOW_INSTALL_APPS), and EVERY non-guarded installed third-party app on
+            // the phone is suspended until both Accessibility and UsageStats are restored.
+            // isGuarded() (checked again in setPackageSuspendedInternal) guarantees no system app,
+            // Settings, PermissionController, launcher, IME, or Custos is ever touched (Rule 6).
             if (isFailClosedActive(ctx)) {
-                val failClosedPkgs = (config.limits.map { it.packageName } +
-                    config.periodBlocks.flatMap { it.packages })
-                    .filter { !isGuarded(ctx, it) }
-                if (failClosedPkgs.any { it !in newlyBlocked }) {
-                    Log.w(TAG, "FAIL-CLOSED: accessibility down -> suspending ${failClosedPkgs.size} limited package(s)")
+                val allNonGuarded = try {
+                    ctx.packageManager.getInstalledPackages(0)
+                        .map { it.packageName }
+                        .filter { !isGuarded(ctx, it) }
+                } catch (e: Exception) {
+                    (config.limits.map { it.packageName } +
+                        config.periodBlocks.flatMap { it.packages })
+                        .filter { !isGuarded(ctx, it) }
                 }
-                newlyBlocked.addAll(failClosedPkgs)
+                if (allNonGuarded.any { it !in newlyBlocked }) {
+                    Log.w(TAG, "🛡️ CARAPACE ACTIVE: suspending ${allNonGuarded.size} non-guarded installed package(s)")
+                }
+                newlyBlocked.addAll(allNonGuarded)
             }
 
             // Apply newly blocked / unblocked transitions
@@ -1338,14 +1436,18 @@ object GuardianEngine {
                 if (pkg == currentApp) {
                     GuardianWatcherService.forceHomeIfBlocked()
                 }
-                Log.w(TAG, "Quota/Session/Curfew reached -> Blocked & Suspended: $pkg")
+                Log.w(TAG, "Quota/Session/Curfew/Carapace -> Blocked & Suspended: $pkg")
             }
 
+            val wlState = getState(ctx)
             for (pkg in toUnblock) {
                 activeBlockedApps.remove(pkg)
-                setPackageSuspendedInternal(ctx, pkg, false)
+                val keepSuspendedByWhitelist = wlState.enabled && pkg !in wlState.allowedPackages && !isGuarded(ctx, pkg)
+                if (!keepSuspendedByWhitelist) {
+                    setPackageSuspendedInternal(ctx, pkg, false)
+                }
                 BlockedNotificationManager.applyNotificationMute(ctx, pkg, false)
-                Log.i(TAG, "Quota/Session/Curfew lifted -> Unblocked & Unsuspended: $pkg")
+                Log.i(TAG, "Quota/Session/Curfew/Carapace lifted -> Unblocked: $pkg (whitelistQuarantined=$keepSuspendedByWhitelist)")
             }
         }
     }
