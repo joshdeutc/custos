@@ -56,34 +56,34 @@ export function HeroSection() {
             <div className="mt-8 flex flex-col gap-3.5 sm:flex-row sm:items-center">
               <Link
                 href="/#early-access"
-                className="inline-flex items-center justify-center gap-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-3.5 text-sm font-semibold text-white shadow-glow transition-all hover:brightness-110 active:scale-[0.99]"
+                className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-5 py-3.5 text-sm font-semibold text-white shadow-glow transition-all hover:brightness-110 active:scale-[0.99]"
               >
-                <Download className="h-4 w-4" />
-                <span>Télécharger sur Google Play (Early Access)</span>
+                <Download className="h-4 w-4 shrink-0" />
+                <span>Google Play (Early Access)</span>
               </Link>
 
               <Link
                 href="/#features"
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3.5 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-5 py-3.5 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
               >
                 <span>Explorer les fonctionnalités</span>
-                <ArrowRight className="h-4 w-4" />
+                <ArrowRight className="h-4 w-4 shrink-0" />
               </Link>
             </div>
 
             {/* Trust Micro-Metrics */}
             <div className="mt-9 grid grid-cols-1 gap-3 border-t border-slate-200/80 pt-6 sm:grid-cols-3 dark:border-zinc-800/80">
-              <div className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-zinc-400">
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
-                <span>Zéro serveur tiers ni tracking</span>
+              <div className="flex items-center gap-2 text-xs font-medium text-slate-600 sm:whitespace-nowrap dark:text-zinc-400">
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-400" />
+                <span>Zéro tracking serveur</span>
               </div>
-              <div className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-zinc-400">
-                <Lock className="h-4 w-4 shrink-0 text-indigo-500" />
-                <span>Délai anti-impulsion asymétrique</span>
+              <div className="flex items-center gap-2 text-xs font-medium text-slate-600 sm:whitespace-nowrap dark:text-zinc-400">
+                <Lock className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                <span>Délai anti-impulsion</span>
               </div>
-              <div className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-zinc-400">
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
-                <span>Code auditable (Licence MIT)</span>
+              <div className="flex items-center gap-2 text-xs font-medium text-slate-600 sm:whitespace-nowrap dark:text-zinc-400">
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-400" />
+                <span>Code MIT auditable</span>
               </div>
             </div>
           </motion.div>

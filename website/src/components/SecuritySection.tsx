@@ -38,7 +38,7 @@ export function SecuritySection() {
   return (
     <section
       id="security"
-      className="scroll-mt-20 border-b border-slate-200/80 bg-[#FAFAFA] py-20 sm:py-24 dark:border-zinc-800/80 dark:bg-[#0C0C10]"
+      className="scroll-mt-24 border-b border-slate-200/80 bg-[#FAFAFA] py-20 sm:py-24 dark:border-zinc-800/80 dark:bg-[#0C0C10]"
     >
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         <div className="grid items-start gap-12 lg:grid-cols-12">
@@ -68,28 +68,28 @@ export function SecuritySection() {
               <div className="mt-4 space-y-3 text-xs">
                 <div className="flex items-center justify-between rounded-lg border border-slate-200/80 bg-slate-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/70">
                   <span className="flex items-center gap-2 font-medium text-slate-800 dark:text-zinc-200">
-                    <Cpu className="h-4 w-4 text-indigo-500" />
+                    <Cpu className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                     1. Lecture locale (UsageStats + A11y RAM)
                   </span>
-                  <span className="font-mono text-[10px] text-emerald-600 dark:text-emerald-400">
+                  <span className="font-mono text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
                     On-device
                   </span>
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-slate-200/80 bg-slate-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/70">
                   <span className="flex items-center gap-2 font-medium text-slate-800 dark:text-zinc-200">
-                    <FileCheck2 className="h-4 w-4 text-violet-500" />
+                    <FileCheck2 className="h-4 w-4 text-violet-600 dark:text-violet-400" />
                     2. Évaluation des règles (limits.json)
                   </span>
-                  <span className="font-mono text-[10px] text-emerald-600 dark:text-emerald-400">
+                  <span className="font-mono text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
                     1 sec tick
                   </span>
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-slate-200/80 bg-slate-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/70">
                   <span className="flex items-center gap-2 font-medium text-slate-800 dark:text-zinc-200">
-                    <ServerOff className="h-4 w-4 text-emerald-500" />
+                    <ServerOff className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />
                     3. Transmission cloud ou revente
                   </span>
-                  <span className="font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                  <span className="font-mono text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
                     0 octet
                   </span>
                 </div>

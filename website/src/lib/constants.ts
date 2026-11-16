@@ -10,10 +10,12 @@ export const SITE_CONFIG = {
   lastLegalUpdate: "16 novembre 2026",
   legal: {
     publisherApp: "Custos",
+    publisherDisplayName: "EI Joshua Nancey",
+    ownerName: "Joshua Nancey",
+    city: "Paris, France",
     legalEntity: "NANCEY JOSHUA JOSEPH ANDRE MARIAN",
     legalForm: "Entreprise Individuelle",
     siret: "88400262700039",
-    duns: "274547325",
     address: "20 rue Deparcieux, 75014 Paris, France",
     email: "contact@joshuanancey.com",
     hostName: "Vercel Inc.",

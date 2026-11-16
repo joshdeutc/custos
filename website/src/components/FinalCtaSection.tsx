@@ -15,7 +15,7 @@ export function FinalCtaSection() {
   return (
     <section
       id="early-access"
-      className="scroll-mt-20 bg-[#FAFAFA] py-20 sm:py-24 dark:bg-[#0C0C10]"
+      className="scroll-mt-24 bg-[#FAFAFA] py-20 sm:py-24 dark:bg-[#0C0C10]"
     >
       <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
         <motion.div

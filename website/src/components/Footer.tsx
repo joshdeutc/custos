@@ -1,6 +1,6 @@
 import React from "react";
 import Link from "next/link";
-import { Mail, MapPin, ShieldCheck } from "lucide-react";
+import { ArrowRight, Mail, MapPin, ShieldCheck } from "lucide-react";
 import { CustosLogo } from "@/components/CustosLogo";
 import { SITE_CONFIG } from "@/lib/constants";
 
@@ -29,54 +29,34 @@ export function Footer() {
             </div>
           </div>
 
-          {/* Mandatory Google Play & D-U-N-S Publisher Block */}
-          <div className="md:col-span-5">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
-              Informations légales de l’éditeur
+          {/* Publisher & Contact */}
+          <div className="md:col-span-4">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-zinc-400">
+              Éditeur &amp; Contact
             </h2>
-            <dl className="mt-3 space-y-2 text-sm text-slate-700 dark:text-zinc-300">
+            <dl className="mt-3 space-y-2.5 text-sm text-slate-700 dark:text-zinc-300">
               <div>
                 <dt className="inline font-medium text-slate-900 dark:text-white">
                   Éditeur :{" "}
                 </dt>
                 <dd className="inline">
-                  {legal.publisherApp} — {legal.legalForm}{" "}
-                  <span className="font-medium text-slate-900 dark:text-white">
-                    {legal.legalEntity}
-                  </span>
+                  {legal.publisherApp} — {legal.publisherDisplayName}
                 </dd>
               </div>
-              <div>
-                <dt className="inline font-medium text-slate-900 dark:text-white">
-                  SIRET :{" "}
-                </dt>
-                <dd className="inline font-mono text-xs sm:text-sm">
-                  {legal.siret}
-                </dd>
-                <span className="mx-2 text-slate-300 dark:text-zinc-700">
-                  |
-                </span>
-                <dt className="inline font-medium text-slate-900 dark:text-white">
-                  Numéro D-U-N-S :{" "}
-                </dt>
-                <dd className="inline font-mono text-xs sm:text-sm">
-                  {legal.duns}
-                </dd>
-              </div>
-              <div className="flex items-start gap-1.5">
-                <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-400 dark:text-zinc-500" />
+              <div className="flex items-center gap-1.5">
+                <MapPin className="h-4 w-4 shrink-0 text-slate-600 dark:text-zinc-400" />
                 <div>
                   <dt className="inline font-medium text-slate-900 dark:text-white">
-                    Siège social :{" "}
+                    Localisation :{" "}
                   </dt>
-                  <dd className="inline">{legal.address}</dd>
+                  <dd className="inline">{legal.city}</dd>
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
-                <Mail className="h-4 w-4 shrink-0 text-slate-400 dark:text-zinc-500" />
+                <Mail className="h-4 w-4 shrink-0 text-slate-600 dark:text-zinc-400" />
                 <div>
                   <dt className="inline font-medium text-slate-900 dark:text-white">
-                    Contact & Support :{" "}
+                    Support &amp; RGPD :{" "}
                   </dt>
                   <dd className="inline">
                     <a
@@ -89,12 +69,21 @@ export function Footer() {
                 </div>
               </div>
             </dl>
+            <div className="mt-3">
+              <Link
+                href="/terms"
+                className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 underline-offset-4 hover:underline dark:text-indigo-400"
+              >
+                <span>Mentions légales complètes</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
           </div>
 
           {/* Navigation & Legal Links */}
-          <div className="md:col-span-3">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
-              Conformité & Documents
+          <div className="md:col-span-4">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-zinc-400">
+              Conformité &amp; Documents
             </h2>
             <ul className="mt-3 space-y-2.5 text-sm">
               <li>
@@ -110,7 +99,7 @@ export function Footer() {
                   href="/terms"
                   className="text-slate-600 transition-colors hover:text-indigo-600 dark:text-zinc-400 dark:hover:text-indigo-400"
                 >
-                  Conditions Générales d’Utilisation
+                  Mentions légales &amp; CGU
                 </Link>
               </li>
               <li>
@@ -135,10 +124,10 @@ export function Footer() {
           </div>
         </div>
 
-        <div className="mt-10 flex flex-col items-start justify-between gap-3 border-t border-slate-200/80 pt-6 text-xs text-slate-500 sm:flex-row sm:items-center dark:border-zinc-800/80 dark:text-zinc-500">
+        <div className="mt-10 flex flex-col items-start justify-between gap-3 border-t border-slate-200/80 pt-6 text-xs text-slate-600 sm:flex-row sm:items-center dark:border-zinc-800/80 dark:text-zinc-400">
           <p>
-            © {new Date().getFullYear()} {legal.publisherApp} —{" "}
-            {legal.legalForm} {legal.legalEntity}. Tous droits réservés.
+            © 2026 {legal.publisherApp} — {legal.publisherDisplayName}. Tous
+            droits réservés.
           </p>
           <p className="font-mono">
             custos.joshuanancey.com · {SITE_CONFIG.packageName}

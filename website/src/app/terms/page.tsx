@@ -7,9 +7,28 @@ import { SITE_CONFIG } from "@/lib/constants";
 export const metadata: Metadata = {
   title: "Conditions Générales d’Utilisation (CGU)",
   description:
-    "Conditions Générales d’Utilisation officielles de l’application mobile Android Custos et du site custos.joshuanancey.com.",
+    "Conditions Générales d’Utilisation et mentions légales officielles de l’application mobile Android Custos et du site custos.joshuanancey.com.",
   alternates: {
     canonical: "/terms",
+  },
+  openGraph: {
+    type: "website",
+    locale: "fr_FR",
+    url: "/terms",
+    siteName: "Custos",
+    title: "Conditions Générales d’Utilisation (CGU) | Custos",
+    description:
+      "Mentions légales et Conditions Générales d’Utilisation de l’application mobile Android Custos.",
+  },
+  twitter: {
+    card: "summary",
+    title: "Conditions Générales d’Utilisation (CGU) | Custos",
+    description:
+      "Mentions légales et Conditions Générales d’Utilisation de l’application Android Custos.",
+  },
+  robots: {
+    index: false,
+    follow: true,
   },
 };
 
@@ -44,9 +63,7 @@ export default function TermsPage() {
           </p>
           <p className="mt-1">
             <strong>SIRET :</strong>{" "}
-            <span className="font-mono">{legal.siret}</span> |{" "}
-            <strong>Numéro D-U-N-S :</strong>{" "}
-            <span className="font-mono">{legal.duns}</span>
+            <span className="font-mono">{legal.siret}</span>
           </p>
           <p className="mt-1">
             <strong>Siège social :</strong> {legal.address}
@@ -176,7 +193,7 @@ export default function TermsPage() {
         <p>
           La marque <strong>Custos</strong>, le nom commercial, le logo ainsi
           que l’architecture éditoriale et visuelle du présent site sont la
-          propriété de l’éditeur ({legal.legalForm} {legal.legalEntity}), sans
+          propriété de l’éditeur ({legal.publisherDisplayName}), sans
           préjudice des composants logiciels libres publiés sous licence MIT sur
           le dépôt GitHub officiel (
           <a

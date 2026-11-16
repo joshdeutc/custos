@@ -11,6 +11,21 @@ export const metadata: Metadata = {
   alternates: {
     canonical: "/privacy",
   },
+  openGraph: {
+    type: "website",
+    locale: "fr_FR",
+    url: "/privacy",
+    siteName: "Custos",
+    title: "Politique de confidentialité (RGPD) | Custos",
+    description:
+      "Traitement 100 % local sur Android, zéro traceur, transparence sur les permissions et droits RGPD de Custos.",
+  },
+  twitter: {
+    card: "summary",
+    title: "Politique de confidentialité (RGPD) | Custos",
+    description:
+      "Traitement 100 % local sur Android, zéro collecte serveur et transparence sur les permissions.",
+  },
 };
 
 const ANDROID_PERMISSIONS = [
@@ -81,7 +96,7 @@ export default function PrivacyPage() {
             "Vous conservez un contrôle total pour exporter, modifier (sous réserve de vos propres délais choisis) ou effacer immédiatement toutes vos données locales.",
           ].map((point) => (
             <li key={point} className="flex items-start gap-2.5">
-              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-400" />
               <span>{point}</span>
             </li>
           ))}
@@ -105,17 +120,8 @@ export default function PrivacyPage() {
         </p>
         <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm dark:border-zinc-800 dark:bg-[#111116]">
           <p>
-            <strong>Éditeur :</strong> {legal.publisherApp} —{" "}
-            {legal.legalForm} {legal.legalEntity}
-          </p>
-          <p className="mt-1">
-            <strong>SIRET :</strong>{" "}
-            <span className="font-mono">{legal.siret}</span> |{" "}
-            <strong>D-U-N-S :</strong>{" "}
-            <span className="font-mono">{legal.duns}</span>
-          </p>
-          <p className="mt-1">
-            <strong>Siège social :</strong> {legal.address}
+            <strong>Responsable de traitement :</strong> {legal.publisherApp} —{" "}
+            {legal.publisherDisplayName} ({legal.city})
           </p>
           <p className="mt-1">
             <strong>Contact RGPD / DPO :</strong>{" "}
@@ -125,6 +131,16 @@ export default function PrivacyPage() {
             >
               {legal.email}
             </a>
+          </p>
+          <p className="mt-1 text-xs text-slate-600 dark:text-zinc-400">
+            Mentions légales complètes disponibles dans les{" "}
+            <Link
+              href="/terms"
+              className="font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+            >
+              Conditions Générales d’Utilisation (/terms)
+            </Link>
+            .
           </p>
         </div>
       </section>

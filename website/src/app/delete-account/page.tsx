@@ -11,6 +11,21 @@ export const metadata: Metadata = {
   alternates: {
     canonical: "/delete-account",
   },
+  openGraph: {
+    type: "website",
+    locale: "fr_FR",
+    url: "/delete-account",
+    siteName: "Custos",
+    title: "Suppression de compte et des données | Custos",
+    description:
+      "Procédure officielle pour effacer vos données locales Android ou demander la suppression de votre e-mail Early Access Custos.",
+  },
+  twitter: {
+    card: "summary",
+    title: "Suppression de compte et des données | Custos",
+    description:
+      "Procédure simple et transparente pour supprimer vos données liées à l’application Android Custos.",
+  },
 };
 
 export default function DeleteAccountPage() {
@@ -60,9 +75,9 @@ export default function DeleteAccountPage() {
           adresse e-mail d’accès anticipé (Google Play Closed Testing) et de tout
           historique d’échanges auprès de l’éditeur{" "}
           <strong>
-            {legal.publisherApp} ({legal.legalForm} {legal.legalEntity})
+            {legal.publisherApp} — {legal.publisherDisplayName} ({legal.city})
           </strong>{" "}
-          :
+          ({legal.email}) :
         </p>
 
         <ol className="space-y-4">
@@ -110,8 +125,8 @@ export default function DeleteAccountPage() {
             <p className="font-semibold text-slate-950 dark:text-white">
               Envoyer une demande en un clic
             </p>
-            <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-500 dark:text-zinc-400">
-              <Clock className="h-3.5 w-3.5 text-indigo-500" />
+            <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-600 dark:text-zinc-400">
+              <Clock className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
               <span>Délai de traitement : sous 7 jours ouvrés maximum</span>
             </p>
           </div>
@@ -155,7 +170,7 @@ export default function DeleteAccountPage() {
               simplement l’application).
             </li>
           </ol>
-          <p className="mt-3 text-xs text-slate-500 dark:text-zinc-400">
+          <p className="mt-3 text-xs text-slate-600 dark:text-zinc-400">
             Note : si vous avez activé la sauvegarde Google Drive / Android Auto
             Backup sur votre appareil, vous pouvez également supprimer la
             sauvegarde de l’application dans les paramètres de votre compte
@@ -208,7 +223,7 @@ export default function DeleteAccountPage() {
             </ul>
           </div>
         </div>
-        <p className="pt-2 text-xs text-slate-500 dark:text-zinc-400">
+        <p className="pt-2 text-xs text-slate-600 dark:text-zinc-400">
           Voir également :{" "}
           <Link
             href="/privacy"

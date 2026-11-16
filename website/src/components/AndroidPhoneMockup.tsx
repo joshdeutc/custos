@@ -1,19 +1,17 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowLeft, BatteryCharging, Lock, Wifi } from "lucide-react";
 
 type NodeId = "delay" | "limits" | "curfew" | "nuclear" | "partial" | "schedule";
 
-interface CircleNode {
+interface NodeConfig {
   id: NodeId;
   emoji: string;
   title: string;
   subtitle: string;
-  cx: number;
-  cy: number;
-  size: number;
+  angleDeg: number;
   isHub?: boolean;
   summaryColorClass: string;
   detailHeadline: string;
@@ -23,24 +21,23 @@ interface CircleNode {
   rows: { title: string; meta: string; status: string }[];
 }
 
-// Stage: 306px wide x 448px tall; Hub center (153, 224), R = 104px, pentagon angles 270, 342, 54, 126, 198 deg
-const HUB_CX = 153;
-const HUB_CY = 224;
-const HUB_R = 52; // diameter = 104
-const SAT_R = 38; // diameter = 76
+interface PositionedNode extends NodeConfig {
+  cx: number;
+  cy: number;
+  size: number;
+}
+
 const EASE_CURVE = [0.22, 1, 0.36, 1] as const;
 
-const NODES: CircleNode[] = [
+const NODE_CONFIGS: NodeConfig[] = [
   {
     id: "delay",
     emoji: "⏳",
     title: "Delay & Limits",
     subtitle: "Protection active",
-    cx: HUB_CX,
-    cy: HUB_CY,
-    size: HUB_R * 2,
+    angleDeg: 0,
     isHub: true,
-    summaryColorClass: "text-emerald-600 dark:text-emerald-400",
+    summaryColorClass: "text-emerald-700 dark:text-emerald-400",
     detailHeadline: "Security & Delay",
     detailSub:
       "Renforcer une règle est immédiat. L’alléger exige d’attendre la fin du délai choisi.",
@@ -56,10 +53,8 @@ const NODES: CircleNode[] = [
     id: "limits",
     emoji: "📱",
     title: "App Limits",
-    subtitle: "3 apps · 1 bloquée",
-    cx: 153,
-    cy: 120,
-    size: SAT_R * 2,
+    subtitle: "Quotas actifs",
+    angleDeg: 270,
     summaryColorClass: "text-slate-600 dark:text-zinc-400",
     detailHeadline: "App Limits",
     detailSub:
@@ -76,15 +71,13 @@ const NODES: CircleNode[] = [
     id: "curfew",
     emoji: "🌙",
     title: "Curfew",
-    subtitle: "22:00 → 07:00",
-    cx: 252,
-    cy: 192,
-    size: SAT_R * 2,
+    subtitle: "22h → 07h",
+    angleDeg: 342,
     summaryColorClass: "text-indigo-600 dark:text-indigo-400",
     detailHeadline: "Curfew",
     detailSub:
       "Blocage strict pendant vos heures de sommeil ou d’étude, notifications coupées.",
-    ctaLabel: "+ Add curfew rule",
+    ctaLabel: "+ Ajouter un couvre-feu",
     ctaStyle: "black",
     rows: [
       { title: "Réseaux sociaux · Soir", meta: "Lun–Dim · Notifs en pause", status: "22h → 07h" },
@@ -96,14 +89,12 @@ const NODES: CircleNode[] = [
     emoji: "☢️",
     title: "Nuclear",
     subtitle: "Total block",
-    cx: 214,
-    cy: 308,
-    size: SAT_R * 2,
-    summaryColorClass: "text-rose-600 dark:text-rose-400",
+    angleDeg: 54,
+    summaryColorClass: "text-rose-700 dark:text-rose-400",
     detailHeadline: "Nuclear Mode",
     detailSub:
       "Verrouillage ferme et irréversible sur une durée fixe avec presets nommés et Ne pas déranger.",
-    ctaLabel: "Activate Nuclear Mode",
+    ctaLabel: "Activer le Mode Nucléaire",
     ctaStyle: "red",
     rows: [
       { title: "Preset « Deep Work »", meta: "6 apps + Ne pas déranger", status: "2h 00" },
@@ -116,10 +107,8 @@ const NODES: CircleNode[] = [
     emoji: "🎯",
     title: "Partial Access",
     subtitle: "In-app tabs",
-    cx: 92,
-    cy: 308,
-    size: SAT_R * 2,
-    summaryColorClass: "text-sky-600 dark:text-sky-400",
+    angleDeg: 126,
+    summaryColorClass: "text-sky-700 dark:text-sky-400",
     detailHeadline: "Partial Access",
     detailSub:
       "Redirige instantanément hors des onglets addictifs sans fermer l’application utile.",
@@ -134,10 +123,8 @@ const NODES: CircleNode[] = [
     id: "schedule",
     emoji: "📅",
     title: "Schedule",
-    subtitle: "Jours & heures",
-    cx: 54,
-    cy: 192,
-    size: SAT_R * 2,
+    subtitle: "Jours & h.",
+    angleDeg: 198,
     summaryColorClass: "text-slate-600 dark:text-zinc-400",
     detailHeadline: "Allowed Days & Hours",
     detailSub:
@@ -151,23 +138,101 @@ const NODES: CircleNode[] = [
   },
 ];
 
-function computeEdgeLine(sat: CircleNode) {
-  const dx = sat.cx - HUB_CX;
-  const dy = sat.cy - HUB_CY;
+function computeEdgeLine(
+  satCx: number,
+  satCy: number,
+  hubCx: number,
+  hubCy: number,
+  hubR: number,
+  satR: number
+) {
+  const dx = satCx - hubCx;
+  const dy = satCy - hubCy;
   const dist = Math.hypot(dx, dy);
+  if (dist === 0) {
+    return { x1: hubCx, y1: hubCy, x2: satCx, y2: satCy };
+  }
   const ux = dx / dist;
   const uy = dy / dist;
   return {
-    x1: HUB_CX + ux * HUB_R,
-    y1: HUB_CY + uy * HUB_R,
-    x2: sat.cx - ux * SAT_R,
-    y2: sat.cy - uy * SAT_R,
+    x1: hubCx + ux * hubR,
+    y1: hubCy + uy * hubR,
+    x2: satCx - ux * satR,
+    y2: satCy - uy * satR,
   };
 }
 
 export function AndroidPhoneMockup() {
   const [zoomedId, setZoomedId] = useState<NodeId | null>(null);
-  const satellites = NODES.filter((n) => !n.isHub);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [stageSize, setStageSize] = useState<{ width: number; height: number }>({
+    width: 300,
+    height: 430,
+  });
+
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+
+    const updateSize = () => {
+      const width = Math.round(el.clientWidth);
+      const height = Math.round(el.clientHeight);
+      if (width > 0 && height > 0) {
+        setStageSize((prev) =>
+          prev.width === width && prev.height === height
+            ? prev
+            : { width, height }
+        );
+      }
+    };
+
+    updateSize();
+
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(updateSize);
+      observer.observe(el);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener("resize", updateSize);
+    return () => window.removeEventListener("resize", updateSize);
+  }, []);
+
+  const geometry = useMemo(() => {
+    const stageW = stageSize.width;
+    const stageH = stageSize.height;
+    const hubCx = stageW / 2;
+    const hubCy = stageH / 2 + 6;
+    const radius = Math.min(stageW, stageH) * 0.34;
+    const hubSize = Math.round((stageW * 0.34) / 2) * 2;
+    const satSize = Math.round((stageW * 0.255) / 2) * 2;
+    const hubR = hubSize / 2;
+    const satR = satSize / 2;
+
+    const nodes: PositionedNode[] = NODE_CONFIGS.map((cfg) => {
+      if (cfg.isHub) {
+        return { ...cfg, cx: hubCx, cy: hubCy, size: hubSize };
+      }
+      const rad = (cfg.angleDeg * Math.PI) / 180;
+      return {
+        ...cfg,
+        cx: hubCx + radius * Math.cos(rad),
+        cy: hubCy + radius * Math.sin(rad),
+        size: satSize,
+      };
+    });
+
+    return {
+      stageW,
+      stageH,
+      hubCx,
+      hubCy,
+      hubR,
+      satR,
+      nodes,
+      satellites: nodes.filter((n) => !n.isHub),
+    };
+  }, [stageSize.width, stageSize.height]);
 
   return (
     <div className="relative mx-auto w-full max-w-[330px] select-none">
@@ -192,30 +257,40 @@ export function AndroidPhoneMockup() {
           </div>
         </div>
 
-        {/* Zoomable Canvas Stage (1:1 mirror of ZoomableCanvasView + FeatureCircleView) */}
-        <div className="relative mx-auto h-[448px] w-[306px] overflow-hidden bg-white dark:bg-[#111116]">
+        {/* Zoomable Canvas Stage (1:1 responsive mirror of ZoomableCanvasView) */}
+        <div
+          ref={stageRef}
+          className="relative h-[430px] w-full overflow-hidden bg-white sm:h-[448px] dark:bg-[#111116]"
+        >
           {/* Subtle hint pill when overview is visible */}
           <motion.div
             animate={{ opacity: zoomedId ? 0 : 1 }}
             transition={{ duration: 0.2 }}
-            className="pointer-events-none absolute inset-x-0 top-2.5 flex justify-center"
+            className="pointer-events-none absolute inset-x-0 top-2.5 z-20 flex justify-center px-2"
           >
             <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-medium text-slate-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-              <Lock className="h-2.5 w-2.5 text-emerald-500" />
-              Custos · Touchez un cercle pour zoomer
+              <Lock className="h-2.5 w-2.5 shrink-0 text-emerald-700 dark:text-emerald-400" />
+              <span>Custos · Touchez un cercle pour zoomer</span>
             </span>
           </motion.div>
 
           {/* SVG Connector Lines + Endpoint Dots (fade out on zoomInto) */}
           <motion.svg
-            viewBox="0 0 306 448"
+            viewBox={`0 0 ${geometry.stageW} ${geometry.stageH}`}
             className="pointer-events-none absolute inset-0 h-full w-full"
             animate={{ opacity: zoomedId ? 0 : 1 }}
             transition={{ duration: 0.22 }}
             aria-hidden="true"
           >
-            {satellites.map((sat) => {
-              const line = computeEdgeLine(sat);
+            {geometry.satellites.map((sat) => {
+              const line = computeEdgeLine(
+                sat.cx,
+                sat.cy,
+                geometry.hubCx,
+                geometry.hubCy,
+                geometry.hubR,
+                geometry.satR
+              );
               return (
                 <g key={sat.id}>
                   <line
@@ -245,7 +320,7 @@ export function AndroidPhoneMockup() {
           </motion.svg>
 
           {/* Single-Element Morphing Feature Circles (morphProgress: 0 -> 1) */}
-          {NODES.map((node) => {
+          {geometry.nodes.map((node) => {
             const isZoomed = zoomedId === node.id;
             const isOtherZoomed = zoomedId !== null && !isZoomed;
             const baseLeft = node.cx - node.size / 2;
@@ -256,10 +331,10 @@ export function AndroidPhoneMockup() {
                 key={node.id}
                 initial={false}
                 animate={{
-                  left: isZoomed ? 10 : baseLeft,
-                  top: isZoomed ? 10 : baseTop,
-                  width: isZoomed ? 286 : node.size,
-                  height: isZoomed ? 428 : node.size,
+                  left: isZoomed ? 8 : baseLeft,
+                  top: isZoomed ? 8 : baseTop,
+                  width: isZoomed ? Math.max(geometry.stageW - 16, 220) : node.size,
+                  height: isZoomed ? Math.max(geometry.stageH - 16, 360) : node.size,
                   borderRadius: isZoomed ? 24 : 999,
                   opacity: isOtherZoomed ? 0 : 1,
                   scale: isOtherZoomed ? 0.92 : 1,
@@ -272,31 +347,33 @@ export function AndroidPhoneMockup() {
                   zIndex: isZoomed ? 30 : 10,
                   pointerEvents: isOtherZoomed ? "none" : "auto",
                 }}
+                aria-hidden={isOtherZoomed}
                 className="absolute overflow-hidden border-[1.75px] border-slate-900 bg-white shadow-sm dark:border-zinc-300 dark:bg-[#14141A]"
               >
                 {!isZoomed ? (
                   <button
                     type="button"
                     onClick={() => setZoomedId(node.id)}
+                    tabIndex={isOtherZoomed ? -1 : 0}
                     aria-label={`Ouvrir ${node.title}`}
-                    className="flex h-full w-full flex-col items-center justify-center px-1.5 text-center transition-colors hover:bg-slate-50/70 dark:hover:bg-zinc-900/50"
+                    className="flex h-full w-full flex-col items-center justify-center px-1 text-center transition-colors hover:bg-slate-50/70 dark:hover:bg-zinc-900/50"
                   >
                     <span
-                      className={node.isHub ? "text-base" : "text-sm"}
+                      className={node.isHub ? "text-base sm:text-lg" : "text-xs sm:text-sm"}
                       aria-hidden="true"
                     >
                       {node.emoji}
                     </span>
                     <span
                       className={`mt-0.5 font-bold leading-tight text-slate-950 dark:text-white ${
-                        node.isHub ? "text-[11px]" : "text-[9.5px]"
+                        node.isHub ? "text-[11px] sm:text-xs" : "text-[10px]"
                       }`}
                     >
                       {node.title}
                     </span>
                     <span
-                      className={`mt-0.5 leading-tight ${
-                        node.isHub ? "text-[8.5px]" : "text-[8px]"
+                      className={`mt-0.5 font-medium leading-tight ${
+                        node.isHub ? "text-[9.5px] sm:text-[10px]" : "text-[8.5px] sm:text-[9.5px]"
                       } ${node.summaryColorClass}`}
                     >
                       {node.subtitle}
@@ -307,24 +384,31 @@ export function AndroidPhoneMockup() {
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.24, delay: 0.16 }}
-                    className="flex h-full w-full flex-col justify-between p-4"
+                    className="flex h-full w-full flex-col p-3.5 sm:p-4"
                   >
-                    <div>
-                      <div className="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-zinc-800">
-                        <button
-                          type="button"
-                          onClick={() => setZoomedId(null)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                        >
-                          <ArrowLeft className="h-3 w-3" />
-                          <span>Pentagone</span>
-                        </button>
-                        <span className="text-base" aria-hidden="true">
+                    {/* Sticky Top Header */}
+                    <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 pb-2.5 dark:border-zinc-800">
+                      <button
+                        type="button"
+                        onClick={() => setZoomedId(null)}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                      >
+                        <ArrowLeft className="h-3 w-3" />
+                        <span>Pentagone</span>
+                      </button>
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className="shrink-0 text-sm" aria-hidden="true">
                           {node.emoji}
                         </span>
+                        <span className="truncate text-xs font-bold text-slate-900 dark:text-white">
+                          {node.title}
+                        </span>
                       </div>
+                    </div>
 
-                      <h3 className="mt-3 text-center text-sm font-bold text-slate-950 dark:text-white">
+                    {/* Scrollable Body */}
+                    <div className="mt-3 flex-1 overflow-y-auto pr-0.5">
+                      <h3 className="text-center text-sm font-bold text-slate-950 dark:text-white">
                         {node.detailHeadline}
                       </h3>
                       <p className="mt-1.5 text-center text-[11px] leading-relaxed text-slate-600 dark:text-zinc-400">
@@ -334,7 +418,7 @@ export function AndroidPhoneMockup() {
                       <button
                         type="button"
                         onClick={() => setZoomedId(null)}
-                        className={`mt-4 w-full rounded-xl px-3 py-2 text-[11px] font-semibold text-white transition-opacity hover:opacity-90 ${
+                        className={`mt-3.5 w-full rounded-xl px-3 py-2 text-[11px] font-semibold text-white transition-opacity hover:opacity-90 ${
                           node.ctaStyle === "red"
                             ? "bg-rose-600"
                             : "bg-slate-950 dark:bg-indigo-600"
@@ -343,21 +427,21 @@ export function AndroidPhoneMockup() {
                         {node.ctaLabel}
                       </button>
 
-                      <div className="mt-4 space-y-2">
+                      <div className="mt-3.5 space-y-2">
                         {node.rows.map((row) => (
                           <div
                             key={row.title}
-                            className="flex items-center justify-between rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/70"
+                            className="flex items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-2.5 py-2 dark:border-zinc-800 dark:bg-zinc-900/70"
                           >
-                            <div className="min-w-0 pr-2">
+                            <div className="min-w-0">
                               <p className="truncate text-[11px] font-semibold text-slate-900 dark:text-zinc-100">
                                 {row.title}
                               </p>
-                              <p className="truncate text-[9.5px] text-slate-500 dark:text-zinc-400">
+                              <p className="truncate text-[10px] text-slate-600 dark:text-zinc-400">
                                 {row.meta}
                               </p>
                             </div>
-                            <span className="shrink-0 rounded-md bg-white px-2 py-0.5 font-mono text-[9.5px] font-semibold text-slate-800 shadow-sm dark:bg-zinc-800 dark:text-zinc-200">
+                            <span className="shrink-0 rounded-md bg-white px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-800 shadow-sm dark:bg-zinc-800 dark:text-zinc-200">
                               {row.status}
                             </span>
                           </div>
@@ -365,7 +449,8 @@ export function AndroidPhoneMockup() {
                       </div>
                     </div>
 
-                    <p className="mt-3 text-center text-[10px] text-slate-400 dark:text-zinc-500">
+                    {/* Bottom Hint */}
+                    <p className="mt-2.5 shrink-0 border-t border-slate-100 pt-2 text-center text-[10px] text-slate-600 dark:border-zinc-800/80 dark:text-zinc-400">
                       Appuyez sur « Pentagone » pour dézoomer
                     </p>
                   </motion.div>

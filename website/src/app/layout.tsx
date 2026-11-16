@@ -28,8 +28,8 @@ export const metadata: Metadata = {
     "Custos est l’application Android d’auto-discipline conçue comme un engagement irréversible : quotas quotidiens, limites par session, couvre-feux, Accès Partiel in-app et Mode Nucléaire. 100 % local, zéro publicité.",
   applicationName: "Custos",
   authors: [{ name: "Joshua Nancey", url: SITE_CONFIG.domain }],
-  creator: "NANCEY JOSHUA JOSEPH ANDRE MARIAN",
-  publisher: "Custos — EI NANCEY JOSHUA JOSEPH ANDRE MARIAN",
+  creator: "Joshua Nancey",
+  publisher: "Custos",
   keywords: [
     "Custos",
     "temps d'écran Android",
@@ -49,7 +49,7 @@ export const metadata: Metadata = {
       "Quotas, couvre-feux, blocage d’onglets addictifs (Accès Partiel), Mode Nucléaire et délai de sécurité asymétrique. Traitement 100 % local, zéro tracking.",
   },
   twitter: {
-    card: "summary_large_image",
+    card: "summary",
     title: "Custos — Auto-discipline & temps d’écran sur Android",
     description:
       "Quotas quotidiens, Accès Partiel in-app, Mode Nucléaire et délai anti-impulsion. 100 % local sur votre téléphone.",

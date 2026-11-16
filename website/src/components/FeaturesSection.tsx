@@ -51,7 +51,7 @@ const FEATURES: FeatureCardItem[] = [
     ],
     icon: "partial",
     accentBg: "bg-sky-500/10 dark:bg-sky-500/15",
-    accentText: "text-sky-600 dark:text-sky-400",
+    accentText: "text-sky-700 dark:text-sky-400",
   },
   {
     id: "quotas",
@@ -81,7 +81,7 @@ const FEATURES: FeatureCardItem[] = [
     ],
     icon: "nuclear",
     accentBg: "bg-rose-500/10 dark:bg-rose-500/15",
-    accentText: "text-rose-600 dark:text-rose-400",
+    accentText: "text-rose-700 dark:text-rose-400",
   },
 ];
 
@@ -102,12 +102,12 @@ export function FeaturesSection() {
   return (
     <section
       id="features"
-      className="scroll-mt-20 border-b border-slate-200/80 bg-white py-20 sm:py-24 dark:border-zinc-800/80 dark:bg-[#09090B]"
+      className="scroll-mt-24 border-b border-slate-200/80 bg-white py-20 sm:py-24 dark:border-zinc-800/80 dark:bg-[#09090B]"
     >
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         <div className="max-w-2xl">
           <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-            <Layers className="h-3.5 w-3.5 text-indigo-500" />
+            <Layers className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
             <span>Fonctionnalités réelles</span>
           </div>
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl dark:text-white">
@@ -163,7 +163,7 @@ export function FeaturesSection() {
                     key={item}
                     className="flex items-start gap-2.5 text-xs font-medium text-slate-700 dark:text-zinc-300"
                   >
-                    <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-indigo-500 dark:text-indigo-400" />
+                    <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" />
                     <span>{item}</span>
                   </li>
                 ))}

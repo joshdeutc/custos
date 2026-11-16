@@ -47,12 +47,12 @@ export function FaqSection() {
   return (
     <section
       id="faq"
-      className="scroll-mt-20 border-b border-slate-200/80 bg-white py-20 sm:py-24 dark:border-zinc-800/80 dark:bg-[#09090B]"
+      className="scroll-mt-24 border-b border-slate-200/80 bg-white py-20 sm:py-24 dark:border-zinc-800/80 dark:bg-[#09090B]"
     >
       <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
         <div className="text-center">
           <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-            <HelpCircle className="h-3.5 w-3.5 text-indigo-500" />
+            <HelpCircle className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
             <span>Questions fréquentes</span>
           </div>
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl dark:text-white">
@@ -79,7 +79,7 @@ export function FaqSection() {
                     {item.question}
                   </span>
                   <ChevronDown
-                    className={`h-4 w-4 shrink-0 text-slate-500 transition-transform duration-200 dark:text-zinc-400 ${
+                    className={`h-4 w-4 shrink-0 text-slate-600 transition-transform duration-200 dark:text-zinc-400 ${
                       isOpen ? "rotate-180 text-indigo-600 dark:text-indigo-400" : ""
                     }`}
                   />

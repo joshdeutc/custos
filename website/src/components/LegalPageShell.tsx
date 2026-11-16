@@ -39,7 +39,7 @@ export function LegalPageShell({
           <p className="mt-3 text-base leading-relaxed text-slate-600 dark:text-zinc-400">
             {subtitle}
           </p>
-          <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-slate-500 dark:text-zinc-400">
+          <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-slate-600 dark:text-zinc-400">
             <span className="inline-flex items-center gap-1.5">
               <Calendar className="h-3.5 w-3.5" />
               <span>Dernière mise à jour : {lastUpdated}</span>
