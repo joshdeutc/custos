@@ -2,13 +2,22 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, BatteryCharging, Lock, Wifi } from "lucide-react";
+import {
+  ArrowLeft,
+  BatteryCharging,
+  CalendarClock,
+  Clock,
+  Flame,
+  Lock,
+  MoonStar,
+  Scissors,
+  Wifi,
+} from "lucide-react";
 
 type NodeId = "delay" | "limits" | "curfew" | "nuclear" | "partial" | "schedule";
 
 interface NodeConfig {
   id: NodeId;
-  emoji: string;
   title: string;
   subtitle: string;
   angleDeg: number;
@@ -29,10 +38,42 @@ interface PositionedNode extends NodeConfig {
 
 const EASE_CURVE = [0.22, 1, 0.36, 1] as const;
 
+const NODE_ICON_COLORS: Record<NodeId, string> = {
+  delay: "text-indigo-600 dark:text-indigo-400",
+  limits: "text-indigo-600 dark:text-indigo-400",
+  curfew: "text-violet-600 dark:text-violet-400",
+  nuclear: "text-rose-700 dark:text-rose-400",
+  partial: "text-sky-700 dark:text-sky-400",
+  schedule: "text-emerald-700 dark:text-emerald-400",
+};
+
+function NodeIcon({
+  id,
+  className,
+}: {
+  id: NodeId;
+  className: string;
+}) {
+  const iconClassName = `shrink-0 ${NODE_ICON_COLORS[id]} ${className}`;
+  switch (id) {
+    case "delay":
+      return <Lock className={iconClassName} aria-hidden="true" />;
+    case "limits":
+      return <Clock className={iconClassName} aria-hidden="true" />;
+    case "curfew":
+      return <MoonStar className={iconClassName} aria-hidden="true" />;
+    case "nuclear":
+      return <Flame className={iconClassName} aria-hidden="true" />;
+    case "partial":
+      return <Scissors className={iconClassName} aria-hidden="true" />;
+    case "schedule":
+      return <CalendarClock className={iconClassName} aria-hidden="true" />;
+  }
+}
+
 const NODE_CONFIGS: NodeConfig[] = [
   {
     id: "delay",
-    emoji: "⏳",
     title: "Delay & Limits",
     subtitle: "Protection active",
     angleDeg: 0,
@@ -51,7 +92,6 @@ const NODE_CONFIGS: NodeConfig[] = [
   },
   {
     id: "limits",
-    emoji: "📱",
     title: "App Limits",
     subtitle: "Quotas actifs",
     angleDeg: 270,
@@ -69,7 +109,6 @@ const NODE_CONFIGS: NodeConfig[] = [
   },
   {
     id: "curfew",
-    emoji: "🌙",
     title: "Curfew",
     subtitle: "22h → 07h",
     angleDeg: 342,
@@ -86,7 +125,6 @@ const NODE_CONFIGS: NodeConfig[] = [
   },
   {
     id: "nuclear",
-    emoji: "☢️",
     title: "Nuclear",
     subtitle: "Total block",
     angleDeg: 54,
@@ -104,7 +142,6 @@ const NODE_CONFIGS: NodeConfig[] = [
   },
   {
     id: "partial",
-    emoji: "🎯",
     title: "Partial Access",
     subtitle: "In-app tabs",
     angleDeg: 126,
@@ -121,7 +158,6 @@ const NODE_CONFIGS: NodeConfig[] = [
   },
   {
     id: "schedule",
-    emoji: "📅",
     title: "Schedule",
     subtitle: "Jours & h.",
     angleDeg: 198,
@@ -358,14 +394,16 @@ export function AndroidPhoneMockup() {
                     aria-label={`Ouvrir ${node.title}`}
                     className="flex h-full w-full flex-col items-center justify-center px-1 text-center transition-colors hover:bg-slate-50/70 dark:hover:bg-zinc-900/50"
                   >
+                    <NodeIcon
+                      id={node.id}
+                      className={
+                        node.isHub
+                          ? "h-4 w-4 sm:h-[18px] sm:w-[18px]"
+                          : "h-3.5 w-3.5 sm:h-4 sm:w-4"
+                      }
+                    />
                     <span
-                      className={node.isHub ? "text-base sm:text-lg" : "text-xs sm:text-sm"}
-                      aria-hidden="true"
-                    >
-                      {node.emoji}
-                    </span>
-                    <span
-                      className={`mt-0.5 font-bold leading-tight text-slate-950 dark:text-white ${
+                      className={`mt-0.5 font-bold leading-tight text-slate-950 dark:text-white sm:mt-1 ${
                         node.isHub ? "text-[11px] sm:text-xs" : "text-[10px]"
                       }`}
                     >
@@ -397,9 +435,7 @@ export function AndroidPhoneMockup() {
                         <span>Pentagone</span>
                       </button>
                       <div className="flex min-w-0 items-center gap-1.5">
-                        <span className="shrink-0 text-sm" aria-hidden="true">
-                          {node.emoji}
-                        </span>
+                        <NodeIcon id={node.id} className="h-3.5 w-3.5" />
                         <span className="truncate text-xs font-bold text-slate-900 dark:text-white">
                           {node.title}
                         </span>
