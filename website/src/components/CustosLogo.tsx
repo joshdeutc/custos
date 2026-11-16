@@ -1,0 +1,51 @@
+import React from "react";
+
+interface CustosLogoProps {
+  className?: string;
+  size?: number;
+}
+
+export function CustosLogo({ className = "", size = 34 }: CustosLogoProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 108 108"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient
+          id="custosBrandGrad"
+          x1="0"
+          y1="0"
+          x2="108"
+          y2="108"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stopColor="#6366F1" />
+          <stop offset="1" stopColor="#9333EA" />
+        </linearGradient>
+      </defs>
+      <rect width="108" height="108" rx="24" fill="url(#custosBrandGrad)" />
+      <path
+        d="M44,52 L44,45 A10,10 0 0 1 64,45 L64,52"
+        stroke="#FFFFFF"
+        strokeWidth="7"
+        strokeLinecap="round"
+        fill="none"
+      />
+      <path
+        d="M42,51 L66,51 A5,5 0 0 1 71,56 L71,76 A5,5 0 0 1 66,81 L42,81 A5,5 0 0 1 37,76 L37,56 A5,5 0 0 1 42,51 Z"
+        fill="#FFFFFF"
+      />
+      <path
+        d="M54,58 A4,4 0 1 0 54,66 A4,4 0 1 0 54,58 Z"
+        fill="#6D28D9"
+      />
+      <path d="M52,63 L56,63 L55,74 L53,74 Z" fill="#6D28D9" />
+    </svg>
+  );
+}

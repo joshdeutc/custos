@@ -1,0 +1,23 @@
+export const SITE_CONFIG = {
+  appName: "Custos",
+  tagline: "L’application Android d’auto-discipline conçue comme un engagement irréversible.",
+  domain: "https://custos.joshuanancey.com",
+  packageName: "com.jo.selfcontrol.ultimate",
+  minAndroidVersion: "Android 8.0+ (API 26)",
+  playStoreEarlyAccessHref: "#early-access",
+  githubRepoUrl: "https://github.com/joshdeutc/custos",
+  githubReleasesUrl: "https://github.com/joshdeutc/custos/releases/latest",
+  lastLegalUpdate: "16 novembre 2026",
+  legal: {
+    publisherApp: "Custos",
+    legalEntity: "NANCEY JOSHUA JOSEPH ANDRE MARIAN",
+    legalForm: "Entreprise Individuelle",
+    siret: "88400262700039",
+    duns: "274547325",
+    address: "20 rue Deparcieux, 75014 Paris, France",
+    email: "contact@joshuanancey.com",
+    hostName: "Vercel Inc.",
+    hostAddress: "440 N Barranca Ave #4133, Covina, CA 91723, États-Unis",
+    hostUrl: "https://vercel.com/legal/privacy-policy",
+  },
+} as const;
