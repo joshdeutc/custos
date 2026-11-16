@@ -458,7 +458,9 @@ object GuardianEngine {
             if (ready.isNotEmpty()) {
                 for (r in ready) {
                     updatedAllowed.add(r.packageName)
-                    setPackageSuspendedInternal(ctx, r.packageName, false)
+                    if (!isBlockedByLimitsOrCarapace(ctx, r.packageName)) {
+                        setPackageSuspendedInternal(ctx, r.packageName, false)
+                    }
                     setPackageHiddenInternal(ctx, r.packageName, false)
                     Log.i(TAG, "Quarantine elapsed: released ${r.packageName}")
                 }
@@ -512,7 +514,9 @@ object GuardianEngine {
             val cleanPkg = packageName.trim()
 
             if (isGuarded(ctx, cleanPkg) || cleanPkg in state.allowedPackages) {
-                setPackageSuspendedInternal(ctx, cleanPkg, false)
+                if (isGuarded(ctx, cleanPkg) || !isBlockedByLimitsOrCarapace(ctx, cleanPkg)) {
+                    setPackageSuspendedInternal(ctx, cleanPkg, false)
+                }
                 setPackageHiddenInternal(ctx, cleanPkg, false)
                 return true
             }
@@ -535,7 +539,9 @@ object GuardianEngine {
                 }
                 val updatedAllowed = state.allowedPackages + cleanPkg
                 saveStateInternal(ctx, state.copy(allowedPackages = updatedAllowed))
-                setPackageSuspendedInternal(ctx, cleanPkg, false)
+                if (!isBlockedByLimitsOrCarapace(ctx, cleanPkg)) {
+                    setPackageSuspendedInternal(ctx, cleanPkg, false)
+                }
                 setPackageHiddenInternal(ctx, cleanPkg, false)
                 Log.i(TAG, "Quarantine delay is 0: app $cleanPkg allowed immediately")
                 return true
@@ -735,6 +741,35 @@ object GuardianEngine {
                         runCatching { dpm.setAutoTimeEnabled(admin, true) }
                         runCatching { dpm.setAutoTimeZoneEnabled(admin, true) }
                     }
+                    // F10 (v1.23): Auto-grant POST_NOTIFICATIONS so the Carapace FGS banner is always visible on Android 13+
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                        runCatching {
+                            dpm.setPermissionGrantState(
+                                admin,
+                                ctx.packageName,
+                                android.Manifest.permission.POST_NOTIFICATIONS,
+                                DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED
+                            )
+                            dpm.setPermissionGrantState(
+                                admin,
+                                "com.jo.selfcontrol.ultimate",
+                                android.Manifest.permission.POST_NOTIFICATIONS,
+                                DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED
+                            )
+                        }
+                    }
+                    // Best-effort auto-grant GET_USAGE_STATS (op 43) via AppOps reflection
+                    runCatching {
+                        val appOps = ctx.getSystemService(Context.APP_OPS_SERVICE) as? android.app.AppOpsManager
+                        val setMode = appOps?.javaClass?.getMethod(
+                            "setMode",
+                            Int::class.javaPrimitiveType,
+                            Int::class.javaPrimitiveType,
+                            String::class.java,
+                            Int::class.javaPrimitiveType
+                        )
+                        setMode?.invoke(appOps, 43, android.os.Process.myUid(), ctx.packageName, android.app.AppOpsManager.MODE_ALLOWED)
+                    }
                 }.onFailure { Log.e(TAG, "Failed to apply DO uninstall protection: ${it.message}") }
             }
         }
@@ -771,7 +806,11 @@ object GuardianEngine {
             for (pkgInfo in installed) {
                 val pkg = pkgInfo.packageName
                 if (isGuarded(ctx, pkg) || pkg in state.allowedPackages) {
-                    setPackageSuspendedInternal(ctx, pkg, false)
+                    if (isGuarded(ctx, pkg) || !isBlockedByLimitsOrCarapace(ctx, pkg)) {
+                        setPackageSuspendedInternal(ctx, pkg, false)
+                    } else {
+                        setPackageSuspendedInternal(ctx, pkg, true)
+                    }
                     setPackageHiddenInternal(ctx, pkg, false)
                 } else {
                     setPackageSuspendedInternal(ctx, pkg, true)
@@ -785,8 +824,12 @@ object GuardianEngine {
         for (pkgInfo in installed) {
             val pkg = pkgInfo.packageName
             if (isGuarded(ctx, pkg) || pkg in state.allowedPackages) {
-                // Allowed app -> ensure unhidden and unsuspended
-                setPackageSuspendedInternal(ctx, pkg, false)
+                // F8 (v1.23): Allowed by Whitelist -> ensure unhidden, but NEVER unsuspend if currently blocked by Quota/Session/Curfew/Carapace!
+                if (isGuarded(ctx, pkg) || !isBlockedByLimitsOrCarapace(ctx, pkg)) {
+                    setPackageSuspendedInternal(ctx, pkg, false)
+                } else {
+                    setPackageSuspendedInternal(ctx, pkg, true)
+                }
                 setPackageHiddenInternal(ctx, pkg, false)
             } else {
                 // Unauthorized app -> hide and suspend (and uninstall if from PC/ADB)
@@ -877,9 +920,16 @@ object GuardianEngine {
 
 
         for (pkgInfo in installed) {
-            setPackageSuspendedInternal(ctx, pkgInfo.packageName, false)
-            setPackageHiddenInternal(ctx, pkgInfo.packageName, false)
+            val pkg = pkgInfo.packageName
+            if (isGuarded(ctx, pkg) || !isBlockedByLimitsOrCarapace(ctx, pkg)) {
+                setPackageSuspendedInternal(ctx, pkg, false)
+            }
+            setPackageHiddenInternal(ctx, pkg, false)
         }
+    }
+
+    private fun isBlockedByLimitsOrCarapace(ctx: Context, pkg: String): Boolean {
+        return synchronized(lock) { pkg in activeBlockedApps } || isFailClosedActive(ctx)
     }
 
     fun scheduleNextUnlockAlarm(ctx: Context) {
@@ -1437,6 +1487,14 @@ object GuardianEngine {
                     GuardianWatcherService.forceHomeIfBlocked()
                 }
                 Log.w(TAG, "Quota/Session/Curfew/Carapace -> Blocked & Suspended: $pkg")
+            }
+
+            // F8 (v1.23): Periodically re-verify OS suspension on already-blocked packages so any
+            // external unsuspend attempt is automatically healed within seconds.
+            for (pkg in activeBlockedApps) {
+                if (pkg !in toBlock) {
+                    setPackageSuspendedInternal(ctx, pkg, true)
+                }
             }
 
             val wlState = getState(ctx)
