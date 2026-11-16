@@ -109,13 +109,12 @@ try {
     }
     Write-Host "  [OK] Installation reussie (Success) !" -ForegroundColor Green
 
-    # v1.21 (F3) : accorder WRITE_SECURE_SETTINGS a Guardian pour l'auto-reparation reelle de l'accessibilite
-    # (dpm.setSecureSetting refuse les cles d'accessibilite). Idempotent, a refaire apres chaque reinstallation.
-    $grantOutput = & $adb -s $targetDevice shell pm grant com.jo.custos.guardian android.permission.WRITE_SECURE_SETTINGS 2>&1 | Out-String
+    # v1.21/v1.22 (F3/F4) : accorder WRITE_SECURE_SETTINGS et GET_USAGE_STATS a Guardian
+    $grantOutput = & $adb -s $targetDevice shell "pm grant com.jo.custos.guardian android.permission.WRITE_SECURE_SETTINGS && appops set com.jo.custos.guardian GET_USAGE_STATS allow" 2>&1 | Out-String
     if ($LASTEXITCODE -eq 0 -and $grantOutput -notmatch "Exception") {
-        Write-Host "  [OK] WRITE_SECURE_SETTINGS accorde a Guardian (auto-heal accessibilite actif)." -ForegroundColor Green
+        Write-Host "  [OK] WRITE_SECURE_SETTINGS + GET_USAGE_STATS accordes a Guardian (auto-heal & Carapace prets)." -ForegroundColor Green
     } else {
-        Write-Host "  [ATTENTION] Echec du grant WRITE_SECURE_SETTINGS : $grantOutput" -ForegroundColor Yellow
+        Write-Host "  [ATTENTION] Echec du grant WRITE_SECURE_SETTINGS/GET_USAGE_STATS : $grantOutput" -ForegroundColor Yellow
     }
 
     # S'assurer que les services d'accessibilite (Guardian + Custos UI) sont actifs sans jamais faire de force-stop
