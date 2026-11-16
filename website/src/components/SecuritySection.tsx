@@ -66,30 +66,30 @@ export function SecuritySection() {
                 Pipeline local sur votre Android
               </p>
               <div className="mt-4 space-y-3 text-xs">
-                <div className="flex items-center justify-between rounded-lg border border-slate-200/80 bg-slate-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/70">
-                  <span className="flex items-center gap-2 font-medium text-slate-800 dark:text-zinc-200">
-                    <Cpu className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200/80 bg-slate-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/70">
+                  <span className="flex min-w-0 items-center gap-2 font-medium text-slate-800 dark:text-zinc-200">
+                    <Cpu className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
                     1. Lecture locale (UsageStats + A11y RAM)
                   </span>
-                  <span className="font-mono text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
+                  <span className="shrink-0 whitespace-nowrap font-mono text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
                     On-device
                   </span>
                 </div>
-                <div className="flex items-center justify-between rounded-lg border border-slate-200/80 bg-slate-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/70">
-                  <span className="flex items-center gap-2 font-medium text-slate-800 dark:text-zinc-200">
-                    <FileCheck2 className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200/80 bg-slate-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/70">
+                  <span className="flex min-w-0 items-center gap-2 font-medium text-slate-800 dark:text-zinc-200">
+                    <FileCheck2 className="h-4 w-4 shrink-0 text-violet-600 dark:text-violet-400" />
                     2. Évaluation des règles (limits.json)
                   </span>
-                  <span className="font-mono text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
+                  <span className="shrink-0 whitespace-nowrap font-mono text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
                     1 sec tick
                   </span>
                 </div>
-                <div className="flex items-center justify-between rounded-lg border border-slate-200/80 bg-slate-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/70">
-                  <span className="flex items-center gap-2 font-medium text-slate-800 dark:text-zinc-200">
-                    <ServerOff className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200/80 bg-slate-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/70">
+                  <span className="flex min-w-0 items-center gap-2 font-medium text-slate-800 dark:text-zinc-200">
+                    <ServerOff className="h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-400" />
                     3. Transmission cloud ou revente
                   </span>
-                  <span className="font-mono text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
+                  <span className="shrink-0 whitespace-nowrap font-mono text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
                     0 octet
                   </span>
                 </div>

@@ -75,7 +75,7 @@ const NODE_CONFIGS: NodeConfig[] = [
   {
     id: "delay",
     title: "Delay & Limits",
-    subtitle: "Protection active",
+    subtitle: "Délai actif",
     angleDeg: 0,
     isHub: true,
     summaryColorClass: "text-emerald-700 dark:text-emerald-400",
@@ -143,7 +143,7 @@ const NODE_CONFIGS: NodeConfig[] = [
   {
     id: "partial",
     title: "Partial Access",
-    subtitle: "In-app tabs",
+    subtitle: "In-app",
     angleDeg: 126,
     summaryColorClass: "text-sky-700 dark:text-sky-400",
     detailHeadline: "Partial Access",
@@ -239,9 +239,9 @@ export function AndroidPhoneMockup() {
     const stageH = stageSize.height;
     const hubCx = stageW / 2;
     const hubCy = stageH / 2 + 6;
-    const radius = Math.min(stageW, stageH) * 0.34;
-    const hubSize = Math.round((stageW * 0.34) / 2) * 2;
-    const satSize = Math.round((stageW * 0.255) / 2) * 2;
+    const radius = Math.min(stageW, stageH) * 0.342;
+    const hubSize = Math.round((stageW * 0.345) / 2) * 2;
+    const satSize = Math.round((stageW * 0.262) / 2) * 2;
     const hubR = hubSize / 2;
     const satR = satSize / 2;
 
@@ -392,26 +392,26 @@ export function AndroidPhoneMockup() {
                     onClick={() => setZoomedId(node.id)}
                     tabIndex={isOtherZoomed ? -1 : 0}
                     aria-label={`Ouvrir ${node.title}`}
-                    className="flex h-full w-full flex-col items-center justify-center px-1 text-center transition-colors hover:bg-slate-50/70 dark:hover:bg-zinc-900/50"
+                    className="flex h-full w-full flex-col items-center justify-center gap-[1px] px-2 text-center transition-colors hover:bg-slate-50/70 sm:gap-0.5 dark:hover:bg-zinc-900/50"
                   >
                     <NodeIcon
                       id={node.id}
                       className={
                         node.isHub
-                          ? "h-4 w-4 sm:h-[18px] sm:w-[18px]"
-                          : "h-3.5 w-3.5 sm:h-4 sm:w-4"
+                          ? "h-3.5 w-3.5 sm:h-[18px] sm:w-[18px]"
+                          : "h-3 w-3 sm:h-4 sm:w-4"
                       }
                     />
                     <span
-                      className={`mt-0.5 font-bold leading-tight text-slate-950 dark:text-white sm:mt-1 ${
-                        node.isHub ? "text-[11px] sm:text-xs" : "text-[10px]"
+                      className={`font-bold leading-none text-slate-950 sm:leading-tight dark:text-white ${
+                        node.isHub ? "text-[10px] sm:text-xs" : "text-[9px] sm:text-[10px]"
                       }`}
                     >
                       {node.title}
                     </span>
                     <span
-                      className={`mt-0.5 font-medium leading-tight ${
-                        node.isHub ? "text-[9.5px] sm:text-[10px]" : "text-[8.5px] sm:text-[9.5px]"
+                      className={`font-medium leading-none sm:leading-tight ${
+                        node.isHub ? "text-[9px] sm:text-[10px]" : "text-[8px] sm:text-[9px]"
                       } ${node.summaryColorClass}`}
                     >
                       {node.subtitle}
@@ -422,10 +422,10 @@ export function AndroidPhoneMockup() {
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.24, delay: 0.16 }}
-                    className="flex h-full w-full flex-col p-3.5 sm:p-4"
+                    className="flex h-full w-full flex-col p-3 sm:p-4"
                   >
                     {/* Sticky Top Header */}
-                    <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 pb-2.5 dark:border-zinc-800">
+                    <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 pb-2 sm:pb-2.5 dark:border-zinc-800">
                       <button
                         type="button"
                         onClick={() => setZoomedId(null)}
@@ -443,7 +443,7 @@ export function AndroidPhoneMockup() {
                     </div>
 
                     {/* Scrollable Body */}
-                    <div className="mt-3 flex-1 overflow-y-auto pr-0.5">
+                    <div className="mt-2.5 flex-1 overflow-y-auto pr-0.5 sm:mt-3">
                       <h3 className="text-center text-sm font-bold text-slate-950 dark:text-white">
                         {node.detailHeadline}
                       </h3>
@@ -454,7 +454,7 @@ export function AndroidPhoneMockup() {
                       <button
                         type="button"
                         onClick={() => setZoomedId(null)}
-                        className={`mt-3.5 w-full rounded-xl px-3 py-2 text-[11px] font-semibold text-white transition-opacity hover:opacity-90 ${
+                        className={`mt-3 w-full rounded-xl px-3 py-1.5 text-[11px] font-semibold text-white transition-opacity hover:opacity-90 sm:mt-3.5 sm:py-2 ${
                           node.ctaStyle === "red"
                             ? "bg-rose-600"
                             : "bg-slate-950 dark:bg-indigo-600"
@@ -463,17 +463,17 @@ export function AndroidPhoneMockup() {
                         {node.ctaLabel}
                       </button>
 
-                      <div className="mt-3.5 space-y-2">
+                      <div className="mt-2.5 space-y-1.5 sm:mt-3.5 sm:space-y-2">
                         {node.rows.map((row) => (
                           <div
                             key={row.title}
-                            className="flex items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-2.5 py-2 dark:border-zinc-800 dark:bg-zinc-900/70"
+                            className="flex items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-2.5 py-1.5 sm:py-2 dark:border-zinc-800 dark:bg-zinc-900/70"
                           >
                             <div className="min-w-0">
-                              <p className="truncate text-[11px] font-semibold text-slate-900 dark:text-zinc-100">
+                              <p className="text-[11px] font-semibold leading-snug text-slate-900 dark:text-zinc-100">
                                 {row.title}
                               </p>
-                              <p className="truncate text-[10px] text-slate-600 dark:text-zinc-400">
+                              <p className="text-[10px] leading-snug text-slate-600 dark:text-zinc-400">
                                 {row.meta}
                               </p>
                             </div>
@@ -486,7 +486,7 @@ export function AndroidPhoneMockup() {
                     </div>
 
                     {/* Bottom Hint */}
-                    <p className="mt-2.5 shrink-0 border-t border-slate-100 pt-2 text-center text-[10px] text-slate-600 dark:border-zinc-800/80 dark:text-zinc-400">
+                    <p className="mt-2 shrink-0 border-t border-slate-100 pt-1.5 text-center text-[10px] text-slate-600 sm:mt-2.5 sm:pt-2 dark:border-zinc-800/80 dark:text-zinc-400">
                       Appuyez sur « Pentagone » pour dézoomer
                     </p>
                   </motion.div>
