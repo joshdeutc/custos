@@ -214,6 +214,16 @@ object GuardianEngine {
             if (currentState == null) {
                 currentState = loadState(ctx)
             }
+            if (!carapaceActive && isCarapacePersisted(ctx)) {
+                ensureAccessibilityServicesEnabled(ctx)
+                if (!isProtectionHealthy(ctx)) {
+                    carapaceActive = true
+                    a11yDownSinceMs = System.currentTimeMillis() - A11Y_FAIL_CLOSED_GRACE_MS
+                    Log.w(TAG, "🛡️ Restored persisted Carapace state on init (0s grace)")
+                } else {
+                    setCarapacePersisted(ctx, false)
+                }
+            }
         }
     }
 
@@ -729,10 +739,21 @@ object GuardianEngine {
                     dpm.setUninstallBlocked(admin, "com.jo.selfcontrol.ultimate", true)
                     dpm.clearUserRestriction(admin, UserManager.DISALLOW_FACTORY_RESET)
                     runCatching { dpm.addUserRestriction(admin, UserManager.DISALLOW_SAFE_BOOT) }
+                    ensureAccessibilityServicesEnabled(ctx)
                     if (isProtectionHealthy(ctx)) {
                         runCatching { dpm.clearUserRestriction(admin, UserManager.DISALLOW_DEBUGGING_FEATURES) }
                         runCatching { dpm.clearUserRestriction(admin, UserManager.DISALLOW_INSTALL_APPS) }
                         runCatching { dpm.clearUserRestriction(admin, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES) }
+                        if (carapaceActive || isCarapacePersisted(ctx)) {
+                            carapaceActive = false
+                            a11yDownSinceMs = 0L
+                            applyCarapaceRestrictions(ctx, false)
+                        }
+                    } else if (isCarapacePersisted(ctx)) {
+                        // v1.24: Phone was already in Carapace before reboot/restart and sabotage persists -> 0s grace!
+                        carapaceActive = true
+                        a11yDownSinceMs = System.currentTimeMillis() - A11Y_FAIL_CLOSED_GRACE_MS
+                        applyCarapaceRestrictions(ctx, true)
                     }
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
                         runCatching { dpm.addUserRestriction(admin, UserManager.DISALLOW_CONFIG_DATE_TIME) }
@@ -1147,11 +1168,32 @@ object GuardianEngine {
     private var lastA11yHealMs = 0L
     private var lastEvalMs = 0L
 
-    // v1.21/v1.22 Carapace Complète (fail-closed): timestamp at which Guardian's protection
+    // v1.21/v1.22/v1.24 Carapace Complète (fail-closed): timestamp at which Guardian's protection
     // (Accessibility or UsageStats) was first seen degraded (0 = healthy).
+    // Grace period lowered to 3s in v1.24 (and 0s across reboots when Carapace was already active).
     @Volatile private var a11yDownSinceMs = 0L
     @Volatile private var carapaceActive = false
-    private const val A11Y_FAIL_CLOSED_GRACE_MS = 10_000L
+    private const val A11Y_FAIL_CLOSED_GRACE_MS = 3_000L
+    private const val CARAPACE_PREFS = "guardian_carapace_prefs"
+    private const val KEY_CARAPACE_ACTIVE = "carapace_active"
+
+    private fun isCarapacePersisted(ctx: Context): Boolean {
+        return try {
+            ctx.getSharedPreferences(CARAPACE_PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_CARAPACE_ACTIVE, false)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun setCarapacePersisted(ctx: Context, active: Boolean) {
+        try {
+            ctx.getSharedPreferences(CARAPACE_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_CARAPACE_ACTIVE, active)
+                .commit()
+        } catch (_: Exception) {}
+    }
 
     /** True when GuardianWatcherService is listed in enabled_accessibility_services AND a11y is on. */
     fun isAccessibilityHealthy(ctx: Context): Boolean {
@@ -1209,6 +1251,7 @@ object GuardianEngine {
      * Never touches DISALLOW_FACTORY_RESET (AGENTS.md Rule 1).
      */
     private fun applyCarapaceRestrictions(ctx: Context, active: Boolean) {
+        setCarapacePersisted(ctx, active)
         if (!isDeviceOwner(ctx)) return
         val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
         val admin = getAdminComponent(ctx)
@@ -1239,29 +1282,39 @@ object GuardianEngine {
     }
 
     /**
-     * True when protection (Accessibility or UsageStats) has been down for longer than the 10s
-     * grace period despite self-heal attempts. While true, Carapace Complète engages:
-     * ADB is disabled, app installations are blocked, and ALL non-guarded third-party apps on the
-     * device are suspended via Device Owner APIs.
+     * True when protection (Accessibility or UsageStats) has been down for longer than the 3s
+     * grace period despite self-heal attempts (or 0s if Carapace was already persisted before reboot).
+     * While true, Carapace Complète engages: ADB is disabled, app installations are blocked, and ALL
+     * non-guarded third-party apps on the device are suspended via Device Owner APIs.
      */
     fun isFailClosedActive(ctx: Context): Boolean {
         val now = System.currentTimeMillis()
         if (isProtectionHealthy(ctx)) {
-            if (a11yDownSinceMs != 0L || carapaceActive) {
+            val wasPersisted = isCarapacePersisted(ctx)
+            if (a11yDownSinceMs != 0L || carapaceActive || wasPersisted) {
                 Log.i(TAG, "Protection healthy (a11y + usage_stats) -> leaving Carapace mode")
             }
             a11yDownSinceMs = 0L
-            if (carapaceActive) {
+            if (carapaceActive || wasPersisted) {
                 carapaceActive = false
                 applyCarapaceRestrictions(ctx, false)
             }
             return false
         }
+        if (isCarapacePersisted(ctx)) {
+            a11yDownSinceMs = now - A11Y_FAIL_CLOSED_GRACE_MS
+            if (!carapaceActive) {
+                carapaceActive = true
+                applyCarapaceRestrictions(ctx, true)
+                Log.w(TAG, "🛡️ CARAPACE PERSISTED ACROSS REBOOT/RESTART: 0s grace -> maintaining full lockdown")
+            }
+            return true
+        }
         if (a11yDownSinceMs == 0L) {
             a11yDownSinceMs = now
             Log.w(
                 TAG,
-                "Protection degraded (a11y=${isAccessibilityHealthy(ctx)}, usageStats=${isUsageStatsHealthy(ctx)}) -> 10s grace period started"
+                "Protection degraded (a11y=${isAccessibilityHealthy(ctx)}, usageStats=${isUsageStatsHealthy(ctx)}) -> 3s grace period started"
             )
         }
         val active = now - a11yDownSinceMs >= A11Y_FAIL_CLOSED_GRACE_MS

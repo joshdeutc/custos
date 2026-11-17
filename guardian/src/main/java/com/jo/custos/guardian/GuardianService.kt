@@ -46,8 +46,8 @@ class GuardianService : Service() {
                     nm.createNotificationChannel(
                         android.app.NotificationChannel(
                             FG_CHANNEL_ID,
-                            "Custos Guardian — Protection",
-                            android.app.NotificationManager.IMPORTANCE_LOW
+                            "Custos Guardian — Alerte Carapace",
+                            android.app.NotificationManager.IMPORTANCE_HIGH
                         )
                     )
                 }
@@ -539,7 +539,7 @@ class GuardianService : Service() {
 
     companion object {
         private const val TAG = "Custos.Guardian.Service"
-        private const val FG_CHANNEL_ID = "guardian_failclosed"
+        private const val FG_CHANNEL_ID = "guardian_carapace_alert"
         private const val FG_NOTIFICATION_ID = 7341
         const val EXTRA_FG = "com.jo.custos.guardian.EXTRA_FG"
         private const val CLIENT_UI_PACKAGE = "com.jo.selfcontrol.ultimate"
