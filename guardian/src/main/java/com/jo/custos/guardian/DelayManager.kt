@@ -305,6 +305,7 @@ object DelayManager {
     }
 
     private fun getAppLabel(context: Context, pkg: String): String {
+        if (pkg == ConfigManager.TETHERING_VIRTUAL_PACKAGE) return "📡 Partage de connexion"
         return try {
             val pm = context.packageManager
             val ai = pm.getApplicationInfo(pkg, 0)

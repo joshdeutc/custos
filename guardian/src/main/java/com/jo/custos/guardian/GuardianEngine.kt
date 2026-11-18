@@ -758,6 +758,8 @@ object GuardianEngine {
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
                         runCatching { dpm.addUserRestriction(admin, UserManager.DISALLOW_CONFIG_DATE_TIME) }
                     }
+                    // v1.25: Enforce Tethering Curfew immediately on boot/lockdown
+                    runCatching { enforceTetheringCurfew(ctx, isTetheringCurfewActiveNow(ctx)) }
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
                         runCatching { dpm.setAutoTimeEnabled(admin, true) }
                         runCatching { dpm.setAutoTimeZoneEnabled(admin, true) }
@@ -1429,15 +1431,23 @@ object GuardianEngine {
             }
 
             val newlyBlocked = mutableSetOf<String>()
+            var tetheringBlockedByCurfew = false
 
             // 1. Period Blocks (Couvre-feux) - uses wall-clock time and ConfigManager.isInBlockedWindow
             for (period in config.periodBlocks) {
                 if (dayOfWeek in period.allowedDays) {
                     if (ConfigManager.isInBlockedWindow(currentMinutes, period.blockedStartMinutes, period.blockedEndMinutes)) {
-                        newlyBlocked.addAll(period.packages)
+                        for (pkg in period.packages) {
+                            if (pkg == ConfigManager.TETHERING_VIRTUAL_PACKAGE) {
+                                tetheringBlockedByCurfew = true
+                            } else {
+                                newlyBlocked.add(pkg)
+                            }
+                        }
                     }
                 }
             }
+            enforceTetheringCurfew(ctx, tetheringBlockedByCurfew)
 
             var activeOverlayText: String? = null
 
@@ -1517,7 +1527,7 @@ object GuardianEngine {
                 } catch (e: Exception) {
                     (config.limits.map { it.packageName } +
                         config.periodBlocks.flatMap { it.packages })
-                        .filter { !isGuarded(ctx, it) }
+                        .filter { it != ConfigManager.TETHERING_VIRTUAL_PACKAGE && !isGuarded(ctx, it) }
                 }
                 if (allNonGuarded.any { it !in newlyBlocked }) {
                     Log.w(TAG, "🛡️ CARAPACE ACTIVE: suspending ${allNonGuarded.size} non-guarded installed package(s)")
@@ -1559,6 +1569,65 @@ object GuardianEngine {
                 }
                 BlockedNotificationManager.applyNotificationMute(ctx, pkg, false)
                 Log.i(TAG, "Quota/Session/Curfew/Carapace lifted -> Unblocked: $pkg (whitelistQuarantined=$keepSuspendedByWhitelist)")
+            }
+        }
+    }
+
+    @Volatile private var tetheringCurfewActive = false
+
+    fun isTetheringCurfewActiveNow(ctx: Context): Boolean {
+        val config = ConfigManager.loadConfig(ctx)
+        val now = java.util.Calendar.getInstance()
+        val dayOfWeek = now.get(java.util.Calendar.DAY_OF_WEEK) - 1
+        val currentMinutes = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE)
+        return config.periodBlocks.any { period ->
+            dayOfWeek in period.allowedDays &&
+                ConfigManager.TETHERING_VIRTUAL_PACKAGE in period.packages &&
+                ConfigManager.isInBlockedWindow(currentMinutes, period.blockedStartMinutes, period.blockedEndMinutes)
+        }
+    }
+
+    /**
+     * v1.25: Enforces or lifts the Tethering Curfew via Device Owner UserManager.DISALLOW_CONFIG_TETHERING
+     * plus best-effort active stop across all tethering transports (Wi-Fi Hotspot, USB, Bluetooth, Ethernet, P2P).
+     */
+    private fun enforceTetheringCurfew(ctx: Context, blocked: Boolean) {
+        tetheringCurfewActive = blocked
+        if (!isDeviceOwner(ctx)) return
+        val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
+        val um = ctx.getSystemService(Context.USER_SERVICE) as? UserManager
+        val admin = getAdminComponent(ctx)
+        val currentlyRestricted = um?.hasUserRestriction(UserManager.DISALLOW_CONFIG_TETHERING) == true
+        try {
+            if (blocked) {
+                if (!currentlyRestricted) {
+                    dpm.addUserRestriction(admin, UserManager.DISALLOW_CONFIG_TETHERING)
+                    stopActiveTetheringBestEffort(ctx)
+                    Log.w(TAG, "📡 Tethering Curfew ACTIVE -> DISALLOW_CONFIG_TETHERING enforced (all Hotspot/USB/BT/Ethernet sharing disabled)")
+                }
+            } else {
+                if (currentlyRestricted) {
+                    dpm.clearUserRestriction(admin, UserManager.DISALLOW_CONFIG_TETHERING)
+                    Log.i(TAG, "📡 Tethering Curfew ENDED -> DISALLOW_CONFIG_TETHERING cleared")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to enforce tethering curfew (blocked=$blocked): ${e.message}", e)
+        }
+    }
+
+    private fun stopActiveTetheringBestEffort(ctx: Context) {
+        runCatching {
+            val tm = ctx.getSystemService("tethering")
+            tm?.javaClass?.getMethod("stopAllTethering")?.invoke(tm)
+        }
+        runCatching {
+            val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE)
+            val stopMethod = cm?.javaClass?.getMethod("stopTethering", Int::class.javaPrimitiveType)
+            if (stopMethod != null) {
+                for (type in 0..5) {
+                    runCatching { stopMethod.invoke(cm, type) }
+                }
             }
         }
     }

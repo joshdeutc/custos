@@ -2090,7 +2090,11 @@ class MainActivity : Activity() {
     }
 
     private fun showAddCurfewRuleDialog() {
-        val apps = getInstalledLaunchableApps(forceRefresh = true)
+        val tetheringItem = AppInfo(
+            packageName = ConfigManager.TETHERING_VIRTUAL_PACKAGE,
+            label = "📡 Partage de connexion (Wi-Fi / USB / BT)"
+        )
+        val apps = listOf(tetheringItem) + getInstalledLaunchableApps(forceRefresh = true)
         val selected = mutableSetOf<String>()
 
         val listView = buildAppCheckListView(apps, selected)
@@ -2112,7 +2116,11 @@ class MainActivity : Activity() {
     }
 
     private fun showEditCurfewRuleDialog(index: Int, existingRule: ConfigManager.PeriodBlockRule) {
-        val apps = getInstalledLaunchableApps(forceRefresh = true)
+        val tetheringItem = AppInfo(
+            packageName = ConfigManager.TETHERING_VIRTUAL_PACKAGE,
+            label = "📡 Partage de connexion (Wi-Fi / USB / BT)"
+        )
+        val apps = listOf(tetheringItem) + getInstalledLaunchableApps(forceRefresh = true)
         val selected = mutableSetOf<String>()
 
         val listView = buildAppCheckListView(apps, selected, preChecked = existingRule.packages.toSet())
@@ -3854,6 +3862,9 @@ class MainActivity : Activity() {
     // ──────────────────────────────────────
 
     private fun getAppName(pkg: String): String {
+        if (pkg == ConfigManager.TETHERING_VIRTUAL_PACKAGE) {
+            return "📡 Partage de connexion (Wi-Fi/USB/BT)"
+        }
         return appNameCache.getOrPut(pkg) {
             try {
                 val ai = packageManager.getApplicationInfo(pkg, 0)
@@ -3866,6 +3877,9 @@ class MainActivity : Activity() {
     }
 
     private fun getAppIcon(pkg: String): Drawable {
+        if (pkg == ConfigManager.TETHERING_VIRTUAL_PACKAGE) {
+            return getDrawable(android.R.drawable.ic_menu_share)!!
+        }
         return appIconCache.getOrPut(pkg) {
             try {
                 packageManager.getApplicationIcon(pkg)
@@ -4561,8 +4575,12 @@ class MainActivity : Activity() {
      */
     private val iconCache = HashMap<String, Drawable>()
     private fun appIcon(pkg: String): Drawable = iconCache.getOrPut(pkg) {
-        try { packageManager.getApplicationIcon(pkg) }
-        catch (_: Exception) { getDrawable(android.R.drawable.sym_def_app_icon)!! }
+        if (pkg == ConfigManager.TETHERING_VIRTUAL_PACKAGE) {
+            getDrawable(android.R.drawable.ic_menu_share)!!
+        } else {
+            try { packageManager.getApplicationIcon(pkg) }
+            catch (_: Exception) { getDrawable(android.R.drawable.sym_def_app_icon)!! }
+        }
     }
 
     @Volatile private var cachedLaunchableApps: List<AppInfo>? = null
