@@ -5,26 +5,26 @@ import { LegalPageShell } from "@/components/LegalPageShell";
 import { SITE_CONFIG } from "@/lib/constants";
 
 export const metadata: Metadata = {
-  title: "Suppression de compte et des données",
+  title: "Account & Data Deletion",
   description:
-    "Procédure officielle pour supprimer votre compte Early Access et toutes vos données liées à l’application Android Custos (Google Play Data Safety).",
+    "Official procedure to delete your Early Access entry and any data associated with the Custos Android app (Google Play Data Safety).",
   alternates: {
     canonical: "/delete-account",
   },
   openGraph: {
     type: "website",
-    locale: "fr_FR",
+    locale: "en_US",
     url: "/delete-account",
     siteName: "Custos",
-    title: "Suppression de compte et des données | Custos",
+    title: "Account & Data Deletion | Custos",
     description:
-      "Procédure officielle pour effacer vos données locales Android ou demander la suppression de votre e-mail Early Access Custos.",
+      "Official instructions to clear local Android data or request deletion of your Custos Early Access email.",
   },
   twitter: {
     card: "summary",
-    title: "Suppression de compte et des données | Custos",
+    title: "Account & Data Deletion | Custos",
     description:
-      "Procédure simple et transparente pour supprimer vos données liées à l’application Android Custos.",
+      "Clear and transparent procedure to delete data associated with the Custos Android app.",
   },
 };
 
@@ -32,30 +32,29 @@ export default function DeleteAccountPage() {
   const { legal } = SITE_CONFIG;
 
   const deletionMailto = `mailto:${legal.email}?subject=${encodeURIComponent(
-    "[Custos] Demande de suppression de compte et de données"
+    "[Custos] Account & Data Deletion Request"
   )}&body=${encodeURIComponent(
-    "Bonjour,\n\nJe demande la suppression définitive de mon compte / inscription Early Access et de toutes les données associées à l'application Custos.\n\nAdresse e-mail concernée : \nDétails complémentaires (facultatif) : \n\nMerci."
+    "Hello,\n\nI request the permanent deletion of my Early Access entry / account and all associated data for the Custos app.\n\nEmail address concerned: \nAdditional details (optional): \n\nThank you."
   )}`;
 
   return (
     <LegalPageShell
-      badge="Google Play Sécurité des données · RGPD Art. 17"
-      title="Suppression de compte et des données"
-      subtitle="Procédure simple et transparente pour effacer vos données locales sur Android ou demander par e-mail la suppression définitive de toute information liée à votre accès Early Access ou support."
+      badge="Google Play Data Safety · GDPR Art. 17"
+      title="Account & Data Deletion"
+      subtitle="Clear, transparent instructions to erase your local data on Android or request by email the permanent deletion of any information linked to Early Access or support."
     >
       {/* Important Clarification Banner */}
       <section className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-6 dark:border-emerald-500/30 dark:bg-emerald-500/10">
         <h2 className="text-base font-semibold text-emerald-950 dark:text-emerald-200">
-          À savoir : Custos fonctionne sans création de compte cloud
+          Good to know: Custos works without cloud account creation
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-emerald-900 dark:text-emerald-100/90">
-          L’application mobile Custos ne nécessite pas la création d’un compte
-          sur nos serveurs : toutes vos limites d’applications, couvre-feux et
-          statistiques restent stockés localement sur votre téléphone. Si vous
-          avez communiqué une adresse e-mail dans le cadre du{" "}
-          <strong>programme Early Access Google Play</strong> ou du{" "}
-          <strong>support technique</strong>, vous pouvez demander leur
-          suppression définitive à tout moment selon la procédure ci-dessous.
+          The Custos mobile app does not require creating an account on our
+          servers: all of your app limits, curfews, and statistics remain stored
+          locally on your phone. If you shared an email address for{" "}
+          <strong>Google Play Early Access</strong> or{" "}
+          <strong>technical support</strong>, you can request its permanent
+          deletion at any time using the steps below.
         </p>
       </section>
 
@@ -66,41 +65,41 @@ export default function DeleteAccountPage() {
             <Mail className="h-5 w-5" />
           </div>
           <h2 className="text-xl font-semibold text-slate-950 dark:text-white">
-            1. Demander la suppression définitive de votre compte / e-mail
+            1. Request Permanent Deletion of Your Account / Email
           </h2>
         </div>
 
         <p>
-          Suivez ces étapes pour demander la suppression complète de votre
-          adresse e-mail d’accès anticipé (Google Play Closed Testing) et de tout
-          historique d’échanges auprès de l’éditeur{" "}
+          Follow these steps to request complete deletion of your Early Access
+          email address (Google Play Closed Testing) and any support message
+          history held by{" "}
           <strong>
             {legal.publisherApp} — {legal.publisherDisplayName} ({legal.city})
           </strong>{" "}
-          ({legal.email}) :
+          ({legal.email}):
         </p>
 
         <ol className="space-y-4">
           {[
             {
-              step: "Étape 1",
-              title: "Rédiger un e-mail depuis l’adresse concernée",
-              text: `Envoyez un e-mail à ${legal.email} en utilisant de préférence l’adresse e-mail associée à votre demande d’Early Access ou à vos échanges avec le support.`,
+              step: "Step 1",
+              title: "Email from the address concerned",
+              text: `Send an email to ${legal.email}, ideally from the email address associated with your Early Access request or support messages.`,
             },
             {
-              step: "Étape 2",
-              title: "Indiquer l’objet de la demande",
-              text: "Utilisez l’objet : « [Custos] Demande de suppression de compte et de données » afin d’assurer un traitement prioritaire.",
+              step: "Step 2",
+              title: "Include the request subject",
+              text: "Use the subject line: “[Custos] Account & Data Deletion Request” so your request is prioritized.",
             },
             {
-              step: "Étape 3",
-              title: "Préciser les éléments à supprimer",
-              text: "Confirmez l’adresse e-mail Google Play ou support concernée ainsi que, si applicable, votre souhait de quitter la liste des testeurs Early Access Custos.",
+              step: "Step 3",
+              title: "Specify what to delete",
+              text: "Confirm the Google Play or support email address concerned and, if applicable, that you wish to leave the Custos Early Access tester list.",
             },
             {
-              step: "Étape 4",
-              title: "Accusé de réception et exécution définitive",
-              text: "Vous recevez un accusé de réception sous 48 heures ouvrées. La suppression définitive est exécutée sous 7 jours ouvrés maximum (bien en deçà du délai légal RGPD d’un mois) et confirmée par retour d’e-mail.",
+              step: "Step 4",
+              title: "Confirmation & permanent erasure",
+              text: "You will receive an acknowledgment within 48 business hours. Permanent deletion is completed within 7 business days maximum (well within the 1-month GDPR limit) and confirmed by email.",
             },
           ].map((item) => (
             <li
@@ -123,11 +122,11 @@ export default function DeleteAccountPage() {
         <div className="flex flex-col gap-3 rounded-2xl border border-indigo-200 bg-white p-6 sm:flex-row sm:items-center sm:justify-between dark:border-indigo-500/30 dark:bg-[#111116]">
           <div>
             <p className="font-semibold text-slate-950 dark:text-white">
-              Envoyer une demande en un clic
+              Send a deletion request in one click
             </p>
             <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-600 dark:text-zinc-400">
               <Clock className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
-              <span>Délai de traitement : sous 7 jours ouvrés maximum</span>
+              <span>Processing time: within 7 business days maximum</span>
             </p>
           </div>
           <a
@@ -135,7 +134,7 @@ export default function DeleteAccountPage() {
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:brightness-110"
           >
             <Trash2 className="h-4 w-4" />
-            <span>Écrire à {legal.email}</span>
+            <span>Email {legal.email}</span>
           </a>
         </div>
       </section>
@@ -147,34 +146,32 @@ export default function DeleteAccountPage() {
             <Smartphone className="h-5 w-5" />
           </div>
           <h2 className="text-xl font-semibold text-slate-950 dark:text-white">
-            2. Effacer immédiatement vos données locales sur Android
+            2. Immediately Erase Local Data on Android
           </h2>
         </div>
 
         <p>
-          Pour supprimer instantanément 100 % des règles, quotas, préférences et
-          états stockés sur votre téléphone :
+          To instantaneously wipe 100% of rules, quotas, preferences, and states
+          stored on your phone:
         </p>
 
         <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-zinc-800 dark:bg-[#111116]">
           <ol className="list-decimal space-y-2 pl-5 text-sm text-slate-700 dark:text-zinc-300">
             <li>
-              Ouvrez les <strong>Paramètres Android</strong> de votre appareil.
+              Open your device’s <strong>Android Settings</strong>.
             </li>
             <li>
-              Accédez à <strong>Applications</strong> → <strong>Custos</strong>{" "}
-              → <strong>Espace de stockage et cache</strong>.
+              Go to <strong>Apps</strong> → <strong>Custos</strong> →{" "}
+              <strong>Storage &amp; cache</strong>.
             </li>
             <li>
-              Appuyez sur <strong>Supprimer les données</strong> (ou désinstallez
-              simplement l’application).
+              Tap <strong>Clear storage</strong> (or simply uninstall the app).
             </li>
           </ol>
           <p className="mt-3 text-xs text-slate-600 dark:text-zinc-400">
-            Note : si vous avez activé la sauvegarde Google Drive / Android Auto
-            Backup sur votre appareil, vous pouvez également supprimer la
-            sauvegarde de l’application dans les paramètres de votre compte
-            Google.
+            Note: if Google Drive / Android Auto Backup is enabled on your
+            device, you can also delete the app backup inside your Google
+            account settings.
           </p>
         </div>
       </section>
@@ -182,61 +179,59 @@ export default function DeleteAccountPage() {
       {/* Summary of Deleted vs Retained Data */}
       <section className="space-y-3">
         <h2 className="text-xl font-semibold text-slate-950 dark:text-white">
-          3. Périmètre des données supprimées et exceptions légales
+          3. Scope of Deleted Data &amp; Legal Exceptions
         </h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-zinc-800 dark:bg-[#111116]">
             <h3 className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
-              Données définitivement effacées
+              Permanently Deleted Data
             </h3>
             <ul className="mt-2 list-disc space-y-1.5 pl-4 text-xs leading-relaxed text-slate-600 dark:text-zinc-400">
               <li>
-                Adresse e-mail inscrite aux tests fermés / Early Access Google
-                Play.
+                Email address enrolled in Google Play Closed Testing / Early
+                Access.
               </li>
               <li>
-                Intégralité des messages et pièces échangées avec{" "}
-                {legal.email}.
+                All support messages and attachments exchanged with {legal.email}.
               </li>
               <li>
-                Sur votre téléphone : l’ensemble des fichiers JSON et
-                préférences locales lors de la désinstallation.
+                On your phone: all local JSON files and preferences upon
+                uninstallation.
               </li>
             </ul>
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-zinc-800 dark:bg-[#111116]">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-zinc-200">
-              Durées techniques résiduelles
+              Residual Technical Retention
             </h3>
             <ul className="mt-2 list-disc space-y-1.5 pl-4 text-xs leading-relaxed text-slate-600 dark:text-zinc-400">
               <li>
-                Journaux techniques transitoires de sécurité web de l’hébergeur (
-                {legal.hostName}), purgés automatiquement selon ses fenêtres de
-                rétention standards.
+                Transient web security logs from the hosting provider (
+                {legal.hostName}), automatically purged according to its
+                standard retention windows.
               </li>
               <li>
-                Données strictement imposées par une obligation légale française
-                en cas de facturation commerciale future (non applicable aux
-                utilisateurs gratuits).
+                Records strictly required by French accounting law in the event
+                of future commercial billing (not applicable to free users).
               </li>
             </ul>
           </div>
         </div>
         <p className="pt-2 text-xs text-slate-600 dark:text-zinc-400">
-          Voir également :{" "}
+          See also:{" "}
           <Link
             href="/privacy"
             className="text-indigo-600 hover:underline dark:text-indigo-400"
           >
-            Politique de confidentialité
+            Privacy Policy
           </Link>{" "}
           ·{" "}
           <Link
             href="/terms"
             className="text-indigo-600 hover:underline dark:text-indigo-400"
           >
-            Conditions Générales d’Utilisation
+            Terms of Use &amp; Legal Notice
           </Link>
           .
         </p>

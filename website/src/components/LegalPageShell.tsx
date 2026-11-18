@@ -26,7 +26,7 @@ export function LegalPageShell({
           className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition-colors hover:text-indigo-600 dark:text-zinc-400 dark:hover:text-indigo-400"
         >
           <ArrowLeft className="h-4 w-4" />
-          <span>Retour à l’accueil</span>
+          <span>Back to home</span>
         </Link>
 
         <header className="mt-6 border-b border-slate-200 pb-8 dark:border-zinc-800">
@@ -42,10 +42,10 @@ export function LegalPageShell({
           <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-slate-600 dark:text-zinc-400">
             <span className="inline-flex items-center gap-1.5">
               <Calendar className="h-3.5 w-3.5" />
-              <span>Dernière mise à jour : {lastUpdated}</span>
+              <span>Last updated: {lastUpdated}</span>
             </span>
             <span className="font-mono">
-              Application : {SITE_CONFIG.legal.publisherApp} ({SITE_CONFIG.packageName})
+              App: {SITE_CONFIG.legal.publisherApp} ({SITE_CONFIG.packageName})
             </span>
           </div>
         </header>

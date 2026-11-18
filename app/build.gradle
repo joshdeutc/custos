@@ -24,7 +24,7 @@ android {
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.jo.selfcontrol.ultimate"
+        applicationId "com.custos.studio.app"
         minSdk 26
         targetSdk 34
         versionCode 5

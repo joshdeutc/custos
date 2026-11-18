@@ -12,32 +12,32 @@ interface FaqItem {
 const FAQ_ITEMS: FaqItem[] = [
   {
     question:
-      "Pourquoi Custos demande-t-il l’autorisation Service d’Accessibilité ?",
+      "Why does Custos request the Accessibility Service permission?",
     answer:
-      "Sur Android, le service d’accessibilité est indispensable pour connaître en temps réel l’application au premier plan, vous ramener automatiquement sur l’écran d’accueil lorsqu’un quota ou couvre-feu est dépassé, et reconnaître les onglets bloqués par la fonction Accès Partiel (comme YouTube Shorts). Aucune frappe clavier, aucun mot de passe ni contenu de message n’est jamais lu ou enregistré.",
+      "On Android, the accessibility service is essential to detect the active foreground app in real time, return you automatically to the home screen when a quota or curfew expires, and recognize tabs blocked by Partial Access (such as YouTube Shorts). No keystrokes, passwords, or message contents are ever read or stored.",
   },
   {
     question:
-      "Mes données d’utilisation quittent-elles mon smartphone ?",
+      "Does my usage data ever leave my smartphone?",
     answer:
-      "Non. Custos fonctionne sans serveur distant ni création de compte. Vos règles (limits.json, screen_rules.json), compteurs quotidiens et préférences restent strictement dans le stockage privé local de votre appareil.",
+      "No. Custos operates without any remote server or account creation. Your rules (limits.json, screen_rules.json), daily counters, and preferences remain strictly inside your device’s private local storage.",
   },
   {
     question:
-      "Que se passe-t-il si j’essaie d’alléger une limite ou d’annuler le Mode Nucléaire ?",
+      "What happens if I try to relax a limit or cancel Nuclear Mode?",
     answer:
-      "C’est le cœur du mécanisme anti-impulsion de Custos : renforcer une limite est instantané, mais l’alléger exige d’attendre l’expiration du délai de sécurité que vous avez défini (de 30 minutes à plusieurs heures). Le Mode Nucléaire, quant à lui, reste verrouillé jusqu’à la fin du minuteur choisi.",
+      "That is the core of Custos’s anti-impulse mechanism: tightening a limit is instant, while relaxing it requires waiting for your configured security delay (from 30 minutes to several hours) to elapse. Nuclear Mode remains locked until the selected timer ends.",
   },
   {
-    question: "L’application nécessite-t-elle un téléphone rooté ou des droits spéciaux ?",
+    question: "Does the app require a rooted phone or special privileges?",
     answer:
-      "Non. Custos fonctionne sur n’importe quel smartphone Android 8.0 ou supérieur grâce aux autorisations standard d’Android (Accessibilité et Données d’utilisation) — sans root, sans privilège administrateur d’appareil et sans ordinateur. Elle s’installe et se désinstalle comme une application classique.",
+      "No. Custos runs on any Android 8.0+ smartphone using standard Android permissions (Accessibility and Usage Access) — with no root, no device admin setup, and no computer required. It installs and uninstalls like any standard app.",
   },
   {
     question:
-      "Comment installer Custos aujourd’hui ou rejoindre l’Early Access Google Play ?",
+      "How can I install Custos today or join Google Play Early Access?",
     answer:
-      "Custos finalise son déploiement sur le Google Play Store (phase Early Access / Tests fermés). Vous pouvez demander un accès anticipé par e-mail à contact@joshuanancey.com ou consulter dès maintenant le code source et les versions publiées sous licence MIT sur GitHub.",
+      "Custos is finalizing its Google Play Store rollout (Early Access / Closed Testing). You can request early access by emailing contact@joshuanancey.com or inspect the MIT-licensed source code and releases directly on GitHub.",
   },
 ];
 
@@ -53,14 +53,13 @@ export function FaqSection() {
         <div className="text-center">
           <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
             <HelpCircle className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
-            <span>Questions fréquentes</span>
+            <span>Frequently asked questions</span>
           </div>
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl dark:text-white">
-            Tout savoir sur Custos
+            Everything about Custos
           </h2>
           <p className="mt-3 text-sm text-slate-600 sm:text-base dark:text-zinc-400">
-            Permissions Android, vie privée, principe du délai et accès au
-            téléchargement.
+            Android permissions, privacy, security delay, and early access.
           </p>
         </div>
 

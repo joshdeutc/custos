@@ -7,9 +7,9 @@ import { SITE_CONFIG } from "@/lib/constants";
 
 export function FinalCtaSection() {
   const earlyAccessMailto = `mailto:${SITE_CONFIG.legal.email}?subject=${encodeURIComponent(
-    "[Custos] Demande d'accès Early Access Google Play"
+    "[Custos] Google Play Early Access Request"
   )}&body=${encodeURIComponent(
-    "Bonjour,\n\nJe souhaite rejoindre le programme Early Access de Custos sur Google Play.\nAdresse e-mail Google Play :\nModèle Android :"
+    "Hello,\n\nI would like to join the Custos Early Access program on Google Play.\nGoogle Play email address:\nAndroid device model:"
   )}`;
 
   return (
@@ -37,16 +37,16 @@ export function FinalCtaSection() {
           <div className="relative mx-auto max-w-2xl">
             <div className="inline-flex items-center gap-2 rounded-full border border-indigo-400/30 bg-indigo-500/15 px-3.5 py-1 text-xs font-medium text-indigo-200">
               <Smartphone className="h-3.5 w-3.5" />
-              <span>Bientôt sur Google Play Store</span>
+              <span>Coming soon to Google Play Store</span>
             </div>
 
             <h2 className="mt-5 text-3xl font-bold tracking-tight text-white sm:text-4xl">
-              Prêt à reprendre la main sur votre attention ?
+              Ready to take back control of your attention?
             </h2>
             <p className="mt-4 text-sm leading-relaxed text-slate-300 sm:text-base">
-              Custos est en cours de déploiement sur le Google Play Store (Tests
-              fermés / Early Access). Rejoignez l’accès anticipé par e-mail ou
-              découvrez dès maintenant les versions publiées sur GitHub.
+              Custos is rolling out on the Google Play Store (Closed Testing /
+              Early Access). Request early access by email or explore our
+              MIT-licensed releases on GitHub.
             </p>
 
             <div className="mt-8 flex flex-col justify-center gap-3.5 sm:flex-row">
@@ -55,7 +55,7 @@ export function FinalCtaSection() {
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-6 py-3.5 text-sm font-semibold text-slate-950 shadow-sm transition-all hover:bg-indigo-50"
               >
                 <Mail className="h-4 w-4 text-indigo-600" />
-                <span>Rejoindre l’Early Access Google Play</span>
+                <span>Join Google Play Early Access</span>
               </a>
 
               <a
@@ -65,15 +65,12 @@ export function FinalCtaSection() {
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-6 py-3.5 text-sm font-semibold text-white backdrop-blur transition-colors hover:bg-white/15"
               >
                 <Code2 className="h-4 w-4" />
-                <span>Voir les releases GitHub (MIT)</span>
+                <span>View GitHub Releases (MIT)</span>
               </a>
             </div>
 
             <p className="mt-6 text-xs text-slate-400">
-              Android 8.0+ requis · Package :{" "}
-              <span className="font-mono text-slate-300">
-                {SITE_CONFIG.packageName}
-              </span>
+              Android 8.0+ required · Open Source (MIT)
             </p>
           </div>
         </motion.div>

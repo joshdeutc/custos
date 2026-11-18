@@ -25,14 +25,14 @@ interface FeatureCardItem {
 const FEATURES: FeatureCardItem[] = [
   {
     id: "delay",
-    tag: "Asymétrie anti-impulsion",
-    title: "Délai de Sécurité Anti-Contournement",
+    tag: "Anti-impulse asymmetry",
+    title: "Anti-Bypass Security Delay",
     description:
-      "Durcir une limite ou ajouter une application bloquée prend effet immédiatement. En revanche, relever un quota ou supprimer une règle déclenche obligatoirement un délai de réflexion (ex. 30 min à 24 h) avant application.",
+      "Tightening a limit or adding a blocked app takes effect immediately. However, raising a quota or deleting a rule triggers a mandatory cooling-off delay (e.g., 30 min to 24h) before taking effect.",
     highlights: [
-      "Durée de protection personnalisable à la règle près",
-      "Protection des pages sensibles dans Paramètres Android",
-      "Délai conservé même après redémarrage du téléphone",
+      "Customizable protection duration per individual rule",
+      "Protection of sensitive Android Settings pages",
+      "Delay preserved even after a device reboot",
     ],
     icon: "delay",
     accentBg: "bg-indigo-500/10 dark:bg-indigo-500/15",
@@ -40,14 +40,14 @@ const FEATURES: FeatureCardItem[] = [
   },
   {
     id: "partial",
-    tag: "Filtrage chirurgical in-app",
-    title: "Accès Partiel (Onglets & Flux)",
+    tag: "Surgical in-app filtering",
+    title: "Partial Access (Tabs & Feeds)",
     description:
-      "Ne sacrifiez plus toute une application utile à cause d’un seul onglet addictif. Custos identifie localement l’écran ciblé (ex. YouTube Shorts ou flux d’actualités) et vous redirige instantanément vers l’écran autorisé.",
+      "Stop sacrificing an entire useful app because of a single addictive tab. Custos locally identifies the targeted screen (e.g., YouTube Shorts or news feeds) and redirects you straight back to the allowed screen.",
     highlights: [
-      "Apprentissage différentiel en 2 taps sur votre téléphone",
-      "Conserve la messagerie, les appels et la recherche utiles",
-      "Analyse exclusivement en RAM, sans capture ni stockage d’écran",
+      "2-tap differential learning right on your phone",
+      "Keeps messaging, calls, and useful search intact",
+      "Evaluated strictly in RAM — no screenshots or screen recording",
     ],
     icon: "partial",
     accentBg: "bg-sky-500/10 dark:bg-sky-500/15",
@@ -55,14 +55,14 @@ const FEATURES: FeatureCardItem[] = [
   },
   {
     id: "quotas",
-    tag: "Moteur temporel 1 Hz",
-    title: "Quotas, Sessions & Couvre-feux",
+    tag: "1 Hz time engine",
+    title: "Quotas, Sessions & Curfews",
     description:
-      "Combinez budgets quotidiens (réinitialisation logique à 2h00 du matin), couvre-feux nocturnes prioritaires et limites par session (durée max par ouverture + temps de pause obligatoire avant de pouvoir rouvrir l’app).",
+      "Combine daily time budgets (logical 2:00 AM reset), priority night curfews, and per-session limits (max duration per unlock plus mandatory cooldown before reopening the app).",
     highlights: [
-      "Mise en sourdine automatique des notifications pendant le blocage",
-      "Mesure précise basée sur UsageStats events",
-      "Redémarrage automatique après reboot du téléphone",
+      "Automatic notification muting while an app is blocked",
+      "Accurate measurement powered by UsageStats events",
+      "Automatic restart after phone reboot",
     ],
     icon: "quotas",
     accentBg: "bg-violet-500/10 dark:bg-violet-500/15",
@@ -70,14 +70,14 @@ const FEATURES: FeatureCardItem[] = [
   },
   {
     id: "nuclear",
-    tag: "Focus radical & Presets",
-    title: "Mode Nucléaire & Presets Nommés",
+    tag: "Deep focus & Presets",
+    title: "Nuclear Mode & Named Presets",
     description:
-      "Besoin d’une concentration totale pour un examen, une session Deep Work ou une soirée sans écran ? Déclenchez un blocage ferme sur une durée fixe (30 min, 1 h, 2 h, 4 h ou sur mesure), sans possibilité d’annulation anticipée.",
+      "Need total focus for an exam, a Deep Work sprint, or a screen-free evening? Trigger a firm lockdown for a fixed duration (30 min, 1h, 2h, 4h, or custom) with zero early cancellation.",
     highlights: [
-      "Presets nommés réutilisables en un tap (Deep Work, Examens)",
-      "Activation automatique du mode Ne pas déranger (optionnel)",
-      "Appels d’urgence et applications critiques toujours préservés",
+      "One-tap reusable named presets (Deep Work, Exams)",
+      "Optional automatic Do Not Disturb activation",
+      "Emergency calls and critical system apps always preserved",
     ],
     icon: "nuclear",
     accentBg: "bg-rose-500/10 dark:bg-rose-500/15",
@@ -108,15 +108,15 @@ export function FeaturesSection() {
         <div className="max-w-2xl">
           <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
             <Layers className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
-            <span>Fonctionnalités réelles</span>
+            <span>Core features</span>
           </div>
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl dark:text-white">
-            Conçu pour couper le réflexe automatique, pas votre productivité.
+            Built to break automatic habits, not your productivity.
           </h2>
           <p className="mt-4 text-base leading-relaxed text-slate-600 dark:text-zinc-400">
-            Chaque module de Custos répond à une faille classique des
-            limiteurs d’écran traditionnels : trop faciles à désactiver en un
-            instant ou trop radicaux pour les outils utiles du quotidien.
+            Every Custos module solves a classic flaw of traditional screen-time
+            limiters: either too easy to disable in a split second, or too blunt
+            for the tools you genuinely rely on every day.
           </p>
         </div>
 

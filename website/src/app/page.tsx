@@ -8,27 +8,27 @@ import { FinalCtaSection } from "@/components/FinalCtaSection";
 export const metadata: Metadata = {
   title: {
     absolute:
-      "Custos — Contrôle du temps d’écran et auto-discipline sur Android",
+      "Custos — Screen Time Control & Self-Discipline on Android",
   },
   description:
-    "Découvrez Custos : quotas quotidiens, limites par session, couvre-feux, Accès Partiel (YouTube Shorts, Reels), Mode Nucléaire et délai de sécurité asymétrique. Zéro cloud, 100 % local.",
+    "Discover Custos: daily quotas, session limits, curfews, Partial Access (YouTube Shorts, Reels), Nuclear Mode, and asymmetric security delay. Zero cloud, 100% local.",
   alternates: {
     canonical: "/",
   },
   openGraph: {
     type: "website",
-    locale: "fr_FR",
+    locale: "en_US",
     url: "/",
     siteName: "Custos",
-    title: "Custos — Maîtrisez votre temps d’écran sur Android",
+    title: "Custos — Master Your Screen Time on Android",
     description:
-      "Quotas, couvre-feux, blocage d’onglets addictifs (Accès Partiel), Mode Nucléaire et délai de sécurité asymétrique. Traitement 100 % local, zéro tracking.",
+      "Quotas, curfews, addictive tab blocking (Partial Access), Nuclear Mode, and asymmetric security delay. 100% local processing, zero tracking.",
   },
   twitter: {
     card: "summary",
-    title: "Custos — Auto-discipline & temps d’écran sur Android",
+    title: "Custos — Self-Discipline & Screen Time on Android",
     description:
-      "Quotas quotidiens, Accès Partiel in-app, Mode Nucléaire et délai anti-impulsion. 100 % local sur votre téléphone.",
+      "Daily quotas, in-app Partial Access, Nuclear Mode, and anti-impulse delay. 100% local on your phone.",
   },
 };
 

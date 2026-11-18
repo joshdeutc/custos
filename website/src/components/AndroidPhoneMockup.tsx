@@ -75,52 +75,52 @@ const NODE_CONFIGS: NodeConfig[] = [
   {
     id: "delay",
     title: "Delay & Limits",
-    subtitle: "Délai actif",
+    subtitle: "Delay active",
     angleDeg: 0,
     isHub: true,
     summaryColorClass: "text-emerald-700 dark:text-emerald-400",
     detailHeadline: "Security & Delay",
     detailSub:
-      "Renforcer une règle est immédiat. L’alléger exige d’attendre la fin du délai choisi.",
-    ctaLabel: "Délai global : 12h 00",
+      "Tightening a rule takes effect immediately. Relaxing it requires waiting for your chosen delay.",
+    ctaLabel: "Global delay: 12h 00",
     ctaStyle: "black",
     rows: [
-      { title: "Durcissement d’une limite", meta: "Application directe", status: "Instantané" },
-      { title: "Allègement / Suppression", meta: "Sas de réflexion actif", status: "11h 42m" },
-      { title: "Protection Paramètres", meta: "Anti-désactivation rapide", status: "Actif" },
+      { title: "Tightening a limit", meta: "Applied directly", status: "Instant" },
+      { title: "Relaxing / Deleting", meta: "Cooling-off lock active", status: "11h 42m" },
+      { title: "Settings Protection", meta: "Anti-quick-disable", status: "Active" },
     ],
   },
   {
     id: "limits",
     title: "App Limits",
-    subtitle: "Quotas actifs",
+    subtitle: "Quotas active",
     angleDeg: 270,
     summaryColorClass: "text-slate-600 dark:text-zinc-400",
     detailHeadline: "App Limits",
     detailSub:
-      "Budget quotidien cumulé au premier plan (reset à 02h00) + limites par session.",
-    ctaLabel: "+ Ajouter une application",
+      "Daily foreground budget (resets at 2:00 AM) + per-session limits.",
+    ctaLabel: "+ Add an application",
     ctaStyle: "black",
     rows: [
-      { title: "Instagram", meta: "Quota : 30 min / jour", status: "24m / 30m" },
-      { title: "TikTok", meta: "Quota quotidien atteint", status: "Bloqué" },
-      { title: "Discord", meta: "Session 5 min · Pause 4h", status: "2 / 3 sess." },
+      { title: "Instagram", meta: "Quota: 30 min / day", status: "24m / 30m" },
+      { title: "TikTok", meta: "Daily quota reached", status: "Blocked" },
+      { title: "Discord", meta: "5m session · 4h cooldown", status: "2 / 3 sess." },
     ],
   },
   {
     id: "curfew",
     title: "Curfew",
-    subtitle: "22h → 07h",
+    subtitle: "22:00 → 07:00",
     angleDeg: 342,
     summaryColorClass: "text-indigo-600 dark:text-indigo-400",
     detailHeadline: "Curfew",
     detailSub:
-      "Blocage strict pendant vos heures de sommeil ou d’étude, notifications coupées.",
-    ctaLabel: "+ Ajouter un couvre-feu",
+      "Strict blocking during your sleep or study hours, with notifications muted.",
+    ctaLabel: "+ Add a curfew",
     ctaStyle: "black",
     rows: [
-      { title: "Réseaux sociaux · Soir", meta: "Lun–Dim · Notifs en pause", status: "22h → 07h" },
-      { title: "Deep Study · Matin", meta: "Lun–Ven · YouTube, Reddit", status: "09h → 12h" },
+      { title: "Social Media · Night", meta: "Mon–Sun · Notifs muted", status: "22:00 → 07:00" },
+      { title: "Deep Study · Morning", meta: "Mon–Fri · YouTube, Reddit", status: "09:00 → 12:00" },
     ],
   },
   {
@@ -131,13 +131,13 @@ const NODE_CONFIGS: NodeConfig[] = [
     summaryColorClass: "text-rose-700 dark:text-rose-400",
     detailHeadline: "Nuclear Mode",
     detailSub:
-      "Verrouillage ferme et irréversible sur une durée fixe avec presets nommés et Ne pas déranger.",
-    ctaLabel: "Activer le Mode Nucléaire",
+      "Firm, irreversible lockdown for a fixed duration with named presets and Do Not Disturb.",
+    ctaLabel: "Activate Nuclear Mode",
     ctaStyle: "red",
     rows: [
-      { title: "Preset « Deep Work »", meta: "6 apps + Ne pas déranger", status: "2h 00" },
-      { title: "Preset « Examens »", meta: "Tous réseaux sociaux", status: "4h 00" },
-      { title: "Annulation anticipée", meta: "Impossible avant fin du timer", status: "Verrouillé" },
+      { title: "Preset \"Deep Work\"", meta: "6 apps + Do Not Disturb", status: "2h 00" },
+      { title: "Preset \"Exams\"", meta: "All social networks", status: "4h 00" },
+      { title: "Early cancellation", meta: "Impossible before timer ends", status: "Locked" },
     ],
   },
   {
@@ -148,28 +148,28 @@ const NODE_CONFIGS: NodeConfig[] = [
     summaryColorClass: "text-sky-700 dark:text-sky-400",
     detailHeadline: "Partial Access",
     detailSub:
-      "Redirige instantanément hors des onglets addictifs sans fermer l’application utile.",
-    ctaLabel: "+ Apprendre un écran",
+      "Instantly redirects away from addictive tabs without closing the useful app.",
+    ctaLabel: "+ Learn a screen",
     ctaStyle: "black",
     rows: [
-      { title: "YouTube Shorts", meta: "Redirection → Accueil YouTube", status: "Bloqué" },
-      { title: "WhatsApp · Chaînes", meta: "Discussions & appels gardés", status: "Bloqué" },
+      { title: "YouTube Shorts", meta: "Redirect → YouTube Home", status: "Blocked" },
+      { title: "WhatsApp · Channels", meta: "Chats & calls kept", status: "Blocked" },
     ],
   },
   {
     id: "schedule",
     title: "Schedule",
-    subtitle: "Jours & h.",
+    subtitle: "Days & hrs",
     angleDeg: 198,
     summaryColorClass: "text-slate-600 dark:text-zinc-400",
     detailHeadline: "Allowed Days & Hours",
     detailSub:
-      "Autorisez certaines applications uniquement sur des jours ou créneaux précis.",
-    ctaLabel: "Configurer les créneaux",
+      "Allow specific apps only on selected days or time windows.",
+    ctaLabel: "Configure schedules",
     ctaStyle: "black",
     rows: [
-      { title: "Jeux & Streaming", meta: "Ven 18h → Dim 22h uniquement", status: "Restreint" },
-      { title: "Navigateurs", meta: "Hors plages nocturnes", status: "08h → 22h" },
+      { title: "Games & Streaming", meta: "Fri 18:00 → Sun 22:00 only", status: "Restricted" },
+      { title: "Browsers", meta: "Daytime hours only", status: "08:00 → 22:00" },
     ],
   },
 ];
@@ -306,7 +306,7 @@ export function AndroidPhoneMockup() {
           >
             <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-medium text-slate-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
               <Lock className="h-2.5 w-2.5 shrink-0 text-emerald-700 dark:text-emerald-400" />
-              <span>Custos · Touchez un cercle pour zoomer</span>
+              <span>Custos · Tap a circle to zoom</span>
             </span>
           </motion.div>
 
@@ -391,7 +391,7 @@ export function AndroidPhoneMockup() {
                     type="button"
                     onClick={() => setZoomedId(node.id)}
                     tabIndex={isOtherZoomed ? -1 : 0}
-                    aria-label={`Ouvrir ${node.title}`}
+                    aria-label={`Open ${node.title}`}
                     className="flex h-full w-full flex-col items-center justify-center gap-[1px] px-2 text-center transition-colors hover:bg-slate-50/70 sm:gap-0.5 dark:hover:bg-zinc-900/50"
                   >
                     <NodeIcon
@@ -432,7 +432,7 @@ export function AndroidPhoneMockup() {
                         className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
                       >
                         <ArrowLeft className="h-3 w-3" />
-                        <span>Pentagone</span>
+                        <span>Pentagon</span>
                       </button>
                       <div className="flex min-w-0 items-center gap-1.5">
                         <NodeIcon id={node.id} className="h-3.5 w-3.5" />
@@ -487,7 +487,7 @@ export function AndroidPhoneMockup() {
 
                     {/* Bottom Hint */}
                     <p className="mt-2 shrink-0 border-t border-slate-100 pt-1.5 text-center text-[10px] text-slate-600 sm:mt-2.5 sm:pt-2 dark:border-zinc-800/80 dark:text-zinc-400">
-                      Appuyez sur « Pentagone » pour dézoomer
+                      Tap “Pentagon” to zoom out
                     </p>
                   </motion.div>
                 )}

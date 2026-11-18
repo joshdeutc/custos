@@ -34,22 +34,22 @@ export function HeroSection() {
           >
             <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200/80 bg-white/90 px-3.5 py-1.5 text-xs font-medium text-indigo-700 shadow-sm dark:border-indigo-500/30 dark:bg-zinc-900/90 dark:text-indigo-300">
               <ShieldCheck className="h-3.5 w-3.5" />
-              <span>Android 8.0+ · Architecture 100 % locale · Zéro publicité</span>
+              <span>Android 8.0+ · 100% Local Architecture · Zero Ads</span>
             </div>
 
             <h1 className="mt-6 text-4xl font-bold tracking-tight text-slate-950 sm:text-5xl lg:text-[3.4rem] lg:leading-[1.08] dark:text-white">
-              Maîtrisez votre temps d’écran sur Android.{" "}
+              Master your screen time on Android.{" "}
               <span className="bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent dark:from-indigo-400 dark:to-purple-400">
-                Sans contournement impulsif.
+                Without impulsive bypasses.
               </span>
             </h1>
 
             <p className="mt-5 max-w-2xl text-base leading-relaxed text-slate-600 sm:text-lg dark:text-zinc-400">
-              Custos remplace la volonté à chaud par un engagement technique
-              fiable : quotas quotidiens, limites par session, couvre-feux,
-              blocage chirurgical <strong className="font-semibold text-slate-800 dark:text-zinc-200">Accès Partiel</strong>{" "}
-              et délai de sécurité asymétrique avant tout allègement — sans
-              compte cloud ni collecte de vos données.
+              Custos replaces fleeting willpower with a reliable technical
+              commitment: daily quotas, session limits, curfews, surgical{" "}
+              <strong className="font-semibold text-slate-800 dark:text-zinc-200">Partial Access</strong>{" "}
+              blocking, and an asymmetric security delay before any relaxation —
+              with no cloud account or data collection.
             </p>
 
             {/* Primary & Secondary CTAs */}
@@ -66,7 +66,7 @@ export function HeroSection() {
                 href="/#features"
                 className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-5 py-3.5 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
               >
-                <span>Explorer les fonctionnalités</span>
+                <span>Explore features</span>
                 <ArrowRight className="h-4 w-4 shrink-0" />
               </Link>
             </div>
@@ -75,15 +75,15 @@ export function HeroSection() {
             <div className="mt-9 grid grid-cols-1 gap-3 border-t border-slate-200/80 pt-6 sm:grid-cols-3 dark:border-zinc-800/80">
               <div className="flex items-center gap-2 text-xs font-medium text-slate-600 sm:whitespace-nowrap dark:text-zinc-400">
                 <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-400" />
-                <span>Zéro tracking serveur</span>
+                <span>Zero server tracking</span>
               </div>
               <div className="flex items-center gap-2 text-xs font-medium text-slate-600 sm:whitespace-nowrap dark:text-zinc-400">
                 <Lock className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
-                <span>Délai anti-impulsion</span>
+                <span>Anti-impulse delay</span>
               </div>
               <div className="flex items-center gap-2 text-xs font-medium text-slate-600 sm:whitespace-nowrap dark:text-zinc-400">
                 <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-400" />
-                <span>Code MIT auditable</span>
+                <span>Auditable MIT code</span>
               </div>
             </div>
           </motion.div>

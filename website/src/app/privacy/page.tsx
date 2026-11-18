@@ -5,71 +5,71 @@ import { LegalPageShell } from "@/components/LegalPageShell";
 import { SITE_CONFIG } from "@/lib/constants";
 
 export const metadata: Metadata = {
-  title: "Politique de confidentialité (RGPD)",
+  title: "Privacy Policy (GDPR)",
   description:
-    "Politique de confidentialité officielle de l’application Android Custos : traitement 100 % local, aucune collecte serveur, transparence totale sur les permissions Android et droits RGPD.",
+    "Official Privacy Policy for the Custos Android app: 100% local processing, zero server collection, full transparency on Android permissions, and GDPR rights.",
   alternates: {
     canonical: "/privacy",
   },
   openGraph: {
     type: "website",
-    locale: "fr_FR",
+    locale: "en_US",
     url: "/privacy",
     siteName: "Custos",
-    title: "Politique de confidentialité (RGPD) | Custos",
+    title: "Privacy Policy (GDPR) | Custos",
     description:
-      "Traitement 100 % local sur Android, zéro traceur, transparence sur les permissions et droits RGPD de Custos.",
+      "100% local processing on Android, zero trackers, full transparency on permissions, and GDPR rights for Custos.",
   },
   twitter: {
     card: "summary",
-    title: "Politique de confidentialité (RGPD) | Custos",
+    title: "Privacy Policy (GDPR) | Custos",
     description:
-      "Traitement 100 % local sur Android, zéro collecte serveur et transparence sur les permissions.",
+      "100% local processing on Android, zero server collection, and transparent permissions.",
   },
 };
 
 const ANDROID_PERMISSIONS = [
   {
-    permission: "Service d’accessibilité (BIND_ACCESSIBILITY_SERVICE)",
+    permission: "Accessibility Service (BIND_ACCESSIBILITY_SERVICE)",
     purpose:
-      "Identifier l’application affichée au premier plan, renvoyer vers l’écran d’accueil lorsqu’un quota ou un couvre-feu expire, décourager la désactivation impulsive dans les Paramètres Android et détecter localement les onglets ciblés par les règles d’Accès Partiel (ex. YouTube Shorts). Les éléments d’écran sont évalués exclusivement en mémoire vive (RAM) à la volée : aucune capture d’écran, aucune frappe clavier ni contenu personnel n’est enregistré ou transmis.",
+      "Identifies the active foreground app, returns you to the home screen when a quota or curfew expires, discourages impulsive deactivation in Android Settings, and locally detects tabs targeted by Partial Access rules (e.g. YouTube Shorts). Screen elements are evaluated strictly in volatile memory (RAM) on the fly: no screenshots, keystrokes, or personal content are ever recorded or transmitted.",
   },
   {
-    permission: "Accès aux données d’utilisation (PACKAGE_USAGE_STATS)",
+    permission: "Usage Access (PACKAGE_USAGE_STATS)",
     purpose:
-      "Mesurer localement le temps passé au premier plan sur les applications que vous avez choisi de limiter, afin de décompter vos budgets quotidiens et vos limites par session.",
+      "Locally measures foreground time spent on the apps you chose to limit, in order to enforce your daily budgets and per-session limits.",
   },
   {
-    permission: "Visibilité des applications installées (QUERY_ALL_PACKAGES)",
+    permission: "Installed Apps Visibility (QUERY_ALL_PACKAGES)",
     purpose:
-      "Afficher au sein de Custos la liste des applications installées sur votre appareil afin que vous puissiez sélectionner celles soumises à un quota, un couvre-feu ou au Mode Nucléaire. Cette liste reste strictement locale.",
+      "Displays the list of installed apps inside Custos so you can select which apps are subject to a quota, curfew, or Nuclear Mode. This list stays strictly on your device.",
   },
   {
     permission: "Notifications (POST_NOTIFICATIONS)",
     purpose:
-      "Afficher sur Android 13 et versions ultérieures la notification persistante requise pour maintenir le service de surveillance en fonctionnement fiable.",
+      "Displays the persistent foreground notification required on Android 13+ to keep the enforcement service running reliably.",
   },
   {
     permission:
-      "Accès aux notifications — facultatif (BIND_NOTIFICATION_LISTENER_SERVICE)",
+      "Notification Access — optional (BIND_NOTIFICATION_LISTENER_SERVICE)",
     purpose:
-      "Mettre temporairement en sourdine les notifications provenant d’une application actuellement bloquée, puis les rétablir à la fin du blocage. Le contenu des messages n’est jamais sauvegardé.",
+      "Temporarily mutes notifications from a currently blocked app, then restores them when the block ends. Message contents are never saved.",
   },
   {
-    permission: "Ne pas déranger — facultatif (ACCESS_NOTIFICATION_POLICY)",
+    permission: "Do Not Disturb — optional (ACCESS_NOTIFICATION_POLICY)",
     purpose:
-      "Activer le mode Ne pas déranger pendant une session de Mode Nucléaire lorsque vous activez cette option.",
+      "Enables Do Not Disturb during a Nuclear Mode session when you explicitly turn on this option.",
   },
   {
     permission:
-      "Démarrage, alarmes exactes et service au premier plan (RECEIVE_BOOT_COMPLETED, SCHEDULE_EXACT_ALARM, FOREGROUND_SERVICE_SPECIAL_USE, REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)",
+      "Boot, Exact Alarms & Foreground Service (RECEIVE_BOOT_COMPLETED, SCHEDULE_EXACT_ALARM, FOREGROUND_SERVICE_SPECIAL_USE, REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)",
     purpose:
-      "Relancer la protection après un redémarrage du téléphone et garantir l’exécution régulière des compteurs de temps sans mise en veille prématurée par le système.",
+      "Restarts protection after a phone reboot and ensures time counters run reliably without premature OS sleep.",
   },
   {
-    permission: "Accès réseau technique (INTERNET)",
+    permission: "Technical Network Access (INTERNET)",
     purpose:
-      "Déclarée uniquement à des fins techniques système sur Android. Custos fonctionne localement hors-ligne et n’envoie aucune donnée utilisateur, analytique ou télémétrique vers des serveurs tiers.",
+      "Declared solely for Android system compatibility. Custos operates locally offline and sends zero user data, analytics, or telemetry to third-party servers.",
   },
 ];
 
@@ -78,22 +78,22 @@ export default function PrivacyPage() {
 
   return (
     <LegalPageShell
-      badge="Conformité RGPD & Google Play"
-      title="Politique de confidentialité"
-      subtitle="Transparence complète sur le fonctionnement 100 % local de Custos, les permissions Android requises et vos droits au titre du Règlement Général sur la Protection des Données (RGPD)."
+      badge="GDPR & Google Play Compliance"
+      title="Privacy Policy"
+      subtitle="Full transparency on Custos’s 100% local operation, required Android permissions, and your rights under the General Data Protection Regulation (GDPR)."
     >
       {/* Executive Summary Box */}
       <section className="rounded-2xl border border-indigo-200/80 bg-white p-6 shadow-soft dark:border-indigo-500/30 dark:bg-[#111116]">
         <div className="flex items-center gap-2 text-sm font-semibold text-indigo-700 dark:text-indigo-300">
           <ShieldCheck className="h-4 w-4" />
-          <span>En résumé</span>
+          <span>In short</span>
         </div>
         <ul className="mt-4 space-y-2.5">
           {[
-            "Custos fonctionne localement sur votre téléphone sans création de compte distante.",
-            "Aucune donnée personnelle, historique de navigation ou statistique d’usage n’est collectée, vendue ou partagée avec des tiers.",
-            "L’application n’embarque aucun SDK publicitaire, aucun traceur comportemental et aucun outil d’analytics tiers.",
-            "Vous conservez un contrôle total pour exporter, modifier (sous réserve de vos propres délais choisis) ou effacer immédiatement toutes vos données locales.",
+            "Custos runs locally on your phone without remote account creation.",
+            "No personal data, browsing history, or usage statistics are ever collected, sold, or shared with third parties.",
+            "The app includes no ad SDKs, no behavioral trackers, and no third-party analytics tools.",
+            "You retain full control to export, modify (subject to your own chosen delays), or immediately delete all your local data.",
           ].map((point) => (
             <li key={point} className="flex items-start gap-2.5">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-400" />
@@ -105,26 +105,26 @@ export default function PrivacyPage() {
 
       <section className="space-y-3">
         <h2 className="text-xl font-semibold text-slate-950 dark:text-white">
-          1. Identité du responsable de traitement
+          1. Data Controller
         </h2>
         <p>
-          L’application mobile Android <strong>{legal.publisherApp}</strong> (
+          The Android mobile app <strong>{legal.publisherApp}</strong> (
           <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-zinc-800">
             {SITE_CONFIG.packageName}
           </code>
-          ) et le présent site officiel (
+          ) and this official website (
           <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-zinc-800">
             custos.joshuanancey.com
           </code>
-          ) sont édités par :
+          ) are published by:
         </p>
         <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm dark:border-zinc-800 dark:bg-[#111116]">
           <p>
-            <strong>Responsable de traitement :</strong> {legal.publisherApp} —{" "}
+            <strong>Data Controller:</strong> {legal.publisherApp} —{" "}
             {legal.publisherDisplayName} ({legal.city})
           </p>
           <p className="mt-1">
-            <strong>Contact RGPD / DPO :</strong>{" "}
+            <strong>Privacy / GDPR Contact:</strong>{" "}
             <a
               href={`mailto:${legal.email}`}
               className="font-medium text-indigo-600 hover:underline dark:text-indigo-400"
@@ -133,12 +133,12 @@ export default function PrivacyPage() {
             </a>
           </p>
           <p className="mt-1 text-xs text-slate-600 dark:text-zinc-400">
-            Mentions légales complètes disponibles dans les{" "}
+            Full legal details are available in the{" "}
             <Link
               href="/terms"
               className="font-medium text-indigo-600 hover:underline dark:text-indigo-400"
             >
-              Conditions Générales d’Utilisation (/terms)
+              Terms of Use &amp; Legal Notice (/terms)
             </Link>
             .
           </p>
@@ -147,69 +147,64 @@ export default function PrivacyPage() {
 
       <section className="space-y-3">
         <h2 className="text-xl font-semibold text-slate-950 dark:text-white">
-          2. Données traitées localement sur votre appareil
+          2. Data Processed Locally on Your Device
         </h2>
         <p>
-          Pour assurer le respect des règles que vous configurez vous-même,
-          Custos enregistre exclusivement dans l’espace de stockage privé interne
-          de l’application sur votre smartphone Android (
+          To enforce the rules you configure, Custos stores data exclusively in
+          the app’s private internal storage on your Android phone (
           <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-zinc-800">
             filesDir
           </code>{" "}
-          et{" "}
+          and{" "}
           <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-zinc-800">
             SharedPreferences
           </code>
-          ) :
+          ):
         </p>
         <ul className="list-disc space-y-2 pl-5">
           <li>
-            <strong>Vos configurations de discipline :</strong> applications
-            limitées, quotas quotidiens, plages de couvre-feu, limites par
-            session, réglages de délai anti-impulsion et presets du Mode
-            Nucléaire (<code className="font-mono text-xs">limits.json</code>,{" "}
+            <strong>Your discipline configurations:</strong> restricted apps,
+            daily quotas, curfew schedules, session limits, anti-impulse delay
+            settings, and Nuclear Mode presets (
+            <code className="font-mono text-xs">limits.json</code>,{" "}
             <code className="font-mono text-xs">delay_config.json</code>,{" "}
             <code className="font-mono text-xs">nuclear_presets.json</code>).
           </li>
           <li>
-            <strong>Vos règles d’Accès Partiel :</strong> nom du package cible
-            et identifiants techniques de composants d’interface (view IDs)
-            permettant de reconnaître un onglet bloqué — jamais le contenu des
-            messages, photos ou vidéos affichés à l’écran (
+            <strong>Your Partial Access rules:</strong> target package name and
+            UI component view IDs used to recognize a blocked tab — never the
+            contents of messages, photos, or videos displayed on screen (
             <code className="font-mono text-xs">screen_rules.json</code>).
           </li>
           <li>
-            <strong>L’état courant de la journée :</strong> temps consommé sur
-            les applications limitées et sessions utilisées pour le suivi des
-            quotas jusqu’à la réinitialisation quotidienne (
+            <strong>Current daily state:</strong> time spent on restricted apps
+            and sessions used to track quotas until the daily reset (
             <code className="font-mono text-xs">usage_state.json</code>).
           </li>
           <li>
-            <strong>Journal d’événements local :</strong> désactivé par défaut (
+            <strong>Local event log:</strong> disabled by default (
             <code className="font-mono text-xs">EVENT_LOG_ENABLED = false</code>
-            ) dans les versions publiques de l’application afin qu’aucun
-            historique d’activité inter-applications ne soit conservé sur disque.
+            ) in public releases so no cross-app activity history is stored on
+            disk.
           </li>
         </ul>
         <p>
-          <strong>Sauvegarde automatique Android :</strong> sur les appareils où
-          Android Auto Backup est activé par l’utilisateur dans les réglages
-          Google/Android, le système d’exploitation peut chiffrer et sauvegarder
-          les fichiers de configuration locaux vers le compte Google personnel de
-          l’utilisateur conformément aux paramètres de confidentialité Android.
-          Custos n’accède jamais à cette sauvegarde.
+          <strong>Android Auto Backup:</strong> on devices where Android Auto
+          Backup is enabled by the user in Google/Android settings, the OS may
+          encrypt and back up local configuration files to the user’s personal
+          Google account according to Android privacy settings. Custos never
+          accesses this backup.
         </p>
       </section>
 
       <section className="space-y-4">
         <h2 className="text-xl font-semibold text-slate-950 dark:text-white">
-          3. Permissions Android et divulgation API AccessibilityService
+          3. Android Permissions &amp; AccessibilityService API Disclosure
         </h2>
         <p>
-          Conformément aux règles du Google Play Store, chaque autorisation
-          sensible est présentée ci-dessous avec sa finalité stricte. Aucune
-          permission n’est utilisée à des fins publicitaires, d’espionnage ou de
-          monétisation.
+          In accordance with Google Play Store policies, each sensitive
+          permission is listed below with its strict purpose. No permission is
+          used for advertising, surveillance, or monetization.
         </p>
 
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-zinc-800 dark:bg-[#111116]">
@@ -230,38 +225,38 @@ export default function PrivacyPage() {
 
       <section className="space-y-3">
         <h2 className="text-xl font-semibold text-slate-950 dark:text-white">
-          4. Échanges support, Early Access et hébergement web
+          4. Support Emails, Early Access &amp; Web Hosting
         </h2>
         <ul className="list-disc space-y-2 pl-5">
           <li>
-            <strong>Support &amp; Programme Early Access Google Play :</strong>{" "}
-            lorsque vous nous écrivez volontairement à{" "}
+            <strong>Support &amp; Google Play Early Access Program:</strong>{" "}
+            when you voluntarily email us at{" "}
             <a
               href={`mailto:${legal.email}`}
               className="font-medium text-indigo-600 hover:underline dark:text-indigo-400"
             >
               {legal.email}
             </a>{" "}
-            (par exemple pour tester l’accès anticipé Google Play ou poser une
-            question technique), nous traitons uniquement votre adresse e-mail et
-            le contenu de votre message sur la base de l’exécution de votre
-            demande / intérêt légitime de support (Art. 6.1.b / 6.1.f RGPD).
+            (for example to join Google Play Early Access or ask a technical
+            question), we process only your email address and message content on
+            the basis of fulfilling your request / legitimate support interest
+            (Art. 6.1.b / 6.1.f GDPR).
           </li>
           <li>
-            <strong>Hébergement du site vitrine :</strong> le site{" "}
+            <strong>Website Hosting:</strong>{" "}
             <code className="font-mono text-xs">custos.joshuanancey.com</code>{" "}
-            est hébergé par <strong>{legal.hostName}</strong> ({legal.hostAddress}
-            ). Ce site ne dépose aucun cookie publicitaire ni traceur d’audience.
-            Comme tout hébergeur web, Vercel peut traiter des journaux techniques
-            de connexion (adresse IP, horodatage, user-agent) exclusivement pour
-            la sécurité et la continuité du service (voir la{" "}
+            is hosted by <strong>{legal.hostName}</strong> ({legal.hostAddress}
+            ). This website uses zero advertising cookies or audience trackers.
+            Like any web host, Vercel may process standard technical connection
+            logs (IP address, timestamp, user-agent) solely for security and
+            service continuity (see{" "}
             <a
               href={legal.hostUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="text-indigo-600 hover:underline dark:text-indigo-400"
             >
-              politique de confidentialité de Vercel
+              Vercel’s Privacy Policy
             </a>
             ).
           </li>
@@ -270,52 +265,49 @@ export default function PrivacyPage() {
 
       <section className="space-y-3">
         <h2 className="text-xl font-semibold text-slate-950 dark:text-white">
-          5. Partage avec des tiers et conservation des données
+          5. Third-Party Sharing &amp; Data Retention
         </h2>
         <p>
-          <strong>Partage :</strong> Custos ne vend, ne loue et ne transfère
-          aucune donnée utilisateur à des courtiers de données, régies
-          publicitaires ou tiers analytiques.
+          <strong>Sharing:</strong> Custos never sells, rents, or transfers any
+          user data to data brokers, ad networks, or third-party analytics
+          providers.
         </p>
         <p>
-          <strong>Durée de conservation :</strong> Les configurations stockées sur
-          votre téléphone restent présentes uniquement tant que l’application est
-          installée et sont supprimées immédiatement lors du nettoyage du
-          stockage ou de la désinstallation de Custos. Les e-mails adressés au
-          support sont conservés pour la durée strictement nécessaire au suivi
-          de votre demande, et au maximum <strong>36 mois</strong> après le
-          dernier échange, sauf demande d’effacement anticipée.
+          <strong>Retention:</strong> Configurations stored on your phone remain
+          present only while the app is installed and are deleted immediately
+          when you clear storage or uninstall Custos. Support emails are kept
+          only as long as needed to handle your request, and for a maximum of{" "}
+          <strong>36 months</strong> after the last exchange unless deleted
+          earlier upon request.
         </p>
       </section>
 
       <section className="space-y-3">
         <h2 className="text-xl font-semibold text-slate-950 dark:text-white">
-          6. Vos droits RGPD et suppression des données
+          6. Your GDPR Rights &amp; Data Deletion
         </h2>
         <p>
-          Conformément au RGPD et à la loi Informatique et Libertés, vous
-          disposez des droits d’accès, de rectification, d’effacement, de
-          limitation, d’opposition et de portabilité sur les éventuelles données
-          de contact que vous nous auriez transmises.
+          Under the GDPR and French data protection law, you have the right to
+          access, rectify, erase, restrict, object to, and port any contact
+          information you have shared with us.
         </p>
         <p>
-          Pour exercer vos droits ou demander la suppression définitive de toute
-          donnée associée, consultez notre page dédiée{" "}
+          To exercise your rights or request permanent deletion of any
+          associated data, visit our dedicated{" "}
           <Link
             href="/delete-account"
             className="font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
           >
-            Suppression de compte et des données (/delete-account)
+            Account &amp; Data Deletion (/delete-account)
           </Link>{" "}
-          ou écrivez directement à{" "}
+          page or email{" "}
           <a
             href={`mailto:${legal.email}`}
             className="font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
           >
             {legal.email}
           </a>
-          . Vous disposez également du droit d’introduire une réclamation auprès
-          de la{" "}
+          . You also have the right to lodge a complaint with the{" "}
           <a
             href="https://www.cnil.fr"
             target="_blank"
@@ -330,13 +322,12 @@ export default function PrivacyPage() {
 
       <section className="space-y-3">
         <h2 className="text-xl font-semibold text-slate-950 dark:text-white">
-          7. Mineurs &amp; Évolutions de cette politique
+          7. Minors &amp; Policy Updates
         </h2>
         <p>
-          Custos ne collecte volontairement aucune donnée personnelle auprès des
-          mineurs. En cas d’évolution fonctionnelle impliquant un traitement
-          nouveau, la présente page sera mise à jour avec une nouvelle date en
-          haut du document avant toute mise en ligne.
+          Custos does not knowingly collect personal data from minors. If any
+          future feature introduces new data processing, this page will be
+          updated with a new effective date at the top prior to release.
         </p>
       </section>
     </LegalPageShell>

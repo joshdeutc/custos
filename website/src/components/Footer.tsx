@@ -20,24 +20,24 @@ export function Footer() {
               </span>
             </Link>
             <p className="mt-3 max-w-xs text-sm leading-relaxed text-slate-600 dark:text-zinc-400">
-              Application Android d’auto-discipline et de maîtrise du temps
-              d’écran. Traitement 100 % local sur votre appareil.
+              Android self-discipline and screen-time control app. 100% local
+              processing on your device.
             </p>
             <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
               <ShieldCheck className="h-3.5 w-3.5" />
-              <span>Zéro publicité · Zéro traceur</span>
+              <span>Zero ads · Zero trackers</span>
             </div>
           </div>
 
           {/* Publisher & Contact */}
           <div className="md:col-span-4">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-zinc-400">
-              Éditeur &amp; Contact
+              Publisher &amp; Contact
             </h2>
             <dl className="mt-3 space-y-2.5 text-sm text-slate-700 dark:text-zinc-300">
               <div>
                 <dt className="inline font-medium text-slate-900 dark:text-white">
-                  Éditeur :{" "}
+                  Publisher:{" "}
                 </dt>
                 <dd className="inline">
                   {legal.publisherApp} — {legal.publisherDisplayName}
@@ -47,7 +47,7 @@ export function Footer() {
                 <MapPin className="h-4 w-4 shrink-0 text-slate-600 dark:text-zinc-400" />
                 <div>
                   <dt className="inline font-medium text-slate-900 dark:text-white">
-                    Localisation :{" "}
+                    Location:{" "}
                   </dt>
                   <dd className="inline">{legal.city}</dd>
                 </div>
@@ -56,7 +56,7 @@ export function Footer() {
                 <Mail className="h-4 w-4 shrink-0 text-slate-600 dark:text-zinc-400" />
                 <div>
                   <dt className="inline font-medium text-slate-900 dark:text-white">
-                    Support &amp; RGPD :{" "}
+                    Support &amp; Privacy:{" "}
                   </dt>
                   <dd className="inline">
                     <a
@@ -74,7 +74,7 @@ export function Footer() {
                 href="/terms"
                 className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 underline-offset-4 hover:underline dark:text-indigo-400"
               >
-                <span>Mentions légales complètes</span>
+                <span>Full Legal Notice</span>
                 <ArrowRight className="h-3.5 w-3.5" />
               </Link>
             </div>
@@ -83,7 +83,7 @@ export function Footer() {
           {/* Navigation & Legal Links */}
           <div className="md:col-span-4">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-zinc-400">
-              Conformité &amp; Documents
+              Compliance &amp; Docs
             </h2>
             <ul className="mt-3 space-y-2.5 text-sm">
               <li>
@@ -91,7 +91,7 @@ export function Footer() {
                   href="/privacy"
                   className="text-slate-600 transition-colors hover:text-indigo-600 dark:text-zinc-400 dark:hover:text-indigo-400"
                 >
-                  Politique de confidentialité (RGPD)
+                  Privacy Policy (GDPR)
                 </Link>
               </li>
               <li>
@@ -99,7 +99,7 @@ export function Footer() {
                   href="/terms"
                   className="text-slate-600 transition-colors hover:text-indigo-600 dark:text-zinc-400 dark:hover:text-indigo-400"
                 >
-                  Mentions légales &amp; CGU
+                  Legal Notice &amp; Terms
                 </Link>
               </li>
               <li>
@@ -107,7 +107,7 @@ export function Footer() {
                   href="/delete-account"
                   className="text-slate-600 transition-colors hover:text-indigo-600 dark:text-zinc-400 dark:hover:text-indigo-400"
                 >
-                  Suppression de compte et des données
+                  Account &amp; Data Deletion
                 </Link>
               </li>
               <li>
@@ -117,7 +117,7 @@ export function Footer() {
                   rel="noopener noreferrer"
                   className="text-slate-600 transition-colors hover:text-indigo-600 dark:text-zinc-400 dark:hover:text-indigo-400"
                 >
-                  Code source (GitHub · MIT)
+                  Source Code (GitHub · MIT)
                 </a>
               </li>
             </ul>
@@ -126,11 +126,11 @@ export function Footer() {
 
         <div className="mt-10 flex flex-col items-start justify-between gap-3 border-t border-slate-200/80 pt-6 text-xs text-slate-600 sm:flex-row sm:items-center dark:border-zinc-800/80 dark:text-zinc-400">
           <p>
-            © 2026 {legal.publisherApp} — {legal.publisherDisplayName}. Tous
-            droits réservés.
+            © 2026 {legal.publisherApp} — {legal.publisherDisplayName}. All
+            rights reserved.
           </p>
           <p className="font-mono">
-            custos.joshuanancey.com · {SITE_CONFIG.packageName}
+            custos.joshuanancey.com
           </p>
         </div>
       </div>

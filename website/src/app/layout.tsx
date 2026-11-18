@@ -21,38 +21,38 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_CONFIG.domain),
   title: {
-    default: "Custos — Contrôle du temps d’écran et auto-discipline sur Android",
+    default: "Custos — Screen Time Control & Self-Discipline on Android",
     template: "%s | Custos",
   },
   description:
-    "Custos est l’application Android d’auto-discipline conçue comme un engagement irréversible : quotas quotidiens, limites par session, couvre-feux, Accès Partiel in-app et Mode Nucléaire. 100 % local, zéro publicité.",
+    "Custos is the Android self-discipline app built as an irreversible commitment: daily quotas, session limits, curfews, in-app Partial Access, and Nuclear Mode. 100% local, zero ads.",
   applicationName: "Custos",
   authors: [{ name: "Joshua Nancey", url: SITE_CONFIG.domain }],
   creator: "Joshua Nancey",
   publisher: "Custos",
   keywords: [
     "Custos",
-    "temps d'écran Android",
-    "auto-discipline",
-    "bloqueur d'applications Android",
-    "mode nucléaire",
-    "contrôle numérique",
-    "productivité Android",
+    "Android screen time",
+    "self-discipline",
+    "Android app blocker",
+    "nuclear mode",
+    "digital wellbeing",
+    "Android productivity",
   ],
   openGraph: {
     type: "website",
-    locale: "fr_FR",
+    locale: "en_US",
     url: SITE_CONFIG.domain,
     siteName: "Custos",
-    title: "Custos — Maîtrisez votre temps d’écran sur Android",
+    title: "Custos — Master Your Screen Time on Android",
     description:
-      "Quotas, couvre-feux, blocage d’onglets addictifs (Accès Partiel), Mode Nucléaire et délai de sécurité asymétrique. Traitement 100 % local, zéro tracking.",
+      "Quotas, curfews, addictive tab blocking (Partial Access), Nuclear Mode, and asymmetric security delay. 100% local processing, zero tracking.",
   },
   twitter: {
     card: "summary",
-    title: "Custos — Auto-discipline & temps d’écran sur Android",
+    title: "Custos — Self-Discipline & Screen Time on Android",
     description:
-      "Quotas quotidiens, Accès Partiel in-app, Mode Nucléaire et délai anti-impulsion. 100 % local sur votre téléphone.",
+      "Daily quotas, in-app Partial Access, Nuclear Mode, and anti-impulse delay. 100% local on your phone.",
   },
   robots: {
     index: true,
@@ -67,7 +67,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="fr"
+      lang="en"
       suppressHydrationWarning
       className={`${inter.variable} ${jetbrainsMono.variable}`}
     >

@@ -7,8 +7,8 @@ import { CustosLogo } from "@/components/CustosLogo";
 import { useTheme } from "@/components/ThemeProvider";
 
 const NAV_LINKS = [
-  { label: "Fonctionnalités", href: "/#features" },
-  { label: "Sécurité", href: "/#security" },
+  { label: "Features", href: "/#features" },
+  { label: "Security", href: "/#security" },
   { label: "FAQ", href: "/#faq" },
 ];
 
@@ -22,7 +22,7 @@ export function Navbar() {
         <Link
           href="/"
           className="flex items-center gap-2.5 text-slate-900 transition-opacity hover:opacity-90 dark:text-white"
-          aria-label="Custos, retour à l’accueil"
+          aria-label="Custos, back to home"
         >
           <CustosLogo size={32} className="shrink-0 shadow-sm" />
           <span className="text-lg font-semibold tracking-tight">Custos</span>
@@ -33,7 +33,7 @@ export function Navbar() {
 
         <nav
           className="hidden items-center gap-8 md:flex"
-          aria-label="Navigation principale"
+          aria-label="Main navigation"
         >
           {NAV_LINKS.map((item) => (
             <Link
@@ -53,8 +53,8 @@ export function Navbar() {
             className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-950 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
             aria-label={
               theme === "dark"
-                ? "Activer le mode clair"
-                : "Activer le mode sombre"
+                ? "Switch to light mode"
+                : "Switch to dark mode"
             }
           >
             {theme === "dark" ? (
@@ -69,14 +69,14 @@ export function Navbar() {
             className="hidden items-center gap-2 rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-indigo-600 sm:inline-flex dark:bg-indigo-600 dark:hover:bg-indigo-500"
           >
             <Smartphone className="h-3.5 w-3.5" />
-            <span>Bientôt sur Google Play</span>
+            <span>Coming to Google Play</span>
           </Link>
 
           <button
             type="button"
             onClick={() => setMobileOpen((prev) => !prev)}
             className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 md:hidden dark:border-zinc-800 dark:text-zinc-300"
-            aria-label="Ouvrir le menu"
+            aria-label="Open menu"
             aria-expanded={mobileOpen}
           >
             {mobileOpen ? (
@@ -107,7 +107,7 @@ export function Navbar() {
               className="mt-1 inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white dark:bg-indigo-600"
             >
               <Smartphone className="h-3.5 w-3.5" />
-              <span>Bientôt sur Google Play</span>
+              <span>Coming to Google Play</span>
             </Link>
           </div>
         </div>

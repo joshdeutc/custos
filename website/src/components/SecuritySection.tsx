@@ -16,21 +16,21 @@ import {
 const TRUST_PILLARS = [
   {
     icon: ServerOff,
-    title: "Zéro cloud, zéro télémétrie",
+    title: "Zero cloud, zero telemetry",
     description:
-      "Custos n’intègre ni Firebase Analytics, ni régie publicitaire, ni traceur tiers. Aucune statistique d’usage ni habitude d’application n’est jamais envoyée vers nos serveurs.",
+      "Custos includes no Firebase Analytics, no ad networks, and no third-party trackers. No usage statistics or app habits are ever sent to external servers.",
   },
   {
     icon: Database,
-    title: "Stockage 100 % sur l’appareil",
+    title: "100% on-device storage",
     description:
-      "Vos quotas, règles de couvre-feu, sessions et presets Nucléaires sont enregistrés exclusivement dans l’espace privé sécurisé de l’application (filesDir) sur votre téléphone Android.",
+      "Your quotas, curfew rules, sessions, and Nuclear presets are stored exclusively inside the app’s private internal storage (filesDir) on your Android phone.",
   },
   {
     icon: EyeOff,
-    title: "AccessibilityService transparent",
+    title: "Transparent AccessibilityService",
     description:
-      "Le service d’accessibilité détecte uniquement l’application au premier plan et les identifiants d’onglets visés par l’Accès Partiel, en mémoire vive à la volée : aucune frappe clavier ni contenu personnel n’est enregistré.",
+      "The accessibility service only detects the foreground app and view IDs targeted by Partial Access on the fly in RAM: no keystrokes, passwords, or personal content are ever recorded.",
   },
 ];
 
@@ -46,30 +46,30 @@ export function SecuritySection() {
           <div className="lg:col-span-5">
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
               <LockKeyhole className="h-3.5 w-3.5" />
-              <span>Confiance &amp; Vie Privée</span>
+              <span>Trust &amp; Privacy</span>
             </div>
 
             <h2 className="mt-4 text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl dark:text-white">
-              Vos habitudes numériques vous appartiennent. Point final.
+              Your digital habits belong to you. Period.
             </h2>
 
             <p className="mt-4 text-sm leading-relaxed text-slate-600 sm:text-base dark:text-zinc-400">
-              Un outil qui connaît les applications que vous limitez mérite un
-              niveau d’exigence irréprochable. Custos a été architecturé dès le
-              premier jour pour exécuter 100 % de sa logique localement, sans
-              création de compte ni dépendance serveur.
+              A tool that knows which apps you restrict deserves uncompromising
+              privacy standards. Custos was architected from day one to run 100%
+              of its logic locally, with no account creation and zero server
+              dependency.
             </p>
 
             {/* Local Pipeline Diagram */}
             <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-soft dark:border-zinc-800 dark:bg-[#111116]">
               <p className="font-mono text-[11px] font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
-                Pipeline local sur votre Android
+                Local pipeline on your Android
               </p>
               <div className="mt-4 space-y-3 text-xs">
                 <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200/80 bg-slate-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/70">
                   <span className="flex min-w-0 items-center gap-2 font-medium text-slate-800 dark:text-zinc-200">
                     <Cpu className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
-                    1. Lecture locale (UsageStats + A11y RAM)
+                    1. Local read (UsageStats + A11y RAM)
                   </span>
                   <span className="shrink-0 whitespace-nowrap font-mono text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
                     On-device
@@ -78,7 +78,7 @@ export function SecuritySection() {
                 <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200/80 bg-slate-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/70">
                   <span className="flex min-w-0 items-center gap-2 font-medium text-slate-800 dark:text-zinc-200">
                     <FileCheck2 className="h-4 w-4 shrink-0 text-violet-600 dark:text-violet-400" />
-                    2. Évaluation des règles (limits.json)
+                    2. Rule evaluation (limits.json)
                   </span>
                   <span className="shrink-0 whitespace-nowrap font-mono text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
                     1 sec tick
@@ -87,10 +87,10 @@ export function SecuritySection() {
                 <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200/80 bg-slate-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/70">
                   <span className="flex min-w-0 items-center gap-2 font-medium text-slate-800 dark:text-zinc-200">
                     <ServerOff className="h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-400" />
-                    3. Transmission cloud ou revente
+                    3. Cloud transmission or resale
                   </span>
                   <span className="shrink-0 whitespace-nowrap font-mono text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
-                    0 octet
+                    0 bytes
                   </span>
                 </div>
               </div>
@@ -101,7 +101,7 @@ export function SecuritySection() {
                 href="/privacy"
                 className="inline-flex items-center gap-1.5 text-indigo-600 hover:underline dark:text-indigo-400"
               >
-                <span>Lire la politique de confidentialité</span>
+                <span>Read the Privacy Policy</span>
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </div>
