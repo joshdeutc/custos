@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 import { LegalPageShell } from "@/components/LegalPageShell";
@@ -58,7 +58,7 @@ export default function TermsPage() {
         </p>
         <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm dark:border-zinc-800 dark:bg-[#111116]">
           <p>
-            <strong>Publisher:</strong> {legal.publisherApp} —{" "}
+            <strong>Publisher:</strong> {legal.publisherApp} â€”{" "}
             {legal.legalForm} {legal.legalEntity}
           </p>
           <p className="mt-1">
@@ -78,7 +78,7 @@ export default function TermsPage() {
             </a>
           </p>
           <p className="mt-1">
-            <strong>Website Host:</strong> {legal.hostName} —{" "}
+            <strong>Website Host:</strong> {legal.hostName} â€”{" "}
             {legal.hostAddress}
           </p>
         </div>
@@ -118,7 +118,7 @@ export default function TermsPage() {
             <div className="space-y-2 text-sm text-amber-950 dark:text-amber-100">
               <p className="font-semibold">Voluntary User Commitment</p>
               <p>
-                By design, Custos’s protection mechanisms (such as the{" "}
+                By design, Custosâ€™s protection mechanisms (such as the{" "}
                 <strong>cooling-off delay before relaxing a rule</strong> or{" "}
                 <strong>fixed-duration Nuclear Mode</strong>) intentionally
                 prevent immediate relaxation or early cancellation of a
@@ -134,7 +134,7 @@ export default function TermsPage() {
         </div>
         <p>
           <strong>Safety &amp; emergency calls:</strong> Custos never blocks
-          critical phone calling functions, emergency numbers, or Android’s
+          critical phone calling functions, emergency numbers, or Androidâ€™s
           native hardware factory reset.
         </p>
       </section>
@@ -191,7 +191,7 @@ export default function TermsPage() {
             rel="noopener noreferrer"
             className="text-indigo-600 hover:underline dark:text-indigo-400"
           >
-            github.com/joshdeutc/custos
+            github.com/joshdeutc/custos-studio
           </a>
           ), whose license terms continue to apply to those source files.
         </p>
@@ -202,7 +202,7 @@ export default function TermsPage() {
           7. Limitation of Liability &amp; Availability
         </h2>
         <p>
-          The application is provided “as is” as a digital self-discipline tool.
+          The application is provided â€œas isâ€ as a digital self-discipline tool.
           To the fullest extent permitted by applicable law, the publisher shall
           not be liable for any user inconvenience resulting from
           misconfigured quotas or delays, nor for temporary unavailability of
@@ -249,3 +249,4 @@ export default function TermsPage() {
     </LegalPageShell>
   );
 }
+

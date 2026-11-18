@@ -1,12 +1,12 @@
-export const SITE_CONFIG = {
+﻿export const SITE_CONFIG = {
   appName: "Custos",
   tagline: "The Android self-discipline app designed as an irreversible commitment.",
   domain: "https://custos.joshuanancey.com",
   packageName: "com.custos.studio.app",
   minAndroidVersion: "Android 8.0+ (API 26)",
   playStoreEarlyAccessHref: "#early-access",
-  githubRepoUrl: "https://github.com/joshdeutc/custos",
-  githubReleasesUrl: "https://github.com/joshdeutc/custos/releases/latest",
+  githubRepoUrl: "https://github.com/joshdeutc/custos-studio",
+  githubReleasesUrl: "https://github.com/joshdeutc/custos-studio-studio",
   lastLegalUpdate: "November 18, 2026",
   legal: {
     publisherApp: "Custos",
@@ -23,3 +23,4 @@ export const SITE_CONFIG = {
     hostUrl: "https://vercel.com/legal/privacy-policy",
   },
 } as const;
+
