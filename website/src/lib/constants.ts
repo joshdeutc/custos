@@ -1,4 +1,4 @@
-﻿export const SITE_CONFIG = {
+export const SITE_CONFIG = {
   appName: "Custos",
   tagline: "The Android self-discipline app designed as an irreversible commitment.",
   domain: "https://custos.joshuanancey.com",
