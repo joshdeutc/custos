@@ -90,6 +90,19 @@
                 android:resource="@xml/accessibility_service_guardian" />
         </service>
 
+        <!-- v1.26: Local Blackhole VPN Service for Total Internet Curfew (Wi-Fi + 4G/5G) -->
+        <service
+            android:name=".GuardianBlackholeVpnService"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON"
+                android:value="true" />
+        </service>
+
     </application>
 
 </manifest>

@@ -132,6 +132,7 @@ class ConfigManager {
         private const val TAG = "SelfControl.Config"
         private const val LOCAL_CONFIG_NAME = "limits.json"
         const val TETHERING_VIRTUAL_PACKAGE = "@system:tethering"
+        const val INTERNET_VIRTUAL_PACKAGE = "@system:internet"
 
         /**
          * Load configuration from internal storage.

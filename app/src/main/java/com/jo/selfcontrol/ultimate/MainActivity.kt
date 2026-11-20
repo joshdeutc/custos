@@ -2090,11 +2090,17 @@ class MainActivity : Activity() {
     }
 
     private fun showAddCurfewRuleDialog() {
-        val tetheringItem = AppInfo(
-            packageName = ConfigManager.TETHERING_VIRTUAL_PACKAGE,
-            label = "📡 Partage de connexion (Wi-Fi / USB / BT)"
+        val systemCurfewItems = listOf(
+            AppInfo(
+                packageName = ConfigManager.INTERNET_VIRTUAL_PACKAGE,
+                label = "🌐 Coupure Internet totale (Wi-Fi + 4G/5G)"
+            ),
+            AppInfo(
+                packageName = ConfigManager.TETHERING_VIRTUAL_PACKAGE,
+                label = "📡 Partage de connexion (Wi-Fi / USB / BT)"
+            )
         )
-        val apps = listOf(tetheringItem) + getInstalledLaunchableApps(forceRefresh = true)
+        val apps = systemCurfewItems + getInstalledLaunchableApps(forceRefresh = true)
         val selected = mutableSetOf<String>()
 
         val listView = buildAppCheckListView(apps, selected)
@@ -2116,11 +2122,17 @@ class MainActivity : Activity() {
     }
 
     private fun showEditCurfewRuleDialog(index: Int, existingRule: ConfigManager.PeriodBlockRule) {
-        val tetheringItem = AppInfo(
-            packageName = ConfigManager.TETHERING_VIRTUAL_PACKAGE,
-            label = "📡 Partage de connexion (Wi-Fi / USB / BT)"
+        val systemCurfewItems = listOf(
+            AppInfo(
+                packageName = ConfigManager.INTERNET_VIRTUAL_PACKAGE,
+                label = "🌐 Coupure Internet totale (Wi-Fi + 4G/5G)"
+            ),
+            AppInfo(
+                packageName = ConfigManager.TETHERING_VIRTUAL_PACKAGE,
+                label = "📡 Partage de connexion (Wi-Fi / USB / BT)"
+            )
         )
-        val apps = listOf(tetheringItem) + getInstalledLaunchableApps(forceRefresh = true)
+        val apps = systemCurfewItems + getInstalledLaunchableApps(forceRefresh = true)
         val selected = mutableSetOf<String>()
 
         val listView = buildAppCheckListView(apps, selected, preChecked = existingRule.packages.toSet())
@@ -3865,6 +3877,9 @@ class MainActivity : Activity() {
         if (pkg == ConfigManager.TETHERING_VIRTUAL_PACKAGE) {
             return "📡 Partage de connexion (Wi-Fi/USB/BT)"
         }
+        if (pkg == ConfigManager.INTERNET_VIRTUAL_PACKAGE) {
+            return "🌐 Coupure Internet (Wi-Fi + 4G/5G)"
+        }
         return appNameCache.getOrPut(pkg) {
             try {
                 val ai = packageManager.getApplicationInfo(pkg, 0)
@@ -3879,6 +3894,9 @@ class MainActivity : Activity() {
     private fun getAppIcon(pkg: String): Drawable {
         if (pkg == ConfigManager.TETHERING_VIRTUAL_PACKAGE) {
             return getDrawable(android.R.drawable.ic_menu_share)!!
+        }
+        if (pkg == ConfigManager.INTERNET_VIRTUAL_PACKAGE) {
+            return getDrawable(android.R.drawable.ic_lock_lock)!!
         }
         return appIconCache.getOrPut(pkg) {
             try {
@@ -4575,10 +4593,10 @@ class MainActivity : Activity() {
      */
     private val iconCache = HashMap<String, Drawable>()
     private fun appIcon(pkg: String): Drawable = iconCache.getOrPut(pkg) {
-        if (pkg == ConfigManager.TETHERING_VIRTUAL_PACKAGE) {
-            getDrawable(android.R.drawable.ic_menu_share)!!
-        } else {
-            try { packageManager.getApplicationIcon(pkg) }
+        when (pkg) {
+            ConfigManager.TETHERING_VIRTUAL_PACKAGE -> getDrawable(android.R.drawable.ic_menu_share)!!
+            ConfigManager.INTERNET_VIRTUAL_PACKAGE -> getDrawable(android.R.drawable.ic_lock_lock)!!
+            else -> try { packageManager.getApplicationIcon(pkg) }
             catch (_: Exception) { getDrawable(android.R.drawable.sym_def_app_icon)!! }
         }
     }

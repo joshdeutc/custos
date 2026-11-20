@@ -758,8 +758,10 @@ object GuardianEngine {
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
                         runCatching { dpm.addUserRestriction(admin, UserManager.DISALLOW_CONFIG_DATE_TIME) }
                     }
-                    // v1.25: Enforce Tethering Curfew immediately on boot/lockdown
-                    runCatching { enforceTetheringCurfew(ctx, isTetheringCurfewActiveNow(ctx)) }
+                    // v1.25/v1.26: Enforce Tethering & Total Internet Curfews immediately on boot/lockdown
+                    val internetActive = isInternetCurfewActiveNow(ctx)
+                    runCatching { enforceTetheringCurfew(ctx, isTetheringCurfewActiveNow(ctx) || internetActive) }
+                    runCatching { enforceInternetCurfew(ctx, internetActive) }
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
                         runCatching { dpm.setAutoTimeEnabled(admin, true) }
                         runCatching { dpm.setAutoTimeZoneEnabled(admin, true) }
@@ -1432,22 +1434,24 @@ object GuardianEngine {
 
             val newlyBlocked = mutableSetOf<String>()
             var tetheringBlockedByCurfew = false
+            var internetBlockedByCurfew = false
 
             // 1. Period Blocks (Couvre-feux) - uses wall-clock time and ConfigManager.isInBlockedWindow
             for (period in config.periodBlocks) {
                 if (dayOfWeek in period.allowedDays) {
                     if (ConfigManager.isInBlockedWindow(currentMinutes, period.blockedStartMinutes, period.blockedEndMinutes)) {
                         for (pkg in period.packages) {
-                            if (pkg == ConfigManager.TETHERING_VIRTUAL_PACKAGE) {
-                                tetheringBlockedByCurfew = true
-                            } else {
-                                newlyBlocked.add(pkg)
+                            when (pkg) {
+                                ConfigManager.TETHERING_VIRTUAL_PACKAGE -> tetheringBlockedByCurfew = true
+                                ConfigManager.INTERNET_VIRTUAL_PACKAGE -> internetBlockedByCurfew = true
+                                else -> newlyBlocked.add(pkg)
                             }
                         }
                     }
                 }
             }
-            enforceTetheringCurfew(ctx, tetheringBlockedByCurfew)
+            enforceTetheringCurfew(ctx, tetheringBlockedByCurfew || internetBlockedByCurfew)
+            enforceInternetCurfew(ctx, internetBlockedByCurfew)
 
             var activeOverlayText: String? = null
 
@@ -1527,7 +1531,11 @@ object GuardianEngine {
                 } catch (e: Exception) {
                     (config.limits.map { it.packageName } +
                         config.periodBlocks.flatMap { it.packages })
-                        .filter { it != ConfigManager.TETHERING_VIRTUAL_PACKAGE && !isGuarded(ctx, it) }
+                        .filter {
+                            it != ConfigManager.TETHERING_VIRTUAL_PACKAGE &&
+                                it != ConfigManager.INTERNET_VIRTUAL_PACKAGE &&
+                                !isGuarded(ctx, it)
+                        }
                 }
                 if (allNonGuarded.any { it !in newlyBlocked }) {
                     Log.w(TAG, "🛡️ CARAPACE ACTIVE: suspending ${allNonGuarded.size} non-guarded installed package(s)")
@@ -1629,6 +1637,73 @@ object GuardianEngine {
                     runCatching { stopMethod.invoke(cm, type) }
                 }
             }
+        }
+    }
+
+    @Volatile private var internetCurfewActive = false
+
+    fun isInternetCurfewActiveNow(ctx: Context): Boolean {
+        val config = ConfigManager.loadConfig(ctx)
+        val now = java.util.Calendar.getInstance()
+        val dayOfWeek = now.get(java.util.Calendar.DAY_OF_WEEK) - 1
+        val currentMinutes = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE)
+        return config.periodBlocks.any { period ->
+            dayOfWeek in period.allowedDays &&
+                ConfigManager.INTERNET_VIRTUAL_PACKAGE in period.packages &&
+                ConfigManager.isInBlockedWindow(currentMinutes, period.blockedStartMinutes, period.blockedEndMinutes)
+        }
+    }
+
+    /**
+     * v1.26: Enforces or lifts the Total Internet Curfew (Wi-Fi + 4G/5G) without suspending any app.
+     * Uses Device Owner Always-On Blackhole VPN with kernel lockdown (lockdownEnabled = true) +
+     * DISALLOW_CONFIG_VPN so 100% of IPv4/IPv6 traffic is dropped while offline apps, calls & SMS work.
+     */
+    private fun enforceInternetCurfew(ctx: Context, blocked: Boolean) {
+        internetCurfewActive = blocked
+        if (!isDeviceOwner(ctx)) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+        val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
+        val um = ctx.getSystemService(Context.USER_SERVICE) as? UserManager
+        val admin = getAdminComponent(ctx)
+        val currentAlwaysOnPkg = runCatching { dpm.getAlwaysOnVpnPackage(admin) }.getOrNull()
+        val isLockdown = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            runCatching { dpm.isAlwaysOnVpnLockdownEnabled(admin) }.getOrDefault(false)
+        } else {
+            true
+        }
+        val vpnConfigBlocked = um?.hasUserRestriction(UserManager.DISALLOW_CONFIG_VPN) == true
+
+        try {
+            if (blocked) {
+                if (currentAlwaysOnPkg != ctx.packageName || !isLockdown) {
+                    dpm.setAlwaysOnVpnPackage(admin, ctx.packageName, true)
+                    runCatching {
+                        ctx.startService(Intent(ctx, GuardianBlackholeVpnService::class.java))
+                    }
+                    Log.w(TAG, "🌐 Internet Curfew ACTIVE -> Always-On Blackhole VPN (lockdown=true) engaged (Wi-Fi + 4G/5G cut, 0 apps suspended)")
+                }
+                if (!vpnConfigBlocked) {
+                    dpm.addUserRestriction(admin, UserManager.DISALLOW_CONFIG_VPN)
+                }
+            } else {
+                if (currentAlwaysOnPkg == ctx.packageName) {
+                    dpm.setAlwaysOnVpnPackage(admin, null, false)
+                    runCatching {
+                        ctx.startService(
+                            Intent(ctx, GuardianBlackholeVpnService::class.java).apply {
+                                action = GuardianBlackholeVpnService.ACTION_STOP
+                            }
+                        )
+                    }
+                    Log.i(TAG, "🌐 Internet Curfew ENDED -> Always-On Blackhole VPN cleared (Wi-Fi + 4G/5G restored)")
+                }
+                if (vpnConfigBlocked) {
+                    dpm.clearUserRestriction(admin, UserManager.DISALLOW_CONFIG_VPN)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to enforce internet curfew (blocked=$blocked): ${e.message}", e)
         }
     }
 }

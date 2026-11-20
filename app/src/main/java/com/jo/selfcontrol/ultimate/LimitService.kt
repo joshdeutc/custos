@@ -641,7 +641,12 @@ class LimitService : Service() {
         for (rule in periodBlockRules) {
             if (dayOfWeek !in rule.allowedDays) continue
             if (!ConfigManager.isInBlockedWindow(nowMin, rule.blockedStartMinutes, rule.blockedEndMinutes)) continue
-            activeCurfewPackages.addAll(rule.packages.filter { it != ConfigManager.TETHERING_VIRTUAL_PACKAGE })
+            activeCurfewPackages.addAll(
+                rule.packages.filter {
+                    it != ConfigManager.TETHERING_VIRTUAL_PACKAGE &&
+                        it != ConfigManager.INTERNET_VIRTUAL_PACKAGE
+                }
+            )
         }
 
         val shouldBeMuted = mutableSetOf<String>()

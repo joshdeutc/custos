@@ -320,6 +320,7 @@ object DelayManager {
 
     private fun getAppLabel(context: Context, pkg: String): String {
         if (pkg == ConfigManager.TETHERING_VIRTUAL_PACKAGE) return "📡 Partage de connexion"
+        if (pkg == ConfigManager.INTERNET_VIRTUAL_PACKAGE) return "🌐 Coupure Internet (Wi-Fi + 4G/5G)"
         return try {
             val pm = context.packageManager
             val ai = pm.getApplicationInfo(pkg, 0)
