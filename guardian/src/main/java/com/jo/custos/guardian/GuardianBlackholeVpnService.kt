@@ -34,7 +34,7 @@ class GuardianBlackholeVpnService : VpnService() {
                 .setSession("Custos Internet Curfew")
                 .addAddress("10.255.255.2", 32)
                 .addRoute("0.0.0.0", 0)
-                .addDnsServer("127.0.0.1")
+                .addDnsServer("10.255.255.1")
                 .setBlocking(false)
             runCatching {
                 builder.addAddress("fd00:c057::2", 128)

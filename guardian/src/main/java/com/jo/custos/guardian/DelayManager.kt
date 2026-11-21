@@ -795,6 +795,59 @@ object DelayManager {
         saveState(context, state.copy(requestedConfigUpdates = filtered))
     }
 
+    /**
+     * When new hardening rules (curfews or app limits) are added immediately, ensure any pending
+     * deletion for the same signature/package is cancelled and any pending FULL_CONFIG snapshot
+     * also includes the newly added hardening rules so they are neither shown as "pending delete"
+     * nor overwritten when the older FULL_CONFIG executes.
+     */
+    fun preserveHardeningInPendingUpdates(
+        context: Context,
+        addedCurfewRules: List<ConfigManager.PeriodBlockRule>,
+        addedAppLimits: List<ConfigManager.AppLimit>
+    ) {
+        if (addedCurfewRules.isEmpty() && addedAppLimits.isEmpty()) return
+        val state = loadState(context)
+        if (state.requestedConfigUpdates.isEmpty()) return
+
+        val addedCurfewSigs = addedCurfewRules.map { it.scheduleSignature() }.toSet()
+        val addedLimitPkgs = addedAppLimits.map { it.packageName }.toSet()
+        var changed = false
+
+        val updated = state.requestedConfigUpdates.mapNotNull { upd ->
+            if (upd.targetType == "CURFEW" && upd.isDelete && upd.targetKey in addedCurfewSigs) {
+                changed = true
+                return@mapNotNull null
+            }
+            if (upd.targetType == "APP_LIMIT" && upd.isDelete && upd.targetKey in addedLimitPkgs) {
+                changed = true
+                return@mapNotNull null
+            }
+            if (upd.targetType == "FULL_CONFIG" && upd.newLimitsJson.isNotEmpty()) {
+                val cfg = ConfigManager.fromJsonString(upd.newLimitsJson)
+                if (cfg != null) {
+                    val existingCurfewSigs = cfg.periodBlocks.map { it.scheduleSignature() }.toSet()
+                    val existingLimitPkgs = cfg.limits.map { it.packageName }.toSet()
+                    val extraCurfews = addedCurfewRules.filter { it.scheduleSignature() !in existingCurfewSigs }
+                    val extraLimits = addedAppLimits.filter { it.packageName !in existingLimitPkgs }
+                    if (extraCurfews.isNotEmpty() || extraLimits.isNotEmpty()) {
+                        changed = true
+                        val mergedCfg = cfg.copy(
+                            limits = cfg.limits + extraLimits,
+                            periodBlocks = cfg.periodBlocks + extraCurfews
+                        )
+                        return@mapNotNull upd.copy(newLimitsJson = ConfigManager.configToJsonString(mergedCfg))
+                    }
+                }
+            }
+            upd
+        }
+
+        if (changed) {
+            saveState(context, state.copy(requestedConfigUpdates = updated))
+        }
+    }
+
     fun requestCurfewDelete(
         context: Context,
         sig: String,

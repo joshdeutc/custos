@@ -353,6 +353,7 @@ class GuardianService : Service() {
             if (addedCurfewRules.isNotEmpty()) {
                 currentConfig = currentConfig.copy(periodBlocks = currentConfig.periodBlocks + addedCurfewRules)
                 ConfigManager.saveConfig(applicationContext, currentConfig)
+                DelayManager.preserveHardeningInPendingUpdates(applicationContext, addedCurfewRules, emptyList())
                 GuardianEngine.evaluateLimits(applicationContext)
                 Log.i(TAG, "Added ${addedCurfewRules.size} new curfew rule(s) immediately to Guardian")
             }
@@ -363,6 +364,7 @@ class GuardianService : Service() {
             if (addedAppLimits.isNotEmpty()) {
                 currentConfig = currentConfig.copy(limits = currentConfig.limits + addedAppLimits)
                 ConfigManager.saveConfig(applicationContext, currentConfig)
+                DelayManager.preserveHardeningInPendingUpdates(applicationContext, emptyList(), addedAppLimits)
                 GuardianEngine.evaluateLimits(applicationContext)
                 Log.i(TAG, "Added ${addedAppLimits.size} new app limit(s) immediately to Guardian")
             }
