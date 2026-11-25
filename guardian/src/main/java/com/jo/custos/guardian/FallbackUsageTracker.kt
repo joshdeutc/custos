@@ -32,9 +32,11 @@ object FallbackUsageTracker {
     private var loaded = false
     private var logicalDayStartMs = 0L
     private val usageMs = mutableMapOf<String, Long>()
+    private val lastForegroundEndMs = mutableMapOf<String, Long>()
     private var currentPkg: String? = null
     private var currentSinceMs = 0L
     private var lastPersistMs = 0L
+    private const val BACKGROUND_RECONCILE_GRACE_MS = 3_000L
 
     private fun ensureLoaded(ctx: Context) {
         if (loaded) return
@@ -64,6 +66,7 @@ object FallbackUsageTracker {
         if (todayStart != logicalDayStartMs) {
             logicalDayStartMs = todayStart
             usageMs.clear()
+            lastForegroundEndMs.clear()
             currentPkg = null
             currentSinceMs = 0L
         }
@@ -75,6 +78,7 @@ object FallbackUsageTracker {
             val start = maxOf(currentSinceMs, logicalDayStartMs)
             val delta = nowMs - start
             if (delta > 0) usageMs[p] = (usageMs[p] ?: 0L) + delta
+            lastForegroundEndMs[p] = nowMs
         }
         currentSinceMs = nowMs
     }
@@ -85,6 +89,12 @@ object FallbackUsageTracker {
         synchronized(lock) {
             ensureLoaded(ctx)
             rollDayIfNeeded()
+            // Ignore intra-package window state changes (e.g. ModalActivity, dialogs, bottom sheets
+            // inside the same app) so we don't prematurely move open time into usageMs before
+            // UsageStatsManager closes its activity interval.
+            if (pkg == currentPkg && currentSinceMs in 1 until nowMs) {
+                return
+            }
             flushCurrent(nowMs)
             currentPkg = pkg
             currentSinceMs = nowMs
@@ -110,11 +120,20 @@ object FallbackUsageTracker {
     }
 
     /**
-     * Synchronizes the closed-intervals floor with UsageStatsManager when UsageStats is healthy
-     * and reports higher closed usage (e.g. after a reboot or before an appops sabotage).
-     * Since UsageQuery only sums closed [ACTIVITY_RESUMED -> ACTIVITY_PAUSED] intervals and
-     * [usageMs] also only stores closed intervals, comparing them directly never double-counts
-     * the currently open foreground interval.
+     * Synchronizes the closed-intervals floor with UsageStatsManager when UsageStats is healthy.
+     *
+     * Bugfix (2026-11-25):
+     * 1. When [pkg] is currently in the foreground ([currentPkg] == [pkg]) and [statsClosedSeconds]
+     *    jumps above [usageMs] (because an intra-app activity like Instagram ModalActivity or
+     *    SystemUI notification shade triggered ACTIVITY_PAUSED in UsageStatsManager), [statsMs]
+     *    already includes the elapsed time since [currentSinceMs]. We must advance
+     *    [currentSinceMs] = [nowMs] when adopting [statsMs], otherwise [secondsFor] and the next
+     *    [flushCurrent] count that same interval a second time.
+     * 2. When [pkg] has been in the background ([currentPkg] != [pkg]) for at least
+     *    [BACKGROUND_RECONCILE_GRACE_MS] (so UsageStatsManager has committed its ACTIVITY_PAUSED)
+     *    and [statsClosedSeconds] > 0 (proving GET_USAGE_STATS is operational, not sabotaged),
+     *    reconcile [usageMs] directly to [statsMs] so any drift from SystemUI overlays or prior
+     *    double-counting is healed automatically.
      */
     fun syncFloorFromUsageStats(ctx: Context, pkg: String, statsClosedSeconds: Int, nowMs: Long) {
         if (statsClosedSeconds <= 0) return
@@ -123,9 +142,23 @@ object FallbackUsageTracker {
             rollDayIfNeeded()
             val statsMs = statsClosedSeconds * 1000L
             val closedMs = usageMs[pkg] ?: 0L
-            if (statsMs > closedMs) {
-                usageMs[pkg] = statsMs
-                if (nowMs - lastPersistMs > PERSIST_INTERVAL_MS) {
+            if (currentPkg == pkg) {
+                if (statsMs > closedMs) {
+                    usageMs[pkg] = statsMs
+                    if (currentSinceMs in 1 until nowMs) {
+                        currentSinceMs = nowMs
+                    }
+                    if (nowMs - lastPersistMs > PERSIST_INTERVAL_MS) {
+                        persist(ctx)
+                        lastPersistMs = nowMs
+                    }
+                }
+            } else {
+                val leftAt = lastForegroundEndMs[pkg] ?: 0L
+                val canReconcileDown = (nowMs - leftAt) >= BACKGROUND_RECONCILE_GRACE_MS &&
+                    GuardianEngine.isUsageStatsHealthy(ctx)
+                if (statsMs > closedMs || (canReconcileDown && statsMs != closedMs)) {
+                    usageMs[pkg] = statsMs
                     persist(ctx)
                     lastPersistMs = nowMs
                 }

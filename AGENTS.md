@@ -36,3 +36,8 @@ Pour le contexte technique complet, la liste des téléphones connectés et l'hi
 * Compilation et mise à jour USB : `update_app.ps1`
 * Commandes de diagnostic ADB : [docs/COMMANDES_ADB.md](docs/COMMANDES_ADB.md)
 * Guide de provisioning Device Owner : [docs/DEVICE_OWNER_PROVISIONING.md](docs/DEVICE_OWNER_PROVISIONING.md)
+
+---
+
+## 5. Journalisation Systématique des Correctifs (`docs/correctifs/`)
+* **RÈGLE OBLIGATOIRE** : À compter du 25/11/2026, dès qu'un bug est identifié et corrigé dans le code, l'agent doit **systématiquement** créer une note de correctif au format Markdown (`.md`) rangée dans le dossier **[`docs/correctifs/`](docs/correctifs/)** (ex. `docs/correctifs/YYYY-MM-DD_nom_du_correctif.md`) détaillant le symptôme, la cause racine et le correctif appliqué.
